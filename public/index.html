@@ -1,262 +1,244 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stock Portfolio Analyzer | Dashboard</title>
-    <meta
-      name="description"
-      content="Personal stock portfolio analyzer for Indian NSE/BSE stocks with technical analysis, correlation tracking, and real-time alerts."
-    />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="css/styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  </head>
-  <body>
-    <!-- Navigation -->
-    <nav class="navbar">
-      <div class="nav-brand">
-        <span class="logo">📈</span>
-        <span class="brand-text">StockAnalyzer</span>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Portfolio Analyzer | Dashboard</title>
+  <meta name="description"
+    content="Personal stock portfolio analyzer for Indian NSE/BSE stocks with technical analysis, correlation tracking, and real-time alerts." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="logo">📈</span>
+      <span class="brand-text">StockAnalyzer</span>
+    </div>
+    <div class="nav-links">
+      <a href="#dashboard" class="nav-link active" data-section="dashboard">Dashboard</a>
+      <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
+      <a href="#correlation" class="nav-link" data-section="correlation">Correlation</a>
+      <a href="#alerts" class="nav-link" data-section="alerts">Alerts</a>
+    </div>
+    <div class="nav-status">
+      <span class="market-status" id="marketStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Loading...</span>
+      </span>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Dashboard Section -->
+    <section id="dashboard" class="section active">
+      <!-- Summary Cards -->
+      <div class="summary-grid">
+        <div class="summary-card glass">
+          <div class="card-icon">💰</div>
+          <div class="card-content">
+            <span class="card-label">Actual Investment</span>
+            <span class="card-value" id="investedAmount">₹0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">💎</div>
+          <div class="card-content">
+            <span class="card-label">Current Value</span>
+            <span class="card-value" id="currentValue">₹0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">📊</div>
+          <div class="card-content">
+            <span class="card-label">Total P&L</span>
+            <span class="card-value" id="totalPL">₹0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">📈</div>
+          <div class="card-content">
+            <span class="card-label">Today's Change</span>
+            <span class="card-value" id="todayChange">0%</span>
+          </div>
+        </div>
       </div>
-      <div class="nav-links">
-        <a href="#dashboard" class="nav-link active" data-section="dashboard"
-          >Dashboard</a
-        >
-        <a href="#analysis" class="nav-link" data-section="analysis"
-          >Analysis</a
-        >
-        <a href="#correlation" class="nav-link" data-section="correlation"
-          >Correlation</a
-        >
-        <a href="#alerts" class="nav-link" data-section="alerts">Alerts</a>
-      </div>
-      <div class="nav-status">
-        <span class="market-status" id="marketStatus">
-          <span class="status-dot"></span>
-          <span class="status-text">Loading...</span>
-        </span>
-      </div>
-    </nav>
 
-    <!-- Main Content -->
-    <main class="main-content">
-      <!-- Dashboard Section -->
-      <section id="dashboard" class="section active">
-        <!-- Summary Cards -->
-        <div class="summary-grid">
-          <div class="summary-card glass">
-            <div class="card-icon">💰</div>
-            <div class="card-content">
-              <span class="card-label">Portfolio Value</span>
-              <span class="card-value" id="portfolioValue">₹0</span>
-            </div>
-          </div>
-          <div class="summary-card glass">
-            <div class="card-icon">📊</div>
-            <div class="card-content">
-              <span class="card-label">Total P&L</span>
-              <span class="card-value" id="totalPL">₹0</span>
-            </div>
-          </div>
-          <div class="summary-card glass">
-            <div class="card-icon">📈</div>
-            <div class="card-content">
-              <span class="card-label">Today's Change</span>
-              <span class="card-value" id="todayChange">0%</span>
-            </div>
-          </div>
-          <div class="summary-card glass">
-            <div class="card-icon">🏢</div>
-            <div class="card-content">
-              <span class="card-label">Holdings</span>
-              <span class="card-value" id="holdingsCount">15</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Holdings Table -->
-        <div class="holdings-container glass">
-          <div class="section-header">
-            <h2>Your Holdings</h2>
-            <div class="header-actions">
-              <button class="btn btn-secondary" id="refreshBtn">
-                <span class="btn-icon">🔄</span> Refresh
-              </button>
-            </div>
-          </div>
-          <div class="table-wrapper">
-            <table class="data-table" id="holdingsTable">
-              <thead>
-                <tr>
-                  <th>Stock</th>
-                  <th>Qty / Avg. cost</th>
-                  <th>LTP / Net chg.</th>
-                  <th>Invested</th>
-                  <th>Cur. val</th>
-                  <th>P&L</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="holdingsBody">
-                <tr>
-                  <td colspan="7" class="loading-cell">
-                    <div class="loading-spinner"></div>
-                    <span>Loading portfolio data...</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Charts Row -->
-        <div class="charts-grid">
-          <div class="chart-container glass">
-            <h3>Sector Allocation</h3>
-            <canvas id="sectorChart"></canvas>
-          </div>
-          <div class="chart-container glass">
-            <h3>Top Performers Today</h3>
-            <canvas id="performersChart"></canvas>
-          </div>
-        </div>
-      </section>
-
-      <!-- Analysis Section -->
-      <section id="analysis" class="section">
-        <div class="analysis-header">
-          <h2>Technical Analysis</h2>
-          <div class="stock-selector">
-            <select id="analysisStockSelect" class="select-input">
-              <option value="">Select a stock...</option>
-            </select>
-          </div>
-        </div>
-
-        <div id="analysisContent" class="analysis-content">
-          <div class="empty-state glass">
-            <span class="empty-icon">📊</span>
-            <p>Select a stock to view technical analysis</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Correlation Section -->
-      <section id="correlation" class="section">
+      <!-- Holdings Table -->
+      <div class="holdings-container glass">
         <div class="section-header">
-          <h2>Portfolio Correlation</h2>
-          <p class="section-subtitle">
-            Understand how your stocks move together
-          </p>
+          <h2>Your Holdings</h2>
+          <div class="header-actions">
+            <button class="btn btn-secondary" id="refreshBtn">
+              <span class="btn-icon">🔄</span> Refresh
+            </button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table" id="holdingsTable">
+            <thead>
+              <tr>
+                <th>Stock</th>
+                <th>Qty / Avg. cost</th>
+                <th>LTP / Net chg.</th>
+                <th>Invested</th>
+                <th>Cur. val</th>
+                <th>P&L</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="holdingsBody">
+              <tr>
+                <td colspan="7" class="loading-cell">
+                  <div class="loading-spinner"></div>
+                  <span>Loading portfolio data...</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="charts-grid">
+        <div class="chart-container glass">
+          <h3>Sector Allocation</h3>
+          <canvas id="sectorChart"></canvas>
+        </div>
+        <div class="chart-container glass">
+          <h3>Top Performers Today</h3>
+          <canvas id="performersChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Analysis Section -->
+    <section id="analysis" class="section">
+      <div class="analysis-header">
+        <h2>Technical Analysis</h2>
+        <div class="stock-selector">
+          <select id="analysisStockSelect" class="select-input">
+            <option value="">Select a stock...</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="analysisContent" class="analysis-content">
+        <div class="empty-state glass">
+          <span class="empty-icon">📊</span>
+          <p>Select a stock to view technical analysis</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Correlation Section -->
+    <section id="correlation" class="section">
+      <div class="section-header">
+        <h2>Portfolio Correlation</h2>
+        <p class="section-subtitle">
+          Understand how your stocks move together
+        </p>
+      </div>
+
+      <div class="correlation-content">
+        <div class="diversification-card glass" id="diversificationCard">
+          <div class="loading-spinner"></div>
         </div>
 
-        <div class="correlation-content">
-          <div class="diversification-card glass" id="diversificationCard">
+        <div class="correlation-matrix glass" id="correlationMatrix">
+          <h3>Correlation Matrix</h3>
+          <div class="matrix-loading">
+            <div class="loading-spinner"></div>
+            <span>Calculating correlations...</span>
+          </div>
+        </div>
+
+        <div class="high-correlations glass" id="highCorrelations">
+          <h3>Highly Correlated Pairs</h3>
+          <div class="pairs-loading">
             <div class="loading-spinner"></div>
           </div>
-
-          <div class="correlation-matrix glass" id="correlationMatrix">
-            <h3>Correlation Matrix</h3>
-            <div class="matrix-loading">
-              <div class="loading-spinner"></div>
-              <span>Calculating correlations...</span>
-            </div>
-          </div>
-
-          <div class="high-correlations glass" id="highCorrelations">
-            <h3>Highly Correlated Pairs</h3>
-            <div class="pairs-loading">
-              <div class="loading-spinner"></div>
-            </div>
-          </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Alerts Section -->
-      <section id="alerts" class="section">
-        <div class="section-header">
-          <h2>Price Alerts</h2>
-          <button class="btn btn-primary" id="newAlertBtn">
-            <span class="btn-icon">➕</span> New Alert
-          </button>
-        </div>
+    <!-- Alerts Section -->
+    <section id="alerts" class="section">
+      <div class="section-header">
+        <h2>Price Alerts</h2>
+        <button class="btn btn-primary" id="newAlertBtn">
+          <span class="btn-icon">➕</span> New Alert
+        </button>
+      </div>
 
-        <div class="alerts-content">
-          <div class="alerts-list glass" id="alertsList">
-            <div class="empty-state">
-              <span class="empty-icon">🔔</span>
-              <p>No active alerts</p>
-              <p class="empty-hint">
-                Create alerts to get notified when stock prices hit your targets
-              </p>
-            </div>
+      <div class="alerts-content">
+        <div class="alerts-list glass" id="alertsList">
+          <div class="empty-state">
+            <span class="empty-icon">🔔</span>
+            <p>No active alerts</p>
+            <p class="empty-hint">
+              Create alerts to get notified when stock prices hit your targets
+            </p>
           </div>
         </div>
+      </div>
 
-        <!-- New Alert Modal -->
-        <div class="modal" id="alertModal">
-          <div class="modal-content glass">
-            <div class="modal-header">
-              <h3>Create Price Alert</h3>
-              <button class="modal-close" id="closeAlertModal">&times;</button>
-            </div>
-            <form id="alertForm" class="modal-body">
-              <div class="form-group">
-                <label for="alertStock">Stock</label>
-                <select id="alertStock" class="select-input" required>
-                  <option value="">Select stock...</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="alertDirection">Condition</label>
-                <select id="alertDirection" class="select-input" required>
-                  <option value="above">Price goes above</option>
-                  <option value="below">Price goes below</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="alertThreshold">Price (₹)</label>
-                <input
-                  type="number"
-                  id="alertThreshold"
-                  class="text-input"
-                  step="0.01"
-                  required
-                />
-              </div>
-              <div class="form-actions">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  id="cancelAlert"
-                >
-                  Cancel
-                </button>
-                <button type="submit" class="btn btn-primary">
-                  Create Alert
-                </button>
-              </div>
-            </form>
+      <!-- New Alert Modal -->
+      <div class="modal" id="alertModal">
+        <div class="modal-content glass">
+          <div class="modal-header">
+            <h3>Create Price Alert</h3>
+            <button class="modal-close" id="closeAlertModal">&times;</button>
           </div>
+          <form id="alertForm" class="modal-body">
+            <div class="form-group">
+              <label for="alertStock">Stock</label>
+              <select id="alertStock" class="select-input" required>
+                <option value="">Select stock...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="alertDirection">Condition</label>
+              <select id="alertDirection" class="select-input" required>
+                <option value="above">Price goes above</option>
+                <option value="below">Price goes below</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="alertThreshold">Price (₹)</label>
+              <input type="number" id="alertThreshold" class="text-input" step="0.01" required />
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-secondary" id="cancelAlert">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary">
+                Create Alert
+              </button>
+            </div>
+          </form>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
+  </main>
 
-    <!-- Toast Container -->
-    <div class="toast-container" id="toastContainer"></div>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
 
-    <!-- Footer -->
-    <footer class="footer">
-      <p>Data delayed by 15 minutes • Source: Yahoo Finance</p>
-      <p>Last updated: <span id="lastUpdated">-</span></p>
-    </footer>
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Data delayed by 15 minutes • Source: Yahoo Finance</p>
+    <p>Last updated: <span id="lastUpdated">-</span></p>
+  </footer>
 
-    <script src="js/app.js"></script>
-  </body>
+  <script src="js/app.js"></script>
+</body>
+
 </html>

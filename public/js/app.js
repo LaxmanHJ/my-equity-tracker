@@ -77,7 +77,8 @@ function renderPortfolio(data) {
   const { holdings, summary } = data;
 
   // Update summary cards
-  document.getElementById('portfolioValue').textContent = formatCurrency(summary.currentValue);
+  document.getElementById('investedAmount').textContent = formatCurrency(summary.totalInvested);
+  document.getElementById('currentValue').textContent = formatCurrency(summary.currentValue);
 
   const plElement = document.getElementById('totalPL');
   plElement.textContent = formatCurrency(summary.totalProfitLoss);
@@ -94,8 +95,6 @@ function renderPortfolio(data) {
   const todayElement = document.getElementById('todayChange');
   todayElement.textContent = `${todayChangePercent >= 0 ? '+' : ''}${todayChangePercent.toFixed(2)}%`;
   todayElement.className = `card-value ${todayChangePercent >= 0 ? 'positive' : 'negative'}`;
-
-  document.getElementById('holdingsCount').textContent = holdings.length;
 
   // Render holdings table
   const tbody = document.getElementById('holdingsBody');

@@ -14,11 +14,11 @@ export const portfolio = [
     avgPrice: 65.83
   },
   {
-    symbol: 'APLAPOLLO.NS',
-    name: 'APL Apollo Tubes',
+    symbol: 'APLLTD.NS',
+    name: 'Alembic Pharmaceuticals',
     displaySymbol: 'APLLTD',
     exchange: 'NSE',
-    sector: 'Industrial/Metals',
+    sector: 'Pharma',
     quantity: 30,
     avgPrice: 895.07
   },
@@ -50,11 +50,11 @@ export const portfolio = [
     avgPrice: 246.29
   },
   {
-    symbol: 'ZOMATO.NS',
-    name: 'Zomato (Eternal)',
+    symbol: 'ETERNAL.NS',
+    name: 'Eternal',
     displaySymbol: 'ETERNAL',
     exchange: 'NSE',
-    sector: 'Tech/Food Delivery',
+    sector: 'Other',
     quantity: 9,
     avgPrice: 129.37
   },
@@ -122,8 +122,8 @@ export const portfolio = [
     avgPrice: 114.14
   },
   {
-    symbol: 'TIINDIA.NS',
-    name: 'Tube Investments of India',
+    symbol: 'TMCV.NS',
+    name: 'TMCV',
     displaySymbol: 'TMCV',
     exchange: 'NSE',
     sector: 'Auto Components',
@@ -131,8 +131,8 @@ export const portfolio = [
     avgPrice: 102.07
   },
   {
-    symbol: 'TIINDIA.NS',
-    name: 'Tube Investments of India',
+    symbol: 'TMPV.NS',
+    name: 'TMPV',
     displaySymbol: 'TMPV',
     exchange: 'NSE',
     sector: 'Auto Components',
