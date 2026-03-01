@@ -107,25 +107,24 @@ function renderPortfolio(data) {
           <span class="stock-full-name">${stock.name}</span>
         </div>
       </td>
-      <td>${stock.sector}</td>
-      <td>${formatCurrency(stock.price)}</td>
       <td>
-        <div class="price-change ${stock.changePercent >= 0 ? 'change-positive' : 'change-negative'}">
-          ${stock.changePercent >= 0 ? '▲' : '▼'}
-          ${formatCurrency(Math.abs(stock.change))}
-          (${Math.abs(stock.changePercent).toFixed(2)}%)
-        </div>
+        <div>${stock.quantity}</div>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">${formatCurrency(stock.avgPrice)}</div>
       </td>
       <td>
-        <div class="price-range">
-          <span>₹${stock.dayLow?.toFixed(2)} - ₹${stock.dayHigh?.toFixed(2)}</span>
-          ${renderRangeBar(stock.price, stock.dayLow, stock.dayHigh)}
+        <div>${formatCurrency(stock.price)}</div>
+        <div style="font-size: 0.85rem;" class="${stock.changePercent >= 0 ? 'change-positive' : 'change-negative'}">
+          ${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%
         </div>
       </td>
+      <td>${formatCurrency(stock.invested)}</td>
+      <td>${formatCurrency(stock.currentValue)}</td>
       <td>
-        <div class="price-range">
-          <span>₹${stock.fiftyTwoWeekLow?.toFixed(0)} - ₹${stock.fiftyTwoWeekHigh?.toFixed(0)}</span>
-          ${renderRangeBar(stock.price, stock.fiftyTwoWeekLow, stock.fiftyTwoWeekHigh)}
+        <div class="price-change ${stock.profitLoss >= 0 ? 'change-positive' : 'change-negative'}">
+          ${formatCurrency(stock.profitLoss)}
+        </div>
+        <div style="font-size: 0.85rem;" class="${stock.profitLossPercent >= 0 ? 'change-positive' : 'change-negative'}">
+           ${stock.profitLossPercent >= 0 ? '+' : ''}${stock.profitLossPercent.toFixed(2)}%
         </div>
       </td>
       <td>

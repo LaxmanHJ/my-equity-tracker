@@ -83,16 +83,19 @@ export async function getAllQuotes() {
     for (const symbol of batch) {
       const quote = await getQuote(symbol);
       if (quote) {
-        // Attach portfolio info
-        const stockInfo = portfolio.find(s => s.symbol === symbol);
-        quotes.push({
-          ...quote,
-          displaySymbol: stockInfo?.displaySymbol,
-          name: stockInfo?.name,
-          sector: stockInfo?.sector,
-          quantity: stockInfo?.quantity || 0,
-          avgPrice: stockInfo?.avgPrice || 0
-        });
+        // Attach to all portfolio items that match this symbol (e.g. TMCV and TMPV both track TIINDIA.NS)
+        const matchingItems = portfolio.filter(s => s.symbol === symbol);
+
+        for (const stockInfo of matchingItems) {
+          quotes.push({
+            ...quote,
+            displaySymbol: stockInfo.displaySymbol,
+            name: stockInfo.name,
+            sector: stockInfo.sector,
+            quantity: stockInfo.quantity || 0,
+            avgPrice: stockInfo.avgPrice || 0
+          });
+        }
       }
       await delay(settings.api.requestDelayMs);
     }

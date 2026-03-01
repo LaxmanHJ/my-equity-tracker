@@ -10,8 +10,8 @@ export const portfolio = [
     displaySymbol: 'ADANIPOWER',
     exchange: 'NSE',
     sector: 'Power & Utilities',
-    quantity: 0, // Update with your holdings
-    avgPrice: 0  // Update with your average purchase price
+    quantity: 45,
+    avgPrice: 65.83
   },
   {
     symbol: 'APLAPOLLO.NS',
@@ -19,8 +19,8 @@ export const portfolio = [
     displaySymbol: 'APLLTD',
     exchange: 'NSE',
     sector: 'Industrial/Metals',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 30,
+    avgPrice: 895.07
   },
   {
     symbol: 'AWL.NS',
@@ -28,8 +28,8 @@ export const portfolio = [
     displaySymbol: 'AWL',
     exchange: 'NSE',
     sector: 'FMCG/Agri',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 5,
+    avgPrice: 393.88
   },
   {
     symbol: 'BAJAJHIND.NS',
@@ -37,8 +37,8 @@ export const portfolio = [
     displaySymbol: 'BAJAJHIND',
     exchange: 'NSE',
     sector: 'Sugar',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 500,
+    avgPrice: 17.27
   },
   {
     symbol: 'BANDHANBNK.NS',
@@ -46,8 +46,8 @@ export const portfolio = [
     displaySymbol: 'BANDHANBNK',
     exchange: 'NSE',
     sector: 'Banking',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 50,
+    avgPrice: 246.29
   },
   {
     symbol: 'ZOMATO.NS',
@@ -55,8 +55,8 @@ export const portfolio = [
     displaySymbol: 'ETERNAL',
     exchange: 'NSE',
     sector: 'Tech/Food Delivery',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 9,
+    avgPrice: 129.37
   },
   {
     symbol: 'INFY.NS',
@@ -64,8 +64,8 @@ export const portfolio = [
     displaySymbol: 'INFY',
     exchange: 'NSE',
     sector: 'IT Services',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 3,
+    avgPrice: 1300.00
   },
   {
     symbol: 'JIOFIN.NS',
@@ -73,8 +73,8 @@ export const portfolio = [
     displaySymbol: 'JIOFIN',
     exchange: 'NSE',
     sector: 'Financial Services',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 52,
+    avgPrice: 252.60
   },
   {
     symbol: 'REPCOHOME.NS',
@@ -82,8 +82,8 @@ export const portfolio = [
     displaySymbol: 'REPCOHOME',
     exchange: 'NSE',
     sector: 'Housing Finance',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 80,
+    avgPrice: 471.18
   },
   {
     symbol: 'TANLA.NS',
@@ -91,8 +91,8 @@ export const portfolio = [
     displaySymbol: 'TANLA',
     exchange: 'NSE',
     sector: 'Telecom/CPaaS',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 26,
+    avgPrice: 948.20
   },
   {
     symbol: 'TATAELXSI.NS',
@@ -100,8 +100,8 @@ export const portfolio = [
     displaySymbol: 'TATAELXSI',
     exchange: 'NSE',
     sector: 'IT/Design',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 14,
+    avgPrice: 7196.65
   },
   {
     symbol: 'TATAPOWER.NS',
@@ -109,8 +109,8 @@ export const portfolio = [
     displaySymbol: 'TATAPOWER',
     exchange: 'NSE',
     sector: 'Power & Utilities',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 7,
+    avgPrice: 218.79
   },
   {
     symbol: 'TATASTEEL.NS',
@@ -118,8 +118,8 @@ export const portfolio = [
     displaySymbol: 'TATASTEEL',
     exchange: 'NSE',
     sector: 'Steel/Metals',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 200,
+    avgPrice: 114.14
   },
   {
     symbol: 'TIINDIA.NS',
@@ -127,8 +127,8 @@ export const portfolio = [
     displaySymbol: 'TMCV',
     exchange: 'NSE',
     sector: 'Auto Components',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 5,
+    avgPrice: 102.07
   },
   {
     symbol: 'TIINDIA.NS',
@@ -136,8 +136,8 @@ export const portfolio = [
     displaySymbol: 'TMPV',
     exchange: 'NSE',
     sector: 'Auto Components',
-    quantity: 0,
-    avgPrice: 0
+    quantity: 5,
+    avgPrice: 225.60
   }
 ];
 
