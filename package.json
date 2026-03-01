@@ -1,0 +1,36 @@
+{
+  "name": "stock-portfolio-analyzer",
+  "version": "1.0.0",
+  "description": "Personal stock portfolio analyzer for Indian NSE/BSE stocks",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test",
+    "fetch": "node src/scripts/fetchData.js"
+  },
+  "keywords": [
+    "stocks",
+    "portfolio",
+    "nse",
+    "bse",
+    "india",
+    "analysis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14",
+    "yahoo-finance2": "^2.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
