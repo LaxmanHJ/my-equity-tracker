@@ -75,9 +75,12 @@
       <div class="holdings-container glass">
         <div class="section-header">
           <h2>Your Holdings</h2>
-          <div class="header-actions">
-            <button class="btn btn-secondary" id="refreshBtn">
+          <div class="header-actions" style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-secondary" id="refreshBtn" title="Refresh UI from Database">
               <span class="btn-icon">🔄</span> Refresh
+            </button>
+            <button class="btn btn-primary" id="forceSyncBtn" title="Fetch Latest Real-time Data from Market API">
+              <span class="btn-icon">⚡</span> Force Sync
             </button>
           </div>
         </div>

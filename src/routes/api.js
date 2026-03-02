@@ -1,24 +1,24 @@
 import express from 'express';
 import { portfolio, getStocksBySector } from '../config/portfolio.js';
-import { 
-  getAllQuotes, 
-  getHistoricalData, 
+import {
+  getAllQuotes,
+  getHistoricalData,
   getPortfolioSummary,
-  getQuote 
+  getQuote
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
-import { 
-  buildCorrelationMatrix, 
+import {
+  buildCorrelationMatrix,
   findHighCorrelations,
-  analyzeDiversification 
+  analyzeDiversification
 } from '../analysis/correlation.js';
 import { getFullRiskAnalysis } from '../analysis/risk.js';
-import { 
-  createAlert, 
-  getActiveAlerts, 
+import {
+  createAlert,
+  getActiveAlerts,
   triggerAlert,
   saveDailyReport,
-  getDailyReport 
+  getDailyReport
 } from '../database/db.js';
 
 const router = express.Router();
@@ -33,7 +33,8 @@ const router = express.Router();
  */
 router.get('/portfolio', async (req, res) => {
   try {
-    const summary = await getPortfolioSummary();
+    const forceRefresh = req.query.force === 'true';
+    const summary = await getPortfolioSummary(forceRefresh);
     res.json(summary);
   } catch (error) {
     console.error('Portfolio error:', error);
@@ -67,16 +68,16 @@ router.get('/stock/:symbol', async (req, res) => {
     const { symbol } = req.params;
     const stock = portfolio.find(
       s => s.displaySymbol.toLowerCase() === symbol.toLowerCase() ||
-           s.symbol.toLowerCase() === symbol.toLowerCase()
+        s.symbol.toLowerCase() === symbol.toLowerCase()
     );
-    
+
     if (!stock) {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
 
     const quote = await getQuote(stock.symbol);
     const historical = await getHistoricalData(stock.symbol, '1y');
-    
+
     res.json({
       ...stock,
       quote,
@@ -96,12 +97,12 @@ router.get('/stock/:symbol/history', async (req, res) => {
   try {
     const { symbol } = req.params;
     const { period = '1y' } = req.query;
-    
+
     const stock = portfolio.find(
       s => s.displaySymbol.toLowerCase() === symbol.toLowerCase() ||
-           s.symbol.toLowerCase() === symbol.toLowerCase()
+        s.symbol.toLowerCase() === symbol.toLowerCase()
     );
-    
+
     if (!stock) {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
@@ -124,24 +125,24 @@ router.get('/stock/:symbol/history', async (req, res) => {
 router.get('/analysis/technicals/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-    
+
     const stock = portfolio.find(
       s => s.displaySymbol.toLowerCase() === symbol.toLowerCase() ||
-           s.symbol.toLowerCase() === symbol.toLowerCase()
+        s.symbol.toLowerCase() === symbol.toLowerCase()
     );
-    
+
     if (!stock) {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
 
     const historical = await getHistoricalData(stock.symbol, '1y');
-    
+
     if (historical.length === 0) {
       return res.status(404).json({ error: 'No historical data available' });
     }
 
     const analysis = getFullAnalysis(historical);
-    
+
     res.json({
       symbol: stock.displaySymbol,
       name: stock.name,
@@ -161,14 +162,14 @@ router.get('/analysis/technicals/:symbol', async (req, res) => {
 router.get('/analysis/signals', async (req, res) => {
   try {
     const signals = [];
-    
+
     for (const stock of portfolio) {
       const historical = await getHistoricalData(stock.symbol, '3m');
       if (historical.length > 0) {
         const prices = historical.map(d => d.close);
         const dates = historical.map(d => d.date);
         const stockSignals = generateSignals(prices, dates);
-        
+
         signals.push({
           symbol: stock.displaySymbol,
           name: stock.name,
@@ -177,7 +178,7 @@ router.get('/analysis/signals', async (req, res) => {
         });
       }
     }
-    
+
     res.json({ signals, generatedAt: new Date().toISOString() });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate signals' });
@@ -234,18 +235,18 @@ router.get('/analysis/diversification', async (req, res) => {
 router.get('/analysis/risk/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
-    
+
     const stock = portfolio.find(
       s => s.displaySymbol.toLowerCase() === symbol.toLowerCase() ||
-           s.symbol.toLowerCase() === symbol.toLowerCase()
+        s.symbol.toLowerCase() === symbol.toLowerCase()
     );
-    
+
     if (!stock) {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
 
     const riskAnalysis = await getFullRiskAnalysis(stock.symbol);
-    
+
     res.json({
       symbol: stock.displaySymbol,
       name: stock.name,
@@ -281,23 +282,23 @@ router.get('/alerts', (req, res) => {
 router.post('/alerts', (req, res) => {
   try {
     const { symbol, type, threshold, direction } = req.body;
-    
+
     if (!symbol || !threshold || !direction) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    
+
     const stock = portfolio.find(
       s => s.displaySymbol.toLowerCase() === symbol.toLowerCase()
     );
-    
+
     if (!stock) {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
-    
+
     const alertId = createAlert(stock.symbol, type || 'price', threshold, direction);
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       alertId,
       message: `Alert created: ${symbol} ${direction} ₹${threshold}`
     });
@@ -330,15 +331,15 @@ router.delete('/alerts/:id', (req, res) => {
 router.get('/reports/daily', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    
+
     // Check if report already exists
     let report = getDailyReport(today);
-    
+
     if (!report) {
       // Generate new report
       const summary = await getPortfolioSummary();
       const diversification = await analyzeDiversification(90);
-      
+
       // Collect signals for all stocks
       const stockAnalysis = [];
       for (const stock of portfolio) {
@@ -353,7 +354,7 @@ router.get('/reports/daily', async (req, res) => {
           });
         }
       }
-      
+
       const reportData = {
         date: today,
         portfolio: summary,
@@ -362,11 +363,11 @@ router.get('/reports/daily', async (req, res) => {
         marketStatus: isMarketOpen() ? 'OPEN' : 'CLOSED',
         generatedAt: new Date().toISOString()
       };
-      
+
       saveDailyReport(today, reportData);
       report = { report_data: reportData };
     }
-    
+
     res.json(report.report_data);
   } catch (error) {
     console.error('Report error:', error);
@@ -381,16 +382,16 @@ function isMarketOpen() {
   const now = new Date();
   const istOffset = 5.5 * 60 * 60 * 1000;
   const istTime = new Date(now.getTime() + istOffset);
-  
+
   const day = istTime.getUTCDay();
   const hours = istTime.getUTCHours();
   const minutes = istTime.getUTCMinutes();
   const time = hours * 60 + minutes;
-  
+
   // Market hours: 9:15 AM to 3:30 PM IST, Mon-Fri
   const marketOpen = 9 * 60 + 15;
   const marketClose = 15 * 60 + 30;
-  
+
   return day >= 1 && day <= 5 && time >= marketOpen && time <= marketClose;
 }
 

@@ -50,6 +50,7 @@ function initNavigation() {
 
   // Refresh button
   document.getElementById('refreshBtn').addEventListener('click', loadPortfolio);
+  document.getElementById('forceSyncBtn').addEventListener('click', forceSyncPortfolio);
 }
 
 // =============================================
@@ -70,6 +71,33 @@ async function loadPortfolio() {
   } catch (error) {
     console.error('Error loading portfolio:', error);
     showToast('Failed to load portfolio data', 'error');
+  }
+}
+
+async function forceSyncPortfolio() {
+  try {
+    const btn = document.getElementById('forceSyncBtn');
+    btn.innerHTML = '<span class="loading-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #fff;border-bottom-color:transparent;border-radius:50%;margin-right:5px;"></span> Syncing...';
+    btn.disabled = true;
+
+    const response = await fetch(`${API_BASE}/portfolio?force=true`);
+    if (!response.ok) throw new Error('Failed to force sync portfolio');
+
+    portfolioData = await response.json();
+    renderPortfolio(portfolioData);
+    renderCharts(portfolioData);
+    populateStockSelectors(portfolioData.holdings);
+    updateLastUpdated();
+
+    showToast('Successfully synchronized latest market data', 'success');
+
+  } catch (error) {
+    console.error('Error force syncing portfolio:', error);
+    showToast('Failed to synchronize market data', 'error');
+  } finally {
+    const btn = document.getElementById('forceSyncBtn');
+    btn.innerHTML = '<span class="btn-icon">⚡</span> Force Sync';
+    btn.disabled = false;
   }
 }
 

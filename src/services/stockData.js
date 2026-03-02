@@ -19,11 +19,11 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 /**
  * Get quote for a single symbol by analyzing the cached historical data
  */
-async function getQuote(symbol) {
+async function getQuote(symbol, forceRefresh = false) {
   try {
     // This will hit the intelligent local SQLite cache, making it extremely fast
     // and avoiding 15x real-time API calls to rate-limited services.
-    const history = await getHistoricalData(symbol, '1y');
+    const history = await getHistoricalData(symbol, '1y', forceRefresh);
 
     if (!history || history.length < 2) {
       console.warn(`[getQuote] Not enough historical data to generate quote for ${symbol}`);
@@ -70,7 +70,7 @@ async function getQuote(symbol) {
 /**
  * Get quotes for all portfolio stocks with batching to avoid rate limits
  */
-export async function getAllQuotes() {
+export async function getAllQuotes(forceRefresh = false) {
   const symbols = getSymbols();
   const quotes = [];
   const batchSize = 3;  // Process 3 stocks at a time
@@ -81,7 +81,7 @@ export async function getAllQuotes() {
 
     // Process batch sequentially
     for (const symbol of batch) {
-      const quote = await getQuote(symbol);
+      const quote = await getQuote(symbol, forceRefresh);
       if (quote) {
         // Attach to all portfolio items that match this symbol (e.g. TMCV and TMPV both track TIINDIA.NS)
         const matchingItems = portfolio.filter(s => s.symbol === symbol);
@@ -183,8 +183,8 @@ export async function getBenchmarkData(period = '1y') {
 /**
  * Get portfolio summary with current values
  */
-export async function getPortfolioSummary() {
-  const quotes = await getAllQuotes();
+export async function getPortfolioSummary(forceRefresh = false) {
+  const quotes = await getAllQuotes(forceRefresh);
 
   let totalInvested = 0;
   let currentValue = 0;
