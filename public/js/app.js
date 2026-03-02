@@ -43,6 +43,7 @@ function initNavigation() {
       document.getElementById(sectionId).classList.add('active');
 
       // Load section data
+      if (sectionId === 'quant') loadQuantScores();
       if (sectionId === 'correlation') loadCorrelationData();
       if (sectionId === 'alerts') loadAlerts();
     });
@@ -686,3 +687,78 @@ function showToast(message, type = 'info') {
 // Make functions available globally
 window.viewAnalysis = viewAnalysis;
 window.deleteAlert = deleteAlert;
+
+// =============================================
+// Quant Signals
+// =============================================
+
+async function loadQuantScores() {
+  try {
+    const response = await fetch(`${API_BASE}/quant/scores`);
+    if (!response.ok) throw new Error('Quant engine unavailable');
+    const data = await response.json();
+
+    document.getElementById('quantTotal').textContent = data.summary.total;
+    document.getElementById('quantLong').textContent = data.summary.long;
+    document.getElementById('quantHold').textContent = data.summary.hold;
+    document.getElementById('quantShort').textContent = data.summary.short;
+
+    renderQuantCards(data.stocks);
+  } catch (error) {
+    console.error('Error loading quant scores:', error);
+    document.getElementById('quantCardsGrid').innerHTML = `
+      <p style="color:var(--danger);padding:2rem;text-align:center;grid-column:1/-1;">
+        ⚠️ Quant Engine offline — start it with: <code>python3 -m quant_engine.main</code>
+      </p>`;
+  }
+}
+
+function renderQuantCards(stocks) {
+  const grid = document.getElementById('quantCardsGrid');
+
+  grid.innerHTML = stocks.map((stock, index) => {
+    const signalClass = stock.signal === 'LONG' ? 'change-positive'
+      : stock.signal === 'SHORT' ? 'change-negative'
+        : '';
+    const signalEmoji = stock.signal === 'LONG' ? '🟢'
+      : stock.signal === 'SHORT' ? '🔴'
+        : '⚪';
+    const scoreColor = stock.composite_score > 0 ? 'var(--success)' : 'var(--danger)';
+
+    const factorBars = Object.entries(stock.factors).map(([name, data]) => {
+      const pct = ((data.score + 1) / 2 * 100).toFixed(0);
+      const barColor = data.score > 0.2 ? 'var(--success)'
+        : data.score < -0.2 ? 'var(--danger)'
+          : 'var(--text-muted)';
+      const label = name.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+      return `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:4px;">
+          <span style="width:110px;font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">${label}</span>
+          <div style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width 0.5s;"></div>
+          </div>
+          <span style="width:40px;font-size:0.7rem;color:${barColor};text-align:right;">${data.score > 0 ? '+' : ''}${data.score.toFixed(2)}</span>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:12px;padding:1.2rem;position:relative;overflow:hidden;">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${scoreColor};"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+          <div>
+            <span style="font-size:0.7rem;color:var(--text-muted);">#${index + 1}</span>
+            <h3 style="margin:0;font-size:1.1rem;">${stock.symbol}</h3>
+            <span style="font-size:0.8rem;color:var(--text-muted);">₹${stock.price.toLocaleString('en-IN')}</span>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:1.4rem;font-weight:700;color:${scoreColor};">${stock.composite_score > 0 ? '+' : ''}${stock.composite_score}</div>
+            <span class="${signalClass}" style="font-size:0.8rem;font-weight:600;">${signalEmoji} ${stock.signal}</span>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border-color);padding-top:0.8rem;">
+          ${factorBars}
+        </div>
+      </div>`;
+  }).join('');
+}
+

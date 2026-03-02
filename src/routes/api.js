@@ -399,4 +399,32 @@ function isMarketOpen() {
   return day >= 1 && day <= 5 && time >= marketOpen && time <= marketClose;
 }
 
+// ============================================
+// Quant Engine Proxy (Python FastAPI on :5001)
+// ============================================
+
+const QUANT_ENGINE_URL = 'http://localhost:5001';
+
+router.get('/quant/scores', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Quant engine error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable. Is the Python server running on port 5001?' });
+  }
+});
+
+router.get('/quant/scores/:symbol', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/scores/${req.params.symbol}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Quant engine error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable' });
+  }
+});
+
 export default router;

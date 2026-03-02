@@ -23,6 +23,7 @@
     </div>
     <div class="nav-links">
       <a href="#dashboard" class="nav-link active" data-section="dashboard">Dashboard</a>
+      <a href="#quant" class="nav-link" data-section="quant">Quant Signals</a>
       <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
       <a href="#correlation" class="nav-link" data-section="correlation">Correlation</a>
       <a href="#alerts" class="nav-link" data-section="alerts">Alerts</a>
@@ -227,6 +228,51 @@
               </button>
             </div>
           </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quant Signals Section -->
+    <section id="quant" class="section">
+      <div class="quant-summary-grid"
+        style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem;">
+        <div class="summary-card glass">
+          <div class="card-icon">📊</div>
+          <div class="card-content">
+            <span class="card-label">Stocks Scored</span>
+            <span class="card-value" id="quantTotal">0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">🟢</div>
+          <div class="card-content">
+            <span class="card-label">Long Signals</span>
+            <span class="card-value positive" id="quantLong">0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">⚪</div>
+          <div class="card-content">
+            <span class="card-label">Hold</span>
+            <span class="card-value" id="quantHold">0</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">🔴</div>
+          <div class="card-content">
+            <span class="card-label">Short Signals</span>
+            <span class="card-value negative" id="quantShort">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="holdings-container glass">
+        <div class="section-header">
+          <h2>Factor-Based Stock Ranking</h2>
+        </div>
+        <div id="quantCardsGrid"
+          style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem;padding:1rem;">
+          <p style="color:var(--text-muted);padding:2rem;text-align:center;">Loading quant scores...</p>
         </div>
       </div>
     </section>
