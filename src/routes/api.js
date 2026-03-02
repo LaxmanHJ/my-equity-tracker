@@ -161,23 +161,24 @@ router.get('/analysis/technicals/:symbol', async (req, res) => {
  */
 router.get('/analysis/signals', async (req, res) => {
   try {
-    const signals = [];
-
-    for (const stock of portfolio) {
-      const historical = await getHistoricalData(stock.symbol, '3m');
-      if (historical.length > 0) {
-        const prices = historical.map(d => d.close);
-        const dates = historical.map(d => d.date);
-        const stockSignals = generateSignals(prices, dates);
-
-        signals.push({
-          symbol: stock.displaySymbol,
-          name: stock.name,
-          sector: stock.sector,
-          ...stockSignals
-        });
-      }
-    }
+    const results = await Promise.all(
+      portfolio.map(async (stock) => {
+        const historical = await getHistoricalData(stock.symbol, '3m');
+        if (historical.length > 0) {
+          const prices = historical.map(d => d.close);
+          const dates = historical.map(d => d.date);
+          const stockSignals = generateSignals(prices, dates);
+          return {
+            symbol: stock.displaySymbol,
+            name: stock.name,
+            sector: stock.sector,
+            ...stockSignals
+          };
+        }
+        return null;
+      })
+    );
+    const signals = results.filter(Boolean);
 
     res.json({ signals, generatedAt: new Date().toISOString() });
   } catch (error) {
@@ -341,19 +342,22 @@ router.get('/reports/daily', async (req, res) => {
       const diversification = await analyzeDiversification(90);
 
       // Collect signals for all stocks
-      const stockAnalysis = [];
-      for (const stock of portfolio) {
-        const historical = await getHistoricalData(stock.symbol, '3m');
-        if (historical.length > 0) {
-          const prices = historical.map(d => d.close);
-          const signals = generateSignals(prices, historical.map(d => d.date));
-          stockAnalysis.push({
-            symbol: stock.displaySymbol,
-            name: stock.name,
-            signals: signals.signals
-          });
-        }
-      }
+      const analysisResults = await Promise.all(
+        portfolio.map(async (stock) => {
+          const historical = await getHistoricalData(stock.symbol, '3m');
+          if (historical.length > 0) {
+            const prices = historical.map(d => d.close);
+            const signals = generateSignals(prices, historical.map(d => d.date));
+            return {
+              symbol: stock.displaySymbol,
+              name: stock.name,
+              signals: signals.signals
+            };
+          }
+          return null;
+        })
+      );
+      const stockAnalysis = analysisResults.filter(Boolean);
 
       const reportData = {
         date: today,
