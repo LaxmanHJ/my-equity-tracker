@@ -1,0 +1,982 @@
+{
+    "summary": {
+        "total": 18,
+        "long": 0,
+        "hold": 18,
+        "short": 0
+    },
+    "stocks": [
+        {
+            "symbol": "TATAELXSI",
+            "composite_score": 10.44,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -18.21,
+                    "return_3m": -13.22,
+                    "return_6m": -16.94,
+                    "raw_momentum": -15.71,
+                    "score": -0.3141
+                },
+                "mean_reversion": {
+                    "sma_50": 5245.27,
+                    "z_score": -2.2424,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 27.79,
+                    "score": 0.7403
+                },
+                "macd": {
+                    "macd_line": -228.442,
+                    "signal_line": -181.7076,
+                    "histogram": -46.7345,
+                    "histogram_pct": -1.0504,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 35.45,
+                    "vol_long": 39.72,
+                    "vol_ratio": 0.8923,
+                    "regime": "STABLE",
+                    "score": 0.2692
+                },
+                "volume": {
+                    "current_volume": 320311,
+                    "avg_volume_20d": 338717,
+                    "volume_ratio": 0.95,
+                    "price_trend_5d": -1.08,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 4449.3,
+            "data_points": 248
+        },
+        {
+            "symbol": "REPCOHOME",
+            "composite_score": 5.78,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -4.3,
+                    "return_3m": -9.2,
+                    "return_6m": 5.78,
+                    "raw_momentum": -2.22,
+                    "score": -0.0445
+                },
+                "mean_reversion": {
+                    "sma_50": 403.8,
+                    "z_score": -2.4336,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 32.1,
+                    "score": 0.5966
+                },
+                "macd": {
+                    "macd_line": -7.0296,
+                    "signal_line": -3.6774,
+                    "histogram": -3.3522,
+                    "histogram_pct": -0.9053,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 30.36,
+                    "vol_long": 29.37,
+                    "vol_ratio": 1.0338,
+                    "regime": "STABLE",
+                    "score": -0.0844
+                },
+                "volume": {
+                    "current_volume": 189030,
+                    "avg_volume_20d": 110279,
+                    "volume_ratio": 1.71,
+                    "price_trend_5d": -4.55,
+                    "spike": true,
+                    "score": -0.5714
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 370.3,
+            "data_points": 248
+        },
+        {
+            "symbol": "INFY",
+            "composite_score": 4.52,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -20.9,
+                    "return_3m": -17.43,
+                    "return_6m": -14.04,
+                    "raw_momentum": -16.77,
+                    "score": -0.3353
+                },
+                "mean_reversion": {
+                    "sma_50": 1547.33,
+                    "z_score": -1.8845,
+                    "score": 0.9422
+                },
+                "rsi": {
+                    "rsi": 23.52,
+                    "score": 0.8825
+                },
+                "macd": {
+                    "macd_line": -80.328,
+                    "signal_line": -73.5667,
+                    "histogram": -6.7613,
+                    "histogram_pct": -0.5246,
+                    "crossover": "NONE",
+                    "score": -0.5246
+                },
+                "volatility": {
+                    "vol_short": 36.17,
+                    "vol_long": 28.62,
+                    "vol_ratio": 1.2638,
+                    "regime": "EXPANDING",
+                    "score": -0.6596
+                },
+                "volume": {
+                    "current_volume": 10075292,
+                    "avg_volume_20d": 18288788,
+                    "volume_ratio": 0.55,
+                    "price_trend_5d": 1.05,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 1288.9,
+            "data_points": 248
+        },
+        {
+            "symbol": "ZOMATO",
+            "composite_score": 3.67,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -8.63,
+                    "return_3m": -18.31,
+                    "return_6m": -21.55,
+                    "raw_momentum": -17.67,
+                    "score": -0.3534
+                },
+                "mean_reversion": {
+                    "sma_50": 278.88,
+                    "z_score": -2.4855,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 31.14,
+                    "score": 0.6287
+                },
+                "macd": {
+                    "macd_line": -8.4232,
+                    "signal_line": -3.9793,
+                    "histogram": -4.4439,
+                    "histogram_pct": -1.8043,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 41.76,
+                    "vol_long": 39.5,
+                    "vol_ratio": 1.057,
+                    "regime": "STABLE",
+                    "score": -0.1426
+                },
+                "volume": {
+                    "current_volume": 59867520,
+                    "avg_volume_20d": 55739698,
+                    "volume_ratio": 1.07,
+                    "price_trend_5d": -8.1,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 246.3,
+            "data_points": 247
+        },
+        {
+            "symbol": "TANLA",
+            "composite_score": 3.58,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -10.12,
+                    "return_3m": -20.61,
+                    "return_6m": -29.05,
+                    "raw_momentum": -21.89,
+                    "score": -0.4377
+                },
+                "mean_reversion": {
+                    "sma_50": 491.58,
+                    "z_score": -1.5907,
+                    "score": 0.7953
+                },
+                "rsi": {
+                    "rsi": 38.63,
+                    "score": 0.379
+                },
+                "macd": {
+                    "macd_line": -12.999,
+                    "signal_line": -11.8705,
+                    "histogram": -1.1284,
+                    "histogram_pct": -0.2556,
+                    "crossover": "NONE",
+                    "score": -0.2556
+                },
+                "volatility": {
+                    "vol_short": 39.54,
+                    "vol_long": 40.75,
+                    "vol_ratio": 0.9703,
+                    "regime": "STABLE",
+                    "score": 0.0742
+                },
+                "volume": {
+                    "current_volume": 420368,
+                    "avg_volume_20d": 433841,
+                    "volume_ratio": 0.97,
+                    "price_trend_5d": -1.12,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 441.55,
+            "data_points": 248
+        },
+        {
+            "symbol": "APLLTD",
+            "composite_score": 3.36,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -9.82,
+                    "return_3m": -21.66,
+                    "return_6m": -25.19,
+                    "raw_momentum": -20.7,
+                    "score": -0.414
+                },
+                "mean_reversion": {
+                    "sma_50": 792.52,
+                    "z_score": -2.3112,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 22.34,
+                    "score": 0.9218
+                },
+                "macd": {
+                    "macd_line": -20.4608,
+                    "signal_line": -14.073,
+                    "histogram": -6.3878,
+                    "histogram_pct": -0.9057,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 20.62,
+                    "vol_long": 17.4,
+                    "vol_ratio": 1.1846,
+                    "regime": "EXPANDING",
+                    "score": -0.4616
+                },
+                "volume": {
+                    "current_volume": 64563,
+                    "avg_volume_20d": 67188,
+                    "volume_ratio": 0.96,
+                    "price_trend_5d": -6.07,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 705.25,
+            "data_points": 248
+        },
+        {
+            "symbol": "BAJAJHIND",
+            "composite_score": 0.95,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -2.8,
+                    "return_3m": -22.03,
+                    "return_6m": -23.18,
+                    "raw_momentum": -18.64,
+                    "score": -0.3729
+                },
+                "mean_reversion": {
+                    "sma_50": 16.98,
+                    "z_score": -1.2111,
+                    "score": 0.6055
+                },
+                "rsi": {
+                    "rsi": 43.12,
+                    "score": 0.2295
+                },
+                "macd": {
+                    "macd_line": -0.4219,
+                    "signal_line": -0.4198,
+                    "histogram": -0.0021,
+                    "histogram_pct": -0.0135,
+                    "crossover": "NONE",
+                    "score": -0.0135
+                },
+                "volatility": {
+                    "vol_short": 46.0,
+                    "vol_long": 38.27,
+                    "vol_ratio": 1.202,
+                    "regime": "EXPANDING",
+                    "score": -0.505
+                },
+                "volume": {
+                    "current_volume": 8399958,
+                    "avg_volume_20d": 6346026,
+                    "volume_ratio": 1.32,
+                    "price_trend_5d": 2.43,
+                    "spike": false,
+                    "score": 0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 15.61,
+            "data_points": 248
+        },
+        {
+            "symbol": "ETERNAL",
+            "composite_score": 0.64,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -10.92,
+                    "return_3m": -19.19,
+                    "return_6m": -24.36,
+                    "raw_momentum": -19.61,
+                    "score": -0.3921
+                },
+                "mean_reversion": {
+                    "sma_50": 278.04,
+                    "z_score": -2.5069,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 29.71,
+                    "score": 0.6765
+                },
+                "macd": {
+                    "macd_line": -9.5102,
+                    "signal_line": -5.0854,
+                    "histogram": -4.4247,
+                    "histogram_pct": -1.8218,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 41.47,
+                    "vol_long": 39.56,
+                    "vol_ratio": 1.0481,
+                    "regime": "STABLE",
+                    "score": -0.1203
+                },
+                "volume": {
+                    "current_volume": 80406187,
+                    "avg_volume_20d": 58014201,
+                    "volume_ratio": 1.39,
+                    "price_trend_5d": -4.38,
+                    "spike": false,
+                    "score": -0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 242.87,
+            "data_points": 248
+        },
+        {
+            "symbol": "AWL",
+            "composite_score": 0.37,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": -15.22,
+                    "return_3m": -27.71,
+                    "return_6m": -27.87,
+                    "raw_momentum": -25.28,
+                    "score": -0.5055
+                },
+                "mean_reversion": {
+                    "sma_50": 215.17,
+                    "z_score": -2.1828,
+                    "score": 1.0
+                },
+                "rsi": {
+                    "rsi": 15.26,
+                    "score": 1.0
+                },
+                "macd": {
+                    "macd_line": -8.3405,
+                    "signal_line": -6.9927,
+                    "histogram": -1.3479,
+                    "histogram_pct": -0.7476,
+                    "crossover": "NONE",
+                    "score": -0.7
+                },
+                "volatility": {
+                    "vol_short": 21.0,
+                    "vol_long": 19.97,
+                    "vol_ratio": 1.0517,
+                    "regime": "STABLE",
+                    "score": -0.1292
+                },
+                "volume": {
+                    "current_volume": 2954619,
+                    "avg_volume_20d": 1893472,
+                    "volume_ratio": 1.56,
+                    "price_trend_5d": -5.97,
+                    "spike": true,
+                    "score": -0.5201
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 180.29,
+            "data_points": 248
+        },
+        {
+            "symbol": "TMCV",
+            "composite_score": 0.13,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 12.28,
+                    "return_3m": 40.36,
+                    "return_6m": 0.0,
+                    "raw_momentum": 18.6,
+                    "score": 0.372
+                },
+                "mean_reversion": {
+                    "sma_50": 450.78,
+                    "z_score": 1.6766,
+                    "score": -0.8383
+                },
+                "rsi": {
+                    "rsi": 63.14,
+                    "score": -0.4382
+                },
+                "macd": {
+                    "macd_line": 13.1639,
+                    "signal_line": 13.1352,
+                    "histogram": 0.0286,
+                    "histogram_pct": 0.0058,
+                    "crossover": "BULLISH",
+                    "score": 0.3058
+                },
+                "volatility": {
+                    "vol_short": 29.66,
+                    "vol_long": 32.79,
+                    "vol_ratio": 0.9045,
+                    "regime": "STABLE",
+                    "score": 0.2387
+                },
+                "volume": {
+                    "current_volume": 12544016,
+                    "avg_volume_20d": 10421523,
+                    "volume_ratio": 1.2,
+                    "price_trend_5d": 4.73,
+                    "spike": false,
+                    "score": 0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 498.0,
+            "data_points": 77
+        },
+        {
+            "symbol": "JIOFIN",
+            "composite_score": -1.99,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 2.01,
+                    "return_3m": -18.32,
+                    "return_6m": -20.71,
+                    "raw_momentum": -15.21,
+                    "score": -0.3042
+                },
+                "mean_reversion": {
+                    "sma_50": 273.31,
+                    "z_score": -1.3434,
+                    "score": 0.6717
+                },
+                "rsi": {
+                    "rsi": 30.94,
+                    "score": 0.6354
+                },
+                "macd": {
+                    "macd_line": -4.9388,
+                    "signal_line": -4.5982,
+                    "histogram": -0.3406,
+                    "histogram_pct": -0.1368,
+                    "crossover": "BEARISH",
+                    "score": -0.4368
+                },
+                "volatility": {
+                    "vol_short": 33.61,
+                    "vol_long": 28.54,
+                    "vol_ratio": 1.1776,
+                    "regime": "EXPANDING",
+                    "score": -0.444
+                },
+                "volume": {
+                    "current_volume": 19406441,
+                    "avg_volume_20d": 13303669,
+                    "volume_ratio": 1.46,
+                    "price_trend_5d": -2.45,
+                    "spike": false,
+                    "score": -0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 249.0,
+            "data_points": 248
+        },
+        {
+            "symbol": "APLAPOLLO",
+            "composite_score": -3.05,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 9.06,
+                    "return_3m": 28.85,
+                    "return_6m": 39.25,
+                    "raw_momentum": 29.05,
+                    "score": 0.5811
+                },
+                "mean_reversion": {
+                    "sma_50": 2044.23,
+                    "z_score": 1.2662,
+                    "score": -0.6331
+                },
+                "rsi": {
+                    "rsi": 65.15,
+                    "score": -0.5051
+                },
+                "macd": {
+                    "macd_line": 52.6383,
+                    "signal_line": 63.8159,
+                    "histogram": -11.1776,
+                    "histogram_pct": -0.5002,
+                    "crossover": "NONE",
+                    "score": -0.5002
+                },
+                "volatility": {
+                    "vol_short": 18.82,
+                    "vol_long": 22.4,
+                    "vol_ratio": 0.8399,
+                    "regime": "CONTRACTING",
+                    "score": 0.4003
+                },
+                "volume": {
+                    "current_volume": 1312349,
+                    "avg_volume_20d": 998387,
+                    "volume_ratio": 1.31,
+                    "price_trend_5d": 1.97,
+                    "spike": false,
+                    "score": 0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 2234.6,
+            "data_points": 247
+        },
+        {
+            "symbol": "BANDHANBNK",
+            "composite_score": -3.19,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 19.59,
+                    "return_3m": 18.61,
+                    "return_6m": 10.12,
+                    "raw_momentum": 15.41,
+                    "score": 0.3082
+                },
+                "mean_reversion": {
+                    "sma_50": 155.71,
+                    "z_score": 1.6784,
+                    "score": -0.8392
+                },
+                "rsi": {
+                    "rsi": 63.82,
+                    "score": -0.4605
+                },
+                "macd": {
+                    "macd_line": 7.7155,
+                    "signal_line": 6.9367,
+                    "histogram": 0.7788,
+                    "histogram_pct": 0.4384,
+                    "crossover": "NONE",
+                    "score": 0.4384
+                },
+                "volatility": {
+                    "vol_short": 29.63,
+                    "vol_long": 32.24,
+                    "vol_ratio": 0.9189,
+                    "regime": "STABLE",
+                    "score": 0.2027
+                },
+                "volume": {
+                    "current_volume": 9406082,
+                    "avg_volume_20d": 11588738,
+                    "volume_ratio": 0.81,
+                    "price_trend_5d": -1.6,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 177.66,
+            "data_points": 248
+        },
+        {
+            "symbol": "TATASTEEL",
+            "composite_score": -4.43,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 11.94,
+                    "return_3m": 25.77,
+                    "return_6m": 35.12,
+                    "raw_momentum": 26.74,
+                    "score": 0.5348
+                },
+                "mean_reversion": {
+                    "sma_50": 192.03,
+                    "z_score": 1.402,
+                    "score": -0.701
+                },
+                "rsi": {
+                    "rsi": 61.08,
+                    "score": -0.3693
+                },
+                "macd": {
+                    "macd_line": 5.9977,
+                    "signal_line": 6.061,
+                    "histogram": -0.0633,
+                    "histogram_pct": -0.03,
+                    "crossover": "BEARISH",
+                    "score": -0.33
+                },
+                "volatility": {
+                    "vol_short": 25.73,
+                    "vol_long": 29.51,
+                    "vol_ratio": 0.8718,
+                    "regime": "STABLE",
+                    "score": 0.3204
+                },
+                "volume": {
+                    "current_volume": 33538902,
+                    "avg_volume_20d": 36177379,
+                    "volume_ratio": 0.93,
+                    "price_trend_5d": 0.9,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 211.01,
+            "data_points": 248
+        },
+        {
+            "symbol": "TATAPOWER",
+            "composite_score": -8.02,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 2.66,
+                    "return_3m": -5.17,
+                    "return_6m": -3.21,
+                    "raw_momentum": -2.82,
+                    "score": -0.0564
+                },
+                "mean_reversion": {
+                    "sma_50": 371.57,
+                    "z_score": -0.2924,
+                    "score": 0.1462
+                },
+                "rsi": {
+                    "rsi": 45.67,
+                    "score": 0.1442
+                },
+                "macd": {
+                    "macd_line": 2.1754,
+                    "signal_line": 2.3854,
+                    "histogram": -0.21,
+                    "histogram_pct": -0.057,
+                    "crossover": "BEARISH",
+                    "score": -0.357
+                },
+                "volatility": {
+                    "vol_short": 23.75,
+                    "vol_long": 23.3,
+                    "vol_ratio": 1.0193,
+                    "regime": "STABLE",
+                    "score": -0.0482
+                },
+                "volume": {
+                    "current_volume": 5992599,
+                    "avg_volume_20d": 3890435,
+                    "volume_ratio": 1.54,
+                    "price_trend_5d": -3.0,
+                    "spike": true,
+                    "score": -0.5134
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 368.35,
+            "data_points": 248
+        },
+        {
+            "symbol": "ADANIPOWER",
+            "composite_score": -8.33,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 2.5,
+                    "return_3m": -5.99,
+                    "return_6m": 13.68,
+                    "raw_momentum": 3.58,
+                    "score": 0.0715
+                },
+                "mean_reversion": {
+                    "sma_50": 142.81,
+                    "z_score": -0.912,
+                    "score": 0.456
+                },
+                "rsi": {
+                    "rsi": 42.09,
+                    "score": 0.2637
+                },
+                "macd": {
+                    "macd_line": -0.7805,
+                    "signal_line": 0.0152,
+                    "histogram": -0.7957,
+                    "histogram_pct": -0.5768,
+                    "crossover": "NONE",
+                    "score": -0.5768
+                },
+                "volatility": {
+                    "vol_short": 49.91,
+                    "vol_long": 36.42,
+                    "vol_ratio": 1.3703,
+                    "regime": "EXPANDING",
+                    "score": -0.9256
+                },
+                "volume": {
+                    "current_volume": 28511858,
+                    "avg_volume_20d": 21973898,
+                    "volume_ratio": 1.3,
+                    "price_trend_5d": -4.39,
+                    "spike": false,
+                    "score": -0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 137.97,
+            "data_points": 248
+        },
+        {
+            "symbol": "TMPV",
+            "composite_score": -12.57,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 2.12,
+                    "return_3m": 2.45,
+                    "return_6m": -11.11,
+                    "raw_momentum": -3.04,
+                    "score": -0.0609
+                },
+                "mean_reversion": {
+                    "sma_50": 364.44,
+                    "z_score": 0.4239,
+                    "score": -0.2119
+                },
+                "rsi": {
+                    "rsi": 47.98,
+                    "score": 0.0672
+                },
+                "macd": {
+                    "macd_line": 5.0941,
+                    "signal_line": 5.9843,
+                    "histogram": -0.8902,
+                    "histogram_pct": -0.2402,
+                    "crossover": "BEARISH",
+                    "score": -0.5402
+                },
+                "volatility": {
+                    "vol_short": 24.81,
+                    "vol_long": 24.07,
+                    "vol_ratio": 1.0308,
+                    "regime": "STABLE",
+                    "score": -0.077
+                },
+                "volume": {
+                    "current_volume": 13370258,
+                    "avg_volume_20d": 11649232,
+                    "volume_ratio": 1.15,
+                    "price_trend_5d": -1.84,
+                    "spike": false,
+                    "score": 0.0
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 370.6,
+            "data_points": 248
+        },
+        {
+            "symbol": "TIINDIA",
+            "composite_score": -20.23,
+            "signal": "HOLD",
+            "factors": {
+                "momentum": {
+                    "return_1m": 17.94,
+                    "return_3m": -1.59,
+                    "return_6m": -7.03,
+                    "raw_momentum": 0.14,
+                    "score": 0.0028
+                },
+                "mean_reversion": {
+                    "sma_50": 2475.21,
+                    "z_score": 2.0861,
+                    "score": -1.0
+                },
+                "rsi": {
+                    "rsi": 67.6,
+                    "score": -0.5865
+                },
+                "macd": {
+                    "macd_line": 61.3531,
+                    "signal_line": 27.7216,
+                    "histogram": 33.6315,
+                    "histogram_pct": 1.2215,
+                    "crossover": "NONE",
+                    "score": 0.7
+                },
+                "volatility": {
+                    "vol_short": 57.23,
+                    "vol_long": 40.3,
+                    "vol_ratio": 1.4201,
+                    "regime": "EXPANDING",
+                    "score": -1.0
+                },
+                "volume": {
+                    "current_volume": 1021763,
+                    "avg_volume_20d": 842653,
+                    "volume_ratio": 1.21,
+                    "price_trend_5d": 8.42,
+                    "spike": false,
+                    "score": 0.3
+                },
+                "relative_strength": {
+                    "stock_return": null,
+                    "benchmark_return": null,
+                    "excess_return": null,
+                    "score": 0.0
+                }
+            },
+            "price": 2753.4,
+            "data_points": 247
+        }
+    ]
+}
