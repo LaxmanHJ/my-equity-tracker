@@ -73,17 +73,19 @@ async function getQuote(symbol, forceRefresh = false) {
 export async function getAllQuotes(forceRefresh = false) {
   const symbols = getSymbols();
   const quotes = [];
-  const batchSize = 3;  // Process 3 stocks at a time
-  const batchDelayMs = 3000;  // 3 seconds between batches
+
+  // When reading from local cache (normal load), no delays are needed.
+  // When force-refreshing (hitting the network API), use batching with delays.
+  const batchSize = forceRefresh ? 3 : symbols.length;
+  const batchDelayMs = forceRefresh ? 3000 : 0;
+  const perStockDelayMs = forceRefresh ? settings.api.requestDelayMs : 0;
 
   for (let i = 0; i < symbols.length; i += batchSize) {
     const batch = symbols.slice(i, i + batchSize);
 
-    // Process batch sequentially
     for (const symbol of batch) {
       const quote = await getQuote(symbol, forceRefresh);
       if (quote) {
-        // Attach to all portfolio items that match this symbol (e.g. TMCV and TMPV both track TIINDIA.NS)
         const matchingItems = portfolio.filter(s => s.symbol === symbol);
 
         for (const stockInfo of matchingItems) {
@@ -97,11 +99,11 @@ export async function getAllQuotes(forceRefresh = false) {
           });
         }
       }
-      await delay(settings.api.requestDelayMs);
+      if (perStockDelayMs > 0) await delay(perStockDelayMs);
     }
 
-    // Pause between batches (except after the last batch)
-    if (i + batchSize < symbols.length) {
+    // Pause between batches only during force refresh
+    if (batchDelayMs > 0 && i + batchSize < symbols.length) {
       console.log(`Batch ${Math.floor(i / batchSize) + 1} complete. Waiting ${batchDelayMs / 1000}s before next batch...`);
       await delay(batchDelayMs);
     }
