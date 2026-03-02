@@ -16,3 +16,5 @@ data/*.db
 
 # Logs
 *.log
+quant_engine/__pycache__/
+quant_engine/**/__pycache__/
