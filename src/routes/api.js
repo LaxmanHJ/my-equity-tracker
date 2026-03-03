@@ -4,7 +4,8 @@ import {
   getAllQuotes,
   getHistoricalData,
   getPortfolioSummary,
-  getQuote
+  getQuote,
+  getBenchmarkData
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -398,6 +399,30 @@ function isMarketOpen() {
 
   return day >= 1 && day <= 5 && time >= marketOpen && time <= marketClose;
 }
+
+// ============================================
+// Sync Endpoints
+// ============================================
+
+/**
+ * POST /api/sync/benchmark
+ * Manually trigger NIFTY 50 benchmark data sync
+ */
+router.post('/sync/benchmark', async (req, res) => {
+  try {
+    const forceRefresh = req.query.force === 'true';
+    console.log(`[API] Syncing NIFTY 50 benchmark data (force=${forceRefresh})...`);
+    const data = await getBenchmarkData('1y', forceRefresh);
+    res.json({
+      success: true,
+      message: `NIFTY 50 benchmark data synced successfully`,
+      dataPoints: data.length
+    });
+  } catch (error) {
+    console.error('Benchmark sync error:', error);
+    res.status(500).json({ error: 'Failed to sync benchmark data' });
+  }
+});
 
 // ============================================
 // Quant Engine Proxy (Python FastAPI on :5001)

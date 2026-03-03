@@ -6,9 +6,12 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "node --watch src/server.js",
+    "dev:quant": "python3 -m uvicorn quant_engine.main:app --host 0.0.0.0 --port 5001 --reload",
+    "dev:all": "concurrently --kill-others --names \"NODE,QUANT\" --prefix-colors \"cyan,magenta\" \"npm run dev\" \"npm run dev:quant\"",
     "start": "node src/server.js",
     "test": "node --test",
-    "fetch": "node src/scripts/fetchData.js"
+    "fetch": "node src/scripts/fetchData.js",
+    "stop": "lsof -ti:3000 -ti:5001 | xargs kill -9 2>/dev/null; echo '✅ Ports 3000 & 5001 cleared'"
   },
   "keywords": [
     "stocks",
@@ -31,6 +34,7 @@
     "yahoo-finance2": "^2.11.3"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "nodemon": "^3.1.4"
   }
 }

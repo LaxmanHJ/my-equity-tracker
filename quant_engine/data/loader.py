@@ -41,12 +41,16 @@ def load_price_history(symbol: str, limit: int = 365) -> pd.DataFrame:
         conn.close()
 
 
+# Symbols that are benchmarks/indices, not portfolio stocks — exclude from scoring
+BENCHMARK_SYMBOLS = {"^NSEI", "NSEI", "NIFTY", "^NSEBANK"}
+
+
 def load_all_symbols() -> List[str]:
-    """Return all symbols that have cached price history."""
+    """Return all symbols that have cached price history, excluding benchmarks."""
     conn = get_connection()
     try:
         cursor = conn.execute("SELECT DISTINCT symbol FROM price_history")
-        return [row[0] for row in cursor.fetchall()]
+        return [row[0] for row in cursor.fetchall() if row[0] not in BENCHMARK_SYMBOLS]
     finally:
         conn.close()
 

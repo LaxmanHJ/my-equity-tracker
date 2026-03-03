@@ -60,5 +60,10 @@ Set custom trigger points for any stock. The application actively tracks local t
 - **Rate-Limit Resilience:** Initially fetching from Yahoo Finance caused 429 IP bans. The architecture was overhauled to use RapidAPI.
 - **Intelligent Caching System:** To eliminate redundant API calls for current prices, the backend intercepts requests, analyzes the locally cached `1y` SQLite historical data, and constructs a current quote instantly without external network latency.
 
+## Project Start Stop instructions
+- `npm run dev:all`	Start both servers
+- `npm run stop`	Kill both servers
+- `npm run stop && npm run dev:all`	Clean restart
+
 ## License
 MIT

@@ -109,26 +109,45 @@ export async function getAllQuotes(forceRefresh = false) {
     }
   }
 
+  // Also sync NIFTY 50 benchmark data so the Quant Engine can compute Relative Strength
+  try {
+    console.log('[Benchmark Sync] Ensuring NIFTY 50 data is cached...');
+    await getBenchmarkData('1y');
+  } catch (err) {
+    console.warn('[Benchmark Sync] Failed to sync NIFTY 50 data:', err.message);
+  }
+
   return quotes;
 }
 
 /**
  * Get historical data for a symbol intelligently using local cache and RapidAPI
  */
+// Map index/benchmark symbols to their RapidAPI-compatible names.
+// RapidAPI uses human-readable names for indices (e.g., 'NIFTY 50'), not ticker symbols.
+const INDEX_SYMBOL_MAP = {
+  '^NSEI': 'NIFTY 50',
+  'NSEI': 'NIFTY 50',
+  '^NSEBANK': 'NIFTY BANK',
+};
+
 export async function getHistoricalData(symbol, period = '1y', forceRefresh = false) {
   try {
     const cleanSymbol = symbol.replace('.NS', '').replace('.BO', '');
 
+    // For DB storage/lookup, use the clean symbol as-is (e.g., '^NSEI')
+    const dbSymbol = cleanSymbol;
+    // For RapidAPI calls, map index symbols to their API-friendly names
+    const apiSymbol = INDEX_SYMBOL_MAP[cleanSymbol] || cleanSymbol;
+
     // 1. Check database for existing data
-    const localData = forceRefresh ? [] : getPriceHistory(cleanSymbol);
-    const latestDateStr = forceRefresh ? null : getLatestPriceDate(cleanSymbol);
+    const localData = forceRefresh ? [] : getPriceHistory(dbSymbol);
+    const latestDateStr = forceRefresh ? null : getLatestPriceDate(dbSymbol);
 
     // Determine what we need to fetch
     let rapidApiPeriod = period;
 
     if (latestDateStr && !forceRefresh) {
-      // We have local data. Calculate how old it is.
-      // latestDateStr is like '2026-02-27'. Date parsing can be tricky with timezones, so let's normalize.
       const latestDate = new Date(latestDateStr + 'T00:00:00Z');
       const today = new Date();
       const todayNormalized = new Date(today.toISOString().split('T')[0] + 'T00:00:00Z');
@@ -136,20 +155,15 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       const diffTime = Math.abs(todayNormalized - latestDate);
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-      // If data is less than or equal to 3 days old (allowing for long weekends), just return local
       if (diffDays <= 3 && localData.length > 0) {
-        console.log(`[Cache Hit] Returning local historical data for ${cleanSymbol}`);
+        console.log(`[Cache Hit] Returning local historical data for ${dbSymbol}`);
         return localData;
       } else {
-        // We need to fetch the gap. 
-        // RapidAPI lowest period is 1m (1 month). So we just fetch 1 month and update the DB.
-        // This is safe because `savePriceHistory` uses INSERT OR REPLACE.
-        console.log(`[Cache Update] Fetching recent data (1m) to fill gap for ${cleanSymbol}`);
+        console.log(`[Cache Update] Fetching recent data (1m) to fill gap for ${dbSymbol}`);
         rapidApiPeriod = '1m';
       }
     } else {
-      // First run or force refresh: Fetch based on requested period
-      console.log(`[Cache Miss] Fetching fresh historical data (${period}) for ${cleanSymbol}`);
+      console.log(`[Cache Miss] Fetching fresh historical data (${period}) for ${dbSymbol}`);
       if (period === '1m') rapidApiPeriod = '1m';
       if (period === '3m') rapidApiPeriod = '1m';
       if (period === '6m') rapidApiPeriod = '6m';
@@ -158,16 +172,16 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '5y') rapidApiPeriod = '5yr';
     }
 
-    // Fetch new data
-    const newData = await getRapidApiChartData(cleanSymbol, rapidApiPeriod);
+    // Fetch new data (use API-friendly name for RapidAPI)
+    const newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
 
-    // Save to Database
+    // Save to Database (use the original symbol so Python can find it)
     if (newData && newData.length > 0) {
-      savePriceHistory(cleanSymbol, newData);
+      savePriceHistory(dbSymbol, newData);
     }
 
     // Return all local data (combined old + fresh inserted)
-    return getPriceHistory(cleanSymbol);
+    return getPriceHistory(dbSymbol);
 
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.message);
@@ -178,8 +192,8 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
 /**
  * Get NIFTY 50 benchmark data for comparison
  */
-export async function getBenchmarkData(period = '1y') {
-  return getHistoricalData(benchmark.symbol, period);
+export async function getBenchmarkData(period = '1y', forceRefresh = false) {
+  return getHistoricalData(benchmark.symbol, period, forceRefresh);
 }
 
 /**
