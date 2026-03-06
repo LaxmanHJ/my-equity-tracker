@@ -7,6 +7,7 @@ A sophisticated, real-time web application for analyzing a portfolio of Indian (
 ### 📊 Interactive Dashboard
 A unified view of your entire portfolio, featuring real-time prices, daily P&L, invested vs. current value summaries, and sector allocation charts.
 ![Dashboard](docs/dashboard.png)
+![Dashboard2](docs/dashboard2.png)
 
 ### 🧠 Quant Signals (Multi-Factor Scoring)
 A Python-powered quantitative engine that scores every stock in your portfolio across 7 factors — Momentum, Mean Reversion, RSI, MACD, Volatility, Volume, and Relative Strength — producing composite long/hold/short signals with a ranked card view.
