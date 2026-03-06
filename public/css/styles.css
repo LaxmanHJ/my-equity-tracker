@@ -6,12 +6,11 @@
   --bg-primary: #0a0a0f;
   --bg-secondary: #12121a;
   --bg-tertiary: #1a1a25;
-  --bg-glass: rgba(26, 26, 37, 0.7);
 
   /* Accent Colors */
-  --accent-primary: #6366f1;
-  --accent-secondary: #8b5cf6;
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --accent-primary: #e79119;
+  --accent-secondary: rgba(239, 109, 33, 0.968);
+  --accent-gradient: linear-gradient(135deg, #e79119 0%, rgba(239, 109, 33, 0.968) 100%);
 
   /* Status Colors */
   --success: #10b981;
@@ -35,7 +34,7 @@
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.3);
+  --shadow-glow: 0 0 20px rgba(226, 145, 30, 0.803);
 
   /* Spacing */
   --space-xs: 0.25rem;
@@ -91,16 +90,10 @@ body::before {
   left: 0;
   right: 0;
   bottom: 0;
-  background: radial-gradient(
-      ellipse at 20% 20%,
-      rgba(99, 102, 241, 0.15) 0%,
-      transparent 50%
-    ),
-    radial-gradient(
-      ellipse at 80% 80%,
-      rgba(139, 92, 246, 0.1) 0%,
-      transparent 50%
-    );
+  background: radial-gradient(ellipse at 20% 20%,
+      rgba(48, 47, 47, 0.975) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%,
+      #1b1b1a 0%, transparent 50%);
   pointer-events: none;
   z-index: 0;
 }
@@ -109,7 +102,7 @@ body::before {
    Glass Effect
    ============================================= */
 .glass {
-  background: var(--bg-glass);
+  /* background: var(--bg-glass); */
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
@@ -210,10 +203,12 @@ body::before {
 }
 
 @keyframes pulse {
+
   0%,
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -244,6 +239,7 @@ body::before {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -436,7 +432,7 @@ body::before {
 }
 
 .action-btn:hover {
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(239, 109, 33, 0.968);
   border-color: var(--accent-primary);
 }
 
@@ -557,7 +553,7 @@ body::before {
 .text-input:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 0 0 3pxrgba(239, 109, 33, 0.968)
 }
 
 .analysis-content {
@@ -895,6 +891,7 @@ body::before {
     opacity: 0;
     transform: translateX(100%);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
