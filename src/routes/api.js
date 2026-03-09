@@ -441,6 +441,67 @@ router.get('/quant/scores', async (req, res) => {
   }
 });
 
+
+// ============================================
+// News Endpoints
+// ============================================
+
+/**
+ * GET /api/news
+ * Fetch latest news related to portfolio stocks
+ */
+// ============================================
+// News Endpoints
+// ============================================
+
+router.get('/news', async (req, res) => {
+  try {
+
+    const token = process.env.NEWS_API_TOKEN;
+
+    if (!token) {
+      return res.status(500).json({
+        success: false,
+        message: "NEWS_API_TOKEN not configured"
+      });
+    }
+
+    const url = `https://api.marketaux.com/v1/news/all?language=en&limit=10&api_token=${token}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`MarketAux API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    const articles = result.data || [];
+
+    // Sort latest first
+    articles.sort(
+      (a, b) => new Date(b.published_at) - new Date(a.published_at)
+    );
+
+    res.json({
+      success: true,
+      count: articles.length,
+      news: articles
+    });
+
+  } catch (error) {
+
+    console.error("News API error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch news",
+      error: error.message
+    });
+
+  }
+});
+
 router.get('/quant/scores/:symbol', async (req, res) => {
   try {
     const response = await fetch(`${QUANT_ENGINE_URL}/api/scores/${req.params.symbol}`);
@@ -452,4 +513,6 @@ router.get('/quant/scores/:symbol', async (req, res) => {
   }
 });
 
+
+// console.log("NEWS TOKEN:", process.env.NEWS_API_TOKEN);
 export default router;

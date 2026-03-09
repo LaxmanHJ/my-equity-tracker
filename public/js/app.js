@@ -46,12 +46,49 @@ function initNavigation() {
       if (sectionId === 'quant') loadQuantScores();
       if (sectionId === 'correlation') loadCorrelationData();
       if (sectionId === 'alerts') loadAlerts();
+      if (sectionId === 'news') loadNews();
     });
   });
 
   // Refresh button
   document.getElementById('refreshBtn').addEventListener('click', loadPortfolio);
   document.getElementById('forceSyncBtn').addEventListener('click', forceSyncPortfolio);
+}
+
+// =============================================
+// News
+// =============================================
+
+async function loadNews() {
+  const container = document.getElementById("newsContainer");
+  container.innerHTML = "Loading news...";
+
+  try {
+    const response = await fetch(`${API_BASE}/news`);
+    const result = await response.json();
+
+    const news = result.news;
+
+    if (!news || news.length === 0) {
+      container.innerHTML = "<p>No news available</p>";
+      return;
+    }
+
+    container.innerHTML = news.map(article => `
+      <div style="margin-bottom:20px;border-bottom:1px solid #333;padding-bottom:15px;">
+        <h3>${article.title}</h3>
+        <p style="color:#94a3b8;font-size:14px;">
+          ${new Date(article.published_at).toLocaleString()}
+        </p>
+        <p>${article.description || ""}</p>
+        <a href="${article.url}" target="_blank">Read more →</a>
+      </div>
+    `).join("");
+
+  } catch (error) {
+    console.error(error);
+    container.innerHTML = "<p>Failed to load news</p>";
+  }
 }
 
 // =============================================
