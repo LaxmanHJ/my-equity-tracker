@@ -7,6 +7,7 @@
 
 import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
+import { getAlphaVantageChartData } from './alphaVantageService.js';
 import { getPriceHistory, getLatestPriceDate, savePriceHistory } from '../database/db.js';
 import { portfolio, getSymbols, benchmark } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
@@ -172,8 +173,21 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '5y') rapidApiPeriod = '5yr';
     }
 
-    // Fetch new data (use API-friendly name for RapidAPI)
-    const newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+    // Fetch new data: try RapidAPI first, fall back to Alpha Vantage
+    let newData = [];
+    try {
+      newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+      console.log(`[RapidAPI] ✅ ${dbSymbol}: ${newData.length} records`);
+    } catch (rapidErr) {
+      console.warn(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
+      try {
+        newData = await getAlphaVantageChartData(cleanSymbol);
+        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records`);
+      } catch (avErr) {
+        console.error(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
+        newData = [];
+      }
+    }
 
     // Save to Database (use the original symbol so Python can find it)
     if (newData && newData.length > 0) {
