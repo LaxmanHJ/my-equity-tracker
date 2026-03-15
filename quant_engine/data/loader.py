@@ -42,7 +42,7 @@ def load_price_history(symbol: str, limit: int = 365) -> pd.DataFrame:
 
 
 # Symbols that are benchmarks/indices, not portfolio stocks — exclude from scoring
-BENCHMARK_SYMBOLS = {"^NSEI", "NSEI", "NIFTY", "^NSEBANK"}
+BENCHMARK_SYMBOLS = {"^NSEI", "NSEI", "NIFTY", "^NSEBANK", "^BSESN", "BSESN", "SENSEX"}
 
 
 def load_all_symbols() -> List[str]:
@@ -57,7 +57,27 @@ def load_all_symbols() -> List[str]:
 
 def load_benchmark(limit: int = 365) -> pd.DataFrame:
     """Load NIFTY 50 benchmark data. Symbol stored as '^NSEI' or 'NSEI'."""
-    for sym in ["^NSEI", "NSEI", "NIFTY"]:
+    for sym in ["^NSEI", "NSEI", "NIFTY", "NIFTY 50"]:
+        df = load_price_history(sym, limit)
+        if not df.empty:
+            return df
+    return pd.DataFrame()
+
+
+# Symbol candidates for each index
+INDEX_SYMBOL_MAP = {
+    "nifty": ["^NSEI", "NSEI", "NIFTY", "NIFTY 50"],
+    "sensex": ["^BSESN", "BSESN", "SENSEX"],
+}
+
+
+def load_index_data(index_name: str, limit: int = 365) -> pd.DataFrame:
+    """
+    Load index price data from SQLite.
+    index_name: 'nifty' or 'sensex'
+    """
+    candidates = INDEX_SYMBOL_MAP.get(index_name.lower(), [index_name])
+    for sym in candidates:
         df = load_price_history(sym, limit)
         if not df.empty:
             return df

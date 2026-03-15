@@ -159,3 +159,9 @@ export const benchmark = {
   symbol: '^NSEI',
   name: 'NIFTY 50'
 };
+
+// Market indexes to analyse (Markov + Mean Reversion)
+export const indexes = [
+  { symbol: '^NSEI', name: 'NIFTY 50', rapidApiName: 'NIFTY 50' },
+  { symbol: '^BSESN', name: 'SENSEX', rapidApiName: 'SENSEX' },
+];

@@ -9,7 +9,7 @@ import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
 import { getAlphaVantageChartData } from './alphaVantageService.js';
 import { getPriceHistory, getLatestPriceDate, savePriceHistory } from '../database/db.js';
-import { portfolio, getSymbols, benchmark } from '../config/portfolio.js';
+import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
 
 /**
@@ -130,6 +130,8 @@ const INDEX_SYMBOL_MAP = {
   '^NSEI': 'NIFTY 50',
   'NSEI': 'NIFTY 50',
   '^NSEBANK': 'NIFTY BANK',
+  '^BSESN': 'SENSEX',
+  'BSESN': 'SENSEX',
 };
 
 export async function getHistoricalData(symbol, period = '1y', forceRefresh = false) {
@@ -208,6 +210,26 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
  */
 export async function getBenchmarkData(period = '1y', forceRefresh = false) {
   return getHistoricalData(benchmark.symbol, period, forceRefresh);
+}
+
+/**
+ * Fetch historical data for all market indexes (NIFTY + SENSEX)
+ * Used by the Markov Chain and Mean Reversion strategies
+ */
+export async function fetchIndexData(period = '1y', forceRefresh = false) {
+  const results = {};
+  for (const idx of indexes) {
+    try {
+      console.log(`[IndexSync] Fetching ${idx.name} (${idx.symbol})...`);
+      const data = await getHistoricalData(idx.symbol, period, forceRefresh);
+      results[idx.symbol] = { name: idx.name, dataPoints: data.length };
+      console.log(`[IndexSync] ✅ ${idx.name}: ${data.length} records`);
+    } catch (err) {
+      console.error(`[IndexSync] ❌ ${idx.name}: ${err.message}`);
+      results[idx.symbol] = { name: idx.name, dataPoints: 0, error: err.message };
+    }
+  }
+  return results;
 }
 
 /**

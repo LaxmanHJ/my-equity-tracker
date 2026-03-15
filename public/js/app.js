@@ -45,8 +45,8 @@ function initNavigation() {
       // Load section data
       if (sectionId === 'quant') loadQuantScores();
       if (sectionId === 'correlation') loadCorrelationData();
-      if (sectionId === 'alerts') loadAlerts();
-      if (sectionId === 'news') loadNews();
+      if (sectionId === 'alerts') { loadAlerts(); loadNews(); }
+      if (sectionId === 'index-analysis') loadIndexAnalysis();
     });
   });
 
@@ -724,6 +724,204 @@ function showToast(message, type = 'info') {
 // Make functions available globally
 window.viewAnalysis = viewAnalysis;
 window.deleteAlert = deleteAlert;
+
+// =============================================
+// Index Analysis (Markov + Mean Reversion)
+// =============================================
+
+async function loadIndexAnalysis() {
+  const container = document.getElementById('indexAnalysisContent');
+  container.innerHTML = '<div class="glass" style="padding:2rem;text-align:center;"><div class="loading-spinner"></div><p style="color:var(--text-muted);margin-top:1rem;">Loading index analysis...</p></div>';
+
+  try {
+    const response = await fetch(`${API_BASE}/index-analysis`);
+    if (!response.ok) throw new Error('Quant engine unavailable');
+    const data = await response.json();
+
+    container.innerHTML = '';
+    for (const [key, index] of Object.entries(data)) {
+      container.innerHTML += renderIndexCard(index);
+    }
+  } catch (error) {
+    console.error('Error loading index analysis:', error);
+    container.innerHTML = `
+      <div class="glass" style="padding:2rem;text-align:center;">
+        <p style="color:var(--danger);">⚠️ Quant Engine offline</p>
+        <p style="color:var(--text-muted);font-size:0.85rem;">Start it with: <code>python3 -m quant_engine.main</code></p>
+        <p style="color:var(--text-muted);font-size:0.85rem;margin-top:0.5rem;">Also ensure index data is synced via: <code>POST /api/sync/indexes</code></p>
+      </div>`;
+  }
+}
+
+function renderIndexCard(index) {
+  if (index.error && !index.price) {
+    return `
+      <div class="glass" style="padding:1.5rem;">
+        <h3>${index.name}</h3>
+        <p style="color:var(--text-muted);">${index.error}</p>
+      </div>`;
+  }
+
+  const markov = index.markov || {};
+  const mr = index.mean_reversion || {};
+
+  // Regime badge colors
+  const regimeColors = { Bull: '#10b981', Sideways: '#f59e0b', Bear: '#ef4444', Unknown: '#6b7280' };
+  const regimeColor = regimeColors[markov.current_regime] || '#6b7280';
+
+  // MR signal colors
+  const signalColors = {
+    OVERSOLD_BUY: '#10b981', MILD_OVERSOLD: '#34d399',
+    NEUTRAL: '#6b7280',
+    MILD_OVERBOUGHT: '#f97316', OVERBOUGHT_SELL: '#ef4444',
+    INSUFFICIENT_DATA: '#6b7280', NO_DATA: '#6b7280'
+  };
+  const signalColor = signalColors[mr.signal] || '#6b7280';
+  const signalLabel = (mr.signal || 'N/A').replace(/_/g, ' ');
+
+  // Transition matrix HTML
+  let matrixHtml = '';
+  if (markov.transition_matrix && markov.transition_matrix.length > 0) {
+    matrixHtml = `
+      <div style="margin-top:1rem;">
+        <div style="color:var(--text-muted);font-size:0.75rem;text-transform:uppercase;margin-bottom:0.5rem;">Transition Probabilities</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:center;">
+          <thead>
+            <tr>
+              <th style="padding:4px;color:var(--text-muted);text-align:left;">From → To</th>
+              <th style="padding:4px;color:#ef4444;">Bear</th>
+              <th style="padding:4px;color:#f59e0b;">Sideways</th>
+              <th style="padding:4px;color:#10b981;">Bull</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${markov.transition_matrix.map(row => {
+      const fromColor = regimeColors[row.from];
+      return `<tr>
+                <td style="padding:4px;text-align:left;color:${fromColor};font-weight:600;">${row.from}</td>
+                ${['Bear', 'Sideways', 'Bull'].map(to => {
+        const prob = row.to[to];
+        const opacity = Math.max(0.1, prob);
+        const bgColor = regimeColors[to];
+        return `<td style="padding:4px;background:${bgColor}${Math.round(opacity * 40).toString(16).padStart(2, '0')};border-radius:4px;">${(prob * 100).toFixed(1)}%</td>`;
+      }).join('')}
+              </tr>`;
+    }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // Regime distribution
+  let distHtml = '';
+  if (markov.regime_distribution) {
+    distHtml = `
+      <div style="margin-top:1rem;">
+        <div style="color:var(--text-muted);font-size:0.75rem;text-transform:uppercase;margin-bottom:0.5rem;">Regime Distribution (1Y)</div>
+        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px;">
+          ${Object.entries(markov.regime_distribution).map(([regime, pct]) => `
+            <div style="width:${pct}%;background:${regimeColors[regime]};" title="${regime}: ${pct}%"></div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.7rem;color:var(--text-muted);">
+          ${Object.entries(markov.regime_distribution).map(([regime, pct]) => `
+            <span><span style="color:${regimeColors[regime]};">●</span> ${regime} ${pct}%</span>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+
+  // Bollinger Band gauge
+  const bbPct = mr.bollinger_pct !== undefined ? (mr.bollinger_pct * 100).toFixed(0) : 50;
+
+  return `
+    <div class="glass index-card" style="padding:1.5rem;margin-bottom:1.5rem;">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:1.3rem;">${index.name}</h3>
+          <span style="color:var(--text-muted);font-size:0.85rem;">₹${index.price?.toLocaleString('en-IN') || 'N/A'} • ${index.data_points || 0} data points</span>
+        </div>
+        <div style="text-align:right;">
+          <span style="display:inline-block;padding:6px 16px;border-radius:20px;background:${regimeColor}22;color:${regimeColor};font-weight:700;font-size:0.9rem;border:1px solid ${regimeColor}44;">
+            ${markov.current_regime || 'Unknown'}
+          </span>
+          ${markov.regime_streak ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">${markov.regime_streak} day streak</div>` : ''}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+        <!-- Markov Column -->
+        <div style="border-right:1px solid var(--border-color);padding-right:1.5rem;">
+          <div style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;">🔗 Markov Chain</div>
+          
+          <!-- Next Day Prediction -->
+          ${markov.next_day_probabilities ? `
+            <div style="color:var(--text-muted);font-size:0.75rem;text-transform:uppercase;margin-bottom:0.3rem;">Next Day Prediction</div>
+            <div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+              ${Object.entries(markov.next_day_probabilities).map(([regime, prob]) => `
+                <div style="flex:1;text-align:center;padding:8px;border-radius:8px;background:${regimeColors[regime]}15;border:1px solid ${regimeColors[regime]}33;">
+                  <div style="font-size:1.1rem;font-weight:700;color:${regimeColors[regime]};">${(prob * 100).toFixed(1)}%</div>
+                  <div style="font-size:0.7rem;color:var(--text-muted);">${regime}</div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          ${matrixHtml}
+          ${distHtml}
+        </div>
+
+        <!-- Mean Reversion Column -->
+        <div>
+          <div style="font-size:0.85rem;font-weight:600;margin-bottom:0.5rem;">📐 Mean Reversion</div>
+          
+          <!-- Signal Badge -->
+          <div style="margin-bottom:1rem;">
+            <span style="display:inline-block;padding:6px 14px;border-radius:8px;background:${signalColor}22;color:${signalColor};font-weight:600;font-size:0.85rem;border:1px solid ${signalColor}44;">
+              ${signalLabel}
+            </span>
+            ${mr.strength !== undefined ? `<span style="font-size:0.8rem;color:var(--text-muted);margin-left:8px;">Strength: ${(mr.strength * 100).toFixed(0)}%</span>` : ''}
+          </div>
+
+          <!-- Metrics Grid -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;">
+            <div>
+              <div style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Z-Score (20d)</div>
+              <div style="font-size:1.1rem;font-weight:600;color:${mr.z_score_20 > 1.5 ? '#ef4444' : mr.z_score_20 < -1.5 ? '#10b981' : 'var(--text-primary)'}">${mr.z_score_20?.toFixed(2) || 'N/A'}</div>
+            </div>
+            <div>
+              <div style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Z-Score (50d)</div>
+              <div style="font-size:1.1rem;font-weight:600;color:${mr.z_score_50 > 1.5 ? '#ef4444' : mr.z_score_50 < -1.5 ? '#10b981' : 'var(--text-primary)'}">${mr.z_score_50?.toFixed(2) || 'N/A'}</div>
+            </div>
+            <div>
+              <div style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">RSI</div>
+              <div style="font-size:1.1rem;font-weight:600;color:${mr.rsi > 70 ? '#ef4444' : mr.rsi < 30 ? '#10b981' : 'var(--text-primary)'}">${mr.rsi?.toFixed(1) || 'N/A'}</div>
+            </div>
+            <div>
+              <div style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;">Bollinger %</div>
+              <div style="font-size:1.1rem;font-weight:600;">${bbPct}%</div>
+            </div>
+          </div>
+
+          <!-- SMA Levels -->
+          ${mr.sma_20 ? `
+          <div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border-color);">
+            <div style="color:var(--text-muted);font-size:0.7rem;text-transform:uppercase;margin-bottom:0.3rem;">Key Levels</div>
+            <div style="display:flex;justify-content:space-between;font-size:0.8rem;">
+              <span>SMA 20: <strong>₹${mr.sma_20?.toLocaleString('en-IN')}</strong></span>
+              <span>SMA 50: <strong>₹${mr.sma_50?.toLocaleString('en-IN')}</strong></span>
+            </div>
+            ${mr.upper_band ? `
+            <div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-top:4px;color:var(--text-muted);">
+              <span>Lower Band: ₹${mr.lower_band?.toLocaleString('en-IN')}</span>
+              <span>Upper Band: ₹${mr.upper_band?.toLocaleString('en-IN')}</span>
+            </div>` : ''}
+          </div>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
 
 // =============================================
 // Quant Signals

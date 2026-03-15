@@ -201,7 +201,37 @@ Each bar represents one quantitative factor. The bar fills from left (bearish, -
 > ⚠️ **Note:** This factor currently shows `null` / `0.00` because NIFTY 50 benchmark data hasn't been completely cached yet.
 ---
 
-## 4. How the Composite Score is Calculated
+---
+
+## 4. Index Analysis (Market Health)
+
+While individual stock cards look at specific companies, the **Index Analysis** tab evaluates the health of the broader market (like NIFTY 50 and SENSEX). It uses two distinct macro-strategies to tell you if the overall market environment is safe for trend-following or dangerous.
+
+### Strategy 1: Markov Chain Regime Detection
+**What it measures:** The current "State" or "Regime" of the overall market, and the mathematical probability of what tomorrow's price action will look like.
+
+**How it works:** It evaluates daily percentage returns and strictly classifies every single trading day into one of three regimes:
+- **Bull Regime:** The index closed **> +0.5%** higher. Strong buying conviction.
+- **Bear Regime:** The index closed **< -0.5%** lower. Strong selling pressure.
+- **Sideways Regime:** The index moved **between -0.5% and +0.5%**. Low conviction, chopping around roughly flat without a decisive trend.
+
+It then builds a **Transition Probability Matrix** based on historical data. If we are in a Bear regime today, it calculates the exact percentage chance that tomorrow will be Bear, Bull, or Sideways based on how the index has historically behaved.
+
+**How it helps:** It prevents you from fighting the broader market trend. If the Markov Chain says the market is stuck in a "Sideways" regime, expect choppy, non-trending price action where breakouts on individual stocks will likely fail. If we are in a strong "Bull" regime, trend-following strategies are highly favored.
+
+### Strategy 2: Index Mean Reversion (Moving Averages & Oscillators)
+**What it measures:** Is the broader market fundamentally overbought (too expensive and due for a pullback) or oversold (too cheap, panic selling exhausted, due for a bounce)?
+
+**How it works:** It aggregates multiple technical indicators into a single actionable signal (e.g., `OVERSOLD BUY`, `NEUTRAL`, `OVERBOUGHT SELL`):
+- **Z-Scores (20-day & 50-day):** Measures exactly how far the current index price has stretched away from its 20-day and 50-day Simple Moving Averages (SMA). A stretched rubber band must eventually snap back.
+- **Bollinger Bands:** Plots standard deviation bands around the moving average. If the index price pierces the lower band, it indicates a high-probability oversold condition.
+- **RSI (14-day):** A momentum oscillator. An RSI under 30 means the market is in a state of panic selling (exhaustion). An RSI over 70 means irrational exuberance.
+
+**How it helps:** When the entire market is flashing an `OVERSOLD BUY` signal, it’s often the best time to deploy capital into individual stocks that the Quant Engine has rated highly (LONG), as a rising market tide will lift them up. Conversely, if the market is flashing `OVERBOUGHT SELL`, it's time to tighten stop-losses and take profits.
+
+---
+
+## 5. How the Composite Score is Calculated
 
 ```
 Composite = (Momentum × 0.25)
@@ -229,7 +259,7 @@ Final Score = Composite × 100    (range: -100 to +100)
 
 ---
 
-## 5. Quick Reference: Reading a Card in 5 Seconds
+## 6. Quick Reference: Reading a Card in 5 Seconds
 
 1. **Look at the composite score and color.** Green positive = bullish. Red negative = bearish.
 2. **Check the signal badge.** 🟢 LONG means act. ⚪ HOLD means wait. 🔴 SHORT means caution.
@@ -239,7 +269,7 @@ Final Score = Composite × 100    (range: -100 to +100)
 
 ---
 
-## 6. Example: Reading TATAELXSI's Card
+## 7. Example: Reading TATAELXSI's Card
 
 ```
 Score: +10.44 (HOLD — mild bullish lean)

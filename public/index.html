@@ -26,8 +26,8 @@
       <a href="#quant" class="nav-link" data-section="quant">Quant Signals</a>
       <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
       <a href="#correlation" class="nav-link" data-section="correlation">Correlation</a>
-      <a href="#alerts" class="nav-link" data-section="alerts">Alerts</a>
-      <a href="#news" class="nav-link" data-section="news">News</a>
+      <a href="#alerts" class="nav-link" data-section="alerts">Alerts & News</a>
+      <a href="#index-analysis" class="nav-link" data-section="index-analysis">Index Analysis</a>
     </div>
     <div class="nav-status">
       <span class="market-status" id="marketStatus">
@@ -174,7 +174,6 @@
       </div>
     </section>
 
-    <!-- Alerts Section -->
     <section id="alerts" class="section">
       <div class="section-header">
         <h2>Price Alerts</h2>
@@ -193,6 +192,14 @@
             </p>
           </div>
         </div>
+      </div>
+
+      <!-- News (merged into Alerts tab) -->
+      <div class="section-header" style="margin-top:2rem;">
+        <h2>Latest Stock News</h2>
+      </div>
+      <div id="newsContainer" class="glass" style="padding:20px;">
+        <p>Loading news...</p>
       </div>
 
       <!-- New Alert Modal -->
@@ -233,16 +240,19 @@
       </div>
     </section>
 
-    <!-- News Section -->
-<section id="news" class="section">
-  <div class="section-header">
-    <h2>Latest Stock News</h2>
-  </div>
-
-  <div id="newsContainer" class="glass" style="padding:20px;">
-    <p>Loading news...</p>
-  </div>
-</section>
+    <!-- Index Analysis Section -->
+    <section id="index-analysis" class="section">
+      <div class="section-header">
+        <h2>Index Analysis</h2>
+        <p class="section-subtitle">Markov Chain Regime Detection & Mean Reversion Signals</p>
+      </div>
+      <div id="indexAnalysisContent" class="index-analysis-grid">
+        <div class="glass" style="padding:2rem;text-align:center;">
+          <div class="loading-spinner"></div>
+          <p style="color:var(--text-muted);margin-top:1rem;">Loading index analysis...</p>
+        </div>
+      </div>
+    </section>
 
     <!-- Quant Signals Section -->
     <section id="quant" class="section">
