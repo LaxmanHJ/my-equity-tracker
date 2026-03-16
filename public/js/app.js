@@ -44,8 +44,6 @@ function initNavigation() {
 
       // Load section data
       if (sectionId === 'quant') loadQuantScores();
-      if (sectionId === 'correlation') loadCorrelationData();
-      if (sectionId === 'alerts') { loadAlerts(); loadNews(); }
       if (sectionId === 'index-analysis') loadIndexAnalysis();
     });
   });

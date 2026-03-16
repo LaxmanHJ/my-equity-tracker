@@ -25,8 +25,6 @@
       <a href="#dashboard" class="nav-link active" data-section="dashboard">Dashboard</a>
       <a href="#quant" class="nav-link" data-section="quant">Quant Signals</a>
       <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
-      <a href="#correlation" class="nav-link" data-section="correlation">Correlation</a>
-      <a href="#alerts" class="nav-link" data-section="alerts">Alerts & News</a>
       <a href="#index-analysis" class="nav-link" data-section="index-analysis">Index Analysis</a>
     </div>
     <div class="nav-status">
@@ -143,102 +141,8 @@
       </div>
     </section>
 
-    <!-- Correlation Section -->
-    <section id="correlation" class="section">
-      <div class="section-header">
-        <h2>Portfolio Correlation</h2>
-        <p class="section-subtitle">
-          Understand how your stocks move together
-        </p>
-      </div>
 
-      <div class="correlation-content">
-        <div class="diversification-card glass" id="diversificationCard">
-          <div class="loading-spinner"></div>
-        </div>
 
-        <div class="correlation-matrix glass" id="correlationMatrix">
-          <h3>Correlation Matrix</h3>
-          <div class="matrix-loading">
-            <div class="loading-spinner"></div>
-            <span>Calculating correlations...</span>
-          </div>
-        </div>
-
-        <div class="high-correlations glass" id="highCorrelations">
-          <h3>Highly Correlated Pairs</h3>
-          <div class="pairs-loading">
-            <div class="loading-spinner"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="alerts" class="section">
-      <div class="section-header">
-        <h2>Price Alerts</h2>
-        <button class="btn btn-primary" id="newAlertBtn">
-          <span class="btn-icon">➕</span> New Alert
-        </button>
-      </div>
-
-      <div class="alerts-content">
-        <div class="alerts-list glass" id="alertsList">
-          <div class="empty-state">
-            <span class="empty-icon">🔔</span>
-            <p>No active alerts</p>
-            <p class="empty-hint">
-              Create alerts to get notified when stock prices hit your targets
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- News (merged into Alerts tab) -->
-      <div class="section-header" style="margin-top:2rem;">
-        <h2>Latest Stock News</h2>
-      </div>
-      <div id="newsContainer" class="glass" style="padding:20px;">
-        <p>Loading news...</p>
-      </div>
-
-      <!-- New Alert Modal -->
-      <div class="modal" id="alertModal">
-        <div class="modal-content glass">
-          <div class="modal-header">
-            <h3>Create Price Alert</h3>
-            <button class="modal-close" id="closeAlertModal">&times;</button>
-          </div>
-          <form id="alertForm" class="modal-body">
-            <div class="form-group">
-              <label for="alertStock">Stock</label>
-              <select id="alertStock" class="select-input" required>
-                <option value="">Select stock...</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="alertDirection">Condition</label>
-              <select id="alertDirection" class="select-input" required>
-                <option value="above">Price goes above</option>
-                <option value="below">Price goes below</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="alertThreshold">Price (₹)</label>
-              <input type="number" id="alertThreshold" class="text-input" step="0.01" required />
-            </div>
-            <div class="form-actions">
-              <button type="button" class="btn btn-secondary" id="cancelAlert">
-                Cancel
-              </button>
-              <button type="submit" class="btn btn-primary">
-                Create Alert
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </section>
 
     <!-- Index Analysis Section -->
     <section id="index-analysis" class="section">
@@ -305,6 +209,13 @@
 
   <!-- Footer -->
   <footer class="footer">
+    <div style="margin-bottom: 0.5rem; display: flex; justify-content: center; gap: 1rem;">
+      <a href="miscellaneous.html" target="_blank"
+        style="color: var(--text-secondary); text-decoration: none; font-size: 0.9rem;">Miscellaneous Tools</a>
+      <span style="color: var(--border-color);">|</span>
+      <a href="kb.html" target="_blank"
+        style="color: var(--text-secondary); text-decoration: none; font-size: 0.9rem;">Quant Knowledge Base</a>
+    </div>
     <p>Data delayed by 15 minutes • Source: Yahoo Finance</p>
     <p>Last updated: <span id="lastUpdated">-</span></p>
   </footer>

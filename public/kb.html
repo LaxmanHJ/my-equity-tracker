@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StockAnalyzer | Knowledge Base</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="css/kb-styles.css" />
+</head>
+
+<body style="padding-top: 2rem;">
+    <main class="main-content" style="padding: 2rem; max-width: 1400px; margin: 0 auto;">
+        <section id="kb" class="section active" style="display: block;">
+            <div class="section-header"
+                style="margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2>Quant Engine Knowledge Base</h2>
+                    <p class="section-subtitle">Understanding the mathematics behind the signals</p>
+                </div>
+                <a href="/" class="btn btn-secondary" style="text-decoration: none;">&larr; Back to Dashboard</a>
+            </div>
+
+            <div class="kb-grid">
+                <!-- Momentum -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">MOMENTUM (WEIGHTED 1M/3M/6M)</span>
+                        <div class="kb-metric-value" style="color: var(--success);">+1.00</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>-1.0 (Bearish)</span>
+                            <span>0 (Neutral)</span>
+                            <span>+1.0 (Bullish)</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 100%; background: var(--success);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-success">Strong Long</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Momentum combines the 1-month (20%), 3-month (40%), and 6-month (40%) returns. It proves that
+                            an object in motion stays in motion. A high score means the stock is in a confirmed,
+                            mathematically-backed uptrend. A negative score means it's a falling knife.</p>
+                    </div>
+                </div>
+
+                <!-- Mean Reversion -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">MEAN REVERSION (Z-SCORE)</span>
+                        <div class="kb-metric-value" style="color: var(--success);">-2.50</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>
+                                < -2 (Oversold)</span>
+                                    <span>0 (Average)</span>
+                                    <span>> +2 (Overbought)</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 5%; background: var(--success);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-success">Due for bounce</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Calculates how many standard deviations the price is away from its 50-day average. A Z-Score
+                            below -2.0 means the stock has crashed extraordinarily fast and is historically due for a
+                            violent snap-back relief rally. A Z-score above +2.0 means it is dangerously extended.</p>
+                    </div>
+                </div>
+
+                <!-- RSI -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">RELATIVE STRENGTH INDEX (RSI)</span>
+                        <div class="kb-metric-value" style="color: var(--danger);">75.4</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>0 (Oversold)</span>
+                            <span>50 (Nuetral)</span>
+                            <span>100 (Overbought)</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 75%; background: var(--danger);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-danger">Overbought</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Measures the speed of price movements (0 to 100). An RSI below 30 implies sellers are
+                            completely exhausted and a reversal is imminent. An RSI above 70 shows extreme euphoria
+                            where all buyers are trapped at the top.</p>
+                    </div>
+                </div>
+
+                <!-- MACD -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">MACD (MOMENTUM ACCELERATION)</span>
+                        <div class="kb-metric-value" style="color: var(--info);">Bullish Cross</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>Bearish Divergence</span>
+                            <span>No Trend</span>
+                            <span>Bullish Convergence</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 80%; background: var(--info);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-info">Trend Reversal</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Tracks the difference between the 12-day and 26-day EMA. A Bullish Crossover (when the fast
+                            line crosses above the slow line) is the engine's highest-conviction signal that a new,
+                            sustainable uptrend has officially begun.</p>
+                    </div>
+                </div>
+
+                <!-- Volatility -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">VOLATILITY REGIME</span>
+                        <div class="kb-metric-value" style="color: var(--warning);">0.85</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>
+                                < 0.8 (Contracting)</span>
+                                    <span>1.0 (Stable)</span>
+                                    <span>> 1.2 (Expanding)</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 30%; background: var(--warning);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-warning">Contracting Volatility</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Divides short-term volatility by long-term volatility. A ratio below 1.0 means the stock's
+                            price swings are calming down (contracting), creating a secure, low-risk base from which
+                            powerful breakouts occur.</p>
+                    </div>
+                </div>
+
+                <!-- Relative Strength vs NIFTY -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">RELATIVE STRENGTH (VS NIFTY 50)</span>
+                        <div class="kb-metric-value" style="color: var(--success);">+12.5%</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>Underperforming</span>
+                            <span>Parity</span>
+                            <span>Outperforming</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 85%; background: var(--success);"></div>
+                        </div>
+                        <div class="kb-badge kb-badge-success">Market Leader</div>
+                    </div>
+
+                    <div class="kb-desc-block">
+                        <p>Measures pure Alpha. If NIFTY 50 goes up 5% but your stock goes up 17.5%, the stock generated
+                            +12.5% excess return. High relative strength proves institutional money is accumulating this
+                            specific asset regardless of broader market conditions.</p>
+                    </div>
+                </div>
+
+                <!-- Markov Chain -->
+                <div class="kb-card">
+                    <div class="kb-card-header">
+                        <span class="kb-metric-name">MARKOV CHAIN REGIME DETECTION</span>
+                        <div class="kb-metric-value" style="color: #a855f7;">Bull Regime</div>
+                    </div>
+
+                    <div class="kb-track-container">
+                        <div class="kb-track-labels">
+                            <span>Bear (< -0.5%)</span>
+                                    <span>Sideways (Flat)</span>
+                                    <span>Bull (> +0.5%)</span>
+                        </div>
+                        <div class="kb-track">
+                            <div class="kb-track-fill" style="width: 90%; background: #a855f7;"></div>
+                        </div>
+                        <div class="kb-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">Trend
+                            Expected</div>
+                    </div>
+
+                    <div class="kb-desc-block" style="border-left-color: #a855f7;">
+                        <p>An Index Analysis model that predicts the broader market trend. If the index is stuck in a
+                            "Sideways" regime, expect individual stock breakouts to fail entirely. If it shifts to
+                            "Bull," trend-following strategies have a highly elevated probability of success.</p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+</body>
+
+</html>
