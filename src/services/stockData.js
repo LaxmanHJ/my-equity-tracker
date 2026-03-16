@@ -127,11 +127,11 @@ export async function getAllQuotes(forceRefresh = false) {
 // Map index/benchmark symbols to their RapidAPI-compatible names.
 // RapidAPI uses human-readable names for indices (e.g., 'NIFTY 50'), not ticker symbols.
 const INDEX_SYMBOL_MAP = {
-  '^NSEI': 'NIFTY 50',
-  'NSEI': 'NIFTY 50',
+  '^NSEI': 'NIFTY',
+  'NSEI': 'NIFTY',
   '^NSEBANK': 'NIFTY BANK',
-  '^BSESN': 'SENSEX',
-  'BSESN': 'SENSEX',
+  '^BSESN': 'BSE SENSEX',
+  'BSESN': 'BSE SENSEX',
 };
 
 export async function getHistoricalData(symbol, period = '1y', forceRefresh = false) {
