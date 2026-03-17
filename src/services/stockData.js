@@ -110,12 +110,12 @@ export async function getAllQuotes(forceRefresh = false) {
     }
   }
 
-  // Also sync NIFTY 50 benchmark data so the Quant Engine can compute Relative Strength
+  // Also sync NIFTY 50 and SENSEX benchmark data
   try {
-    console.log('[Benchmark Sync] Ensuring NIFTY 50 data is cached...');
-    await getBenchmarkData('1y');
+    console.log('[Benchmark Sync] Ensuring index data (NIFTY 50, SENSEX) is synced...');
+    await fetchIndexData('1y', forceRefresh);
   } catch (err) {
-    console.warn('[Benchmark Sync] Failed to sync NIFTY 50 data:', err.message);
+    console.warn('[Benchmark Sync] Failed to sync index data:', err.message);
   }
 
   return quotes;
