@@ -31,16 +31,25 @@ function initNavigation() {
 
   navLinks.forEach(link => {
     link.addEventListener('click', (e) => {
-      e.preventDefault();
       const sectionId = link.dataset.section;
+
+      // Only hijack navigation if it's a single-page section link
+      if (!sectionId) {
+        return; // Let normal HTML href navigation happen
+      }
+
+      e.preventDefault();
 
       // Update active states
       navLinks.forEach(l => l.classList.remove('active'));
       link.classList.add('active');
 
-      // Show section
+      // Show section if it exists on current page
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      document.getElementById(sectionId).classList.add('active');
+      const sectionEl = document.getElementById(sectionId);
+      if (sectionEl) {
+        sectionEl.classList.add('active');
+      }
 
       // Load section data
       if (sectionId === 'quant') loadQuantScores();
