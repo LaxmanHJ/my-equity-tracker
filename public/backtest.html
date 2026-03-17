@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock Portfolio Analyzer | Backtesting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        .backtest-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.8rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-family: inherit;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="logo">📈</span>
+            <span class="brand-text">StockAnalyzer</span>
+        </div>
+        <div class="nav-links">
+            <a href="index.html#dashboard" class="nav-link">Dashboard</a>
+            <a href="index.html#quant" class="nav-link">Quant Signals</a>
+            <a href="index.html#analysis" class="nav-link">Analysis</a>
+            <a href="#" class="nav-link active">Backtesting</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="section-header">
+            <h2>Strategy Backtesting</h2>
+            <p class="section-subtitle">Simulate trading strategies against historical data</p>
+        </div>
+
+        <div class="backtest-grid">
+            <!-- Configuration Panel -->
+            <div class="glass" style="padding: 1.5rem;">
+                <form id="backtestForm">
+                    <div class="form-group">
+                        <label for="symbol">Stock Symbol</label>
+                        <input type="text" id="symbol" class="form-control" placeholder="e.g. RELIANCE.NS" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="strategy">Strategy</label>
+                        <select id="strategy" class="form-control" required>
+                            <option value="buy_and_hold">Buy & Hold</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="startDate">Start Date</label>
+                        <input type="date" id="startDate" class="form-control" required value="2024-01-01">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="endDate">End Date</label>
+                        <input type="date" id="endDate" class="form-control" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="capital">Initial Capital (₹)</label>
+                        <input type="number" id="capital" class="form-control" value="100000" min="1000" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" style="width: 100%;" id="runBtn">
+                        Run Backtest
+                    </button>
+                </form>
+            </div>
+
+            <!-- Results Area -->
+            <div id="resultsArea" style="display: none;">
+                <!-- Metrics -->
+                <div class="metrics-grid">
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Total Return</span>
+                            <span class="card-value" id="resTotalReturn">0%</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">CAGR</span>
+                            <span class="card-value" id="resCagr">0%</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Max Drawdown</span>
+                            <span class="card-value negative" id="resMaxDd">0%</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Sharpe Ratio</span>
+                            <span class="card-value" id="resSharpe">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="chart-container glass" style="height: 500px;">
+                    <h3>Equity Curve</h3>
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingArea" style="display: none; text-align: center; padding: 4rem;">
+                <div class="loading-spinner" style="width: 40px; height: 40px; margin: 0 auto 1rem;"></div>
+                <p style="color: var(--text-secondary);">Running Simulation...</p>
+            </div>
+
+            <div id="errorArea" style="display: none; padding: 2rem; border-left: 4px solid var(--danger-color);"
+                class="glass">
+                <h3 style="color: var(--danger-color); margin-bottom: 0.5rem;">Backtest Failed</h3>
+                <p id="errorMsg" style="color: var(--text-secondary);"></p>
+            </div>
+        </div>
+
+        <!-- Backtesting Explanation Footer -->
+        <div class="glass" style="margin-top: 2rem; padding: 2rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--text-primary);">How Backtesting Works</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">
+                Backtesting is a way to prove whether a trading idea actually makes money before you risk any real cash
+                on it.
+            </p>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+                <!-- Step 1 -->
+                <div
+                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🤔</div>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">1. The "What If"</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
+                        Imagine it is January 1st, 2023. Our script looks at the data available only up to that day and
+                        checks our technical conditions (e.g., Markov Regime is Bullish, RSI < 30). It signals: <strong>
+                            Buy INFY</strong>.
+                    </p>
+                </div>
+
+                <!-- Step 2 -->
+                <div
+                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🖱️</div>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">2. The Simulation</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
+                        The backtesting engine simulates you actually clicking "Buy" on your broker. It records the
+                        exact price and subtracts a realistic amount for broker fees (commissions) and bad fill prices
+                        (slippage).
+                    </p>
+                </div>
+
+                <!-- Step 3 -->
+                <div
+                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">⏩</div>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">3. The Test</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
+                        It then fast-forwards time, watching the price of INFY go up and down over the following days
+                        and months. Later (e.g., June 15th, 2023), your script evaluates new data and says:
+                        <strong>"Market is Bearish. Sell."</strong>
+                    </p>
+                </div>
+
+                <!-- Step 4 -->
+                <div
+                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">📊</div>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">4. The Result</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
+                        The engine simulates selling your shares, calculates your exact profit or loss on that specific
+                        trade, and updates your total bankroll. It repeats this for every day in the sequence.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/backtest.js"></script>
+</body>
+
+</html>

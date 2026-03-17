@@ -173,6 +173,7 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '1y') rapidApiPeriod = '1yr';
       if (period === '2y') rapidApiPeriod = '3yr';
       if (period === '5y') rapidApiPeriod = '5yr';
+      if (period === '10y') rapidApiPeriod = '10yr';
     }
 
     // Fetch new data: try RapidAPI first, fall back to Alpha Vantage

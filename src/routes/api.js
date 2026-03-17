@@ -442,6 +442,27 @@ router.get('/quant/scores', async (req, res) => {
   }
 });
 
+router.post('/quant/backtest', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/quant/backtest/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+
+    if (!response.ok) {
+      const errData = await response.json();
+      return res.status(response.status).json(errData);
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Quant API Backtest error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
 
 // ============================================
 // News Endpoints
