@@ -5,7 +5,8 @@ import {
   getHistoricalData,
   getPortfolioSummary,
   getQuote,
-  getBenchmarkData
+  getBenchmarkData,
+  fetchIndexData
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -443,6 +444,27 @@ router.get('/quant/scores', async (req, res) => {
   }
 });
 
+router.post('/quant/backtest', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/quant/backtest/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+
+    if (!response.ok) {
+      const errData = await response.json();
+      return res.status(response.status).json(errData);
+    }
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Quant API Backtest error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
 
 // ============================================
 // News Endpoints
@@ -525,6 +547,37 @@ router.get('/quant/scores/:symbol', async (req, res) => {
   } catch (error) {
     console.error('Quant engine error:', error);
     res.status(502).json({ error: 'Quant engine unavailable' });
+  }
+});
+
+/**
+ * GET /api/index-analysis
+ * Proxy to Python quant engine for Markov Chain & Mean Reversion index analysis
+ */
+router.get('/index-analysis', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/index-analysis`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Index analysis error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable for index analysis' });
+  }
+});
+
+/**
+ * POST /api/sync/indexes
+ * Manually trigger NIFTY + SENSEX data sync
+ */
+router.post('/sync/indexes', async (req, res) => {
+  try {
+    const forceRefresh = req.query.force === 'true';
+    console.log(`[API] Syncing index data (force=${forceRefresh})...`);
+    const results = await fetchIndexData('1y', forceRefresh);
+    res.json({ success: true, indexes: results });
+  } catch (error) {
+    console.error('Index sync error:', error);
+    res.status(500).json({ error: 'Failed to sync index data' });
   }
 });
 

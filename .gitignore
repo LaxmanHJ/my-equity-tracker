@@ -6,6 +6,7 @@ node_modules/
 
 # Database
 data/*.db
+data/*.db-*
 
 # OS
 .DS_Store

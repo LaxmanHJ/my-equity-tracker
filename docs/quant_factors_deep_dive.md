@@ -65,6 +65,17 @@ This document provides an in-depth explanation of the 7 quantitative factors use
   - **Excess Return = Stock Return - Benchmark Return**.
 - **How it helps:** Pinpoints structural market leaders. If the NIFTY falls by 5% but your stock falls by only 1%, it demonstrates exceptional relative strength. In bull markets, stocks with high relative strength tend to massively outperform.
 
+## 8. Markov Chain Regime Detection (Index Analysis)
+- **Concept:** Uses probability theory to identify the current overall market state (or "regime") and mathematically forecast the likelihood of tomorrow's market environment based on historical transitions.
+- **Calculation:**
+  - Continuously evaluates the daily percentage returns of major indexes (like NIFTY 50 or SENSEX).
+  - Classifies every single trading day into one of three explicit regimes based on strict thresholds:
+    - **Bull:** Daily return is **> +0.5%**. The market pushed cleanly higher.
+    - **Bear:** Daily return is **< -0.5%**. The market fell sharply.
+    - **Sideways:** Daily return falls **between -0.5% and +0.5%**. These are chopping, low-conviction days with no significant directional movement.
+  - Builds a 3x3 Transition Probability Matrix to measure how frequently state X transitions into state Y.
+- **How it helps:** Gives a statistical framework for the *broader* market trend rather than individual stocks. If the math tells you the market is fiercely stuck in a **Sideways** regime where breakouts continually fail, you know to sit on your hands and avoid trend-following strategies until the regime snaps.
+
 ---
 
 ## Complete Stock Analysis Example: TATAELXSI

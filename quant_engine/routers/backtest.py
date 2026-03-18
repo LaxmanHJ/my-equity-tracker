@@ -1,0 +1,87 @@
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+import sqlite3
+import pandas as pd
+from typing import List
+
+from quant_engine.config import DB_PATH
+from quant_engine.backtest.engine import VectorizedBacktester
+from quant_engine.backtest.metrics import calculate_metrics
+from quant_engine.strategies.base import BaseStrategy
+
+router = APIRouter(
+    prefix="/api/quant/backtest",
+    tags=["backtest"]
+)
+
+class BacktestRequest(BaseModel):
+    symbol: str
+    start_date: str
+    end_date: str
+    strategy: str # e.g. "buy_and_hold", "momentum"
+    initial_capital: float = 10000.0
+
+class BuyAndHoldStrategy(BaseStrategy):
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        # Always hold 1 unit
+        return pd.Series(1, index=data.index)
+
+def fetch_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Fetch OHLCV data from the SQLite DB and format it for the backtester."""
+    try:
+        # DB stores 'RELIANCE', not 'RELIANCE.NS'
+        db_symbol = symbol.replace('.NS', '').replace('.BO', '')
+        
+        conn = sqlite3.connect(DB_PATH)
+        query = """
+            SELECT date, open, high, low, close, volume 
+            FROM price_history 
+            WHERE symbol = ? AND date >= ? AND date <= ?
+            ORDER BY date ASC
+        """
+        df = pd.read_sql_query(query, conn, params=(db_symbol, start_date, end_date), parse_dates=['date'])
+        conn.close()
+        
+        if df.empty:
+            return df
+            
+        df.set_index('date', inplace=True)
+        return df
+    except Exception as e:
+        print(f"DB Error: {e}")
+        return pd.DataFrame()
+
+@router.post("/")
+async def run_backtest(req: BacktestRequest):
+    df = fetch_data(req.symbol, req.start_date, req.end_date)
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"No data found for {req.symbol} in given date range.")
+        
+    # Standardize strategy names (simple dictionary lookup for now)
+    strategies = {
+        "buy_and_hold": BuyAndHoldStrategy("Buy & Hold")
+    }
+    
+    strategy = strategies.get(req.strategy.lower())
+    if not strategy:
+        raise HTTPException(status_code=400, detail=f"Strategy '{req.strategy}' not found.")
+        
+    # 1. Generate signals
+    signals = strategy.generate_signals(df)
+    
+    # 2. Run simulation
+    engine = VectorizedBacktester(df, initial_capital=req.initial_capital)
+    equity_curve = engine.run(signals)
+    
+    # 3. Calculate metrics
+    metrics = calculate_metrics(equity_curve, initial_capital=req.initial_capital)
+    
+    # Format timeseries for frontend Chart.js (needs list of {x: date, y: value})
+    chart_data = [{"x": date.strftime('%Y-%m-%d'), "y": round(val, 2)} for date, val in equity_curve.items()]
+    
+    return {
+        "symbol": req.symbol,
+        "strategy": strategy.name,
+        "metrics": metrics,
+        "chart_data": chart_data
+    }

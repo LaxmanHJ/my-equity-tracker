@@ -1,0 +1,174 @@
+/* =============================================
+   Knowledge Base Specific Styles
+   Designed to replicate a premium quant analysis UI
+   ============================================= */
+
+/* Main Grid Layout */
+.kb-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+    padding-bottom: 3rem;
+}
+
+/* Individual Metric Card */
+.kb-card {
+    background: rgba(26, 26, 37, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 1.75rem;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.kb-card:hover {
+    background: rgba(30, 30, 45, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+/* Card Header (Metric Name & Big Value) */
+.kb-card-header {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 2rem;
+}
+
+.kb-metric-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+}
+
+.kb-metric-value {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Progress Track Component */
+.kb-track-container {
+    margin-bottom: 2rem;
+}
+
+.kb-track {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin: 0.75rem 0;
+    overflow: hidden;
+    position: relative;
+}
+
+.kb-track-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 1s ease-in-out;
+}
+
+.kb-track-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.kb-track-labels span {
+    flex: 1;
+    text-align: center;
+}
+
+.kb-track-labels span:first-child {
+    text-align: left;
+}
+
+.kb-track-labels span:last-child {
+    text-align: right;
+}
+
+/* Badges */
+.kb-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+    letter-spacing: 0.02em;
+}
+
+.kb-badge-success {
+    background: var(--success-bg);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.kb-badge-danger {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.kb-badge-warning {
+    background: var(--warning-bg);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.kb-badge-info {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--info);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+/* Description Block (Left Accent Border) */
+.kb-desc-block {
+    border-left: 3px solid var(--border-color);
+    padding-left: 1.25rem;
+    margin-top: auto;
+}
+
+/* The accent border dynamically matches the primary color of the metric */
+.kb-card:has(.kb-badge-success) .kb-desc-block {
+    border-left-color: rgba(16, 185, 129, 0.6);
+}
+
+.kb-card:has(.kb-badge-danger) .kb-desc-block {
+    border-left-color: rgba(239, 68, 68, 0.6);
+}
+
+.kb-card:has(.kb-badge-warning) .kb-desc-block {
+    border-left-color: rgba(245, 158, 11, 0.6);
+}
+
+.kb-card:has(.kb-badge-info) .kb-desc-block {
+    border-left-color: rgba(59, 130, 246, 0.6);
+}
+
+.kb-desc-block p {
+    font-size: 0.95rem;
+    color: #cad3e0;
+    /* Slightly brighter than text-secondary for readability */
+    line-height: 1.6;
+}
+
+/* Navbar specific override for KB */
+.navbar .nav-links .kb-nav-highlight {
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    margin-left: 0.5rem;
+}
+
+.navbar .nav-links .kb-nav-highlight:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.navbar .nav-links .kb-nav-highlight.active {
+    background: var(--accent-gradient);
+    border-color: transparent;
+    color: #fff;
+}

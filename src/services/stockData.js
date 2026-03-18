@@ -7,8 +7,9 @@
 
 import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
+import { getAlphaVantageChartData } from './alphaVantageService.js';
 import { getPriceHistory, getLatestPriceDate, savePriceHistory } from '../database/db.js';
-import { portfolio, getSymbols, benchmark } from '../config/portfolio.js';
+import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
 
 /**
@@ -109,12 +110,12 @@ export async function getAllQuotes(forceRefresh = false) {
     }
   }
 
-  // Also sync NIFTY 50 benchmark data so the Quant Engine can compute Relative Strength
+  // Also sync NIFTY 50 and SENSEX benchmark data
   try {
-    console.log('[Benchmark Sync] Ensuring NIFTY 50 data is cached...');
-    await getBenchmarkData('1y');
+    console.log('[Benchmark Sync] Ensuring index data (NIFTY 50, SENSEX) is synced...');
+    await fetchIndexData('1y', forceRefresh);
   } catch (err) {
-    console.warn('[Benchmark Sync] Failed to sync NIFTY 50 data:', err.message);
+    console.warn('[Benchmark Sync] Failed to sync index data:', err.message);
   }
 
   return quotes;
@@ -126,9 +127,11 @@ export async function getAllQuotes(forceRefresh = false) {
 // Map index/benchmark symbols to their RapidAPI-compatible names.
 // RapidAPI uses human-readable names for indices (e.g., 'NIFTY 50'), not ticker symbols.
 const INDEX_SYMBOL_MAP = {
-  '^NSEI': 'NIFTY 50',
-  'NSEI': 'NIFTY 50',
+  '^NSEI': 'NIFTY',
+  'NSEI': 'NIFTY',
   '^NSEBANK': 'NIFTY BANK',
+  '^BSESN': 'BSE SENSEX',
+  'BSESN': 'BSE SENSEX',
 };
 
 export async function getHistoricalData(symbol, period = '1y', forceRefresh = false) {
@@ -170,10 +173,24 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '1y') rapidApiPeriod = '1yr';
       if (period === '2y') rapidApiPeriod = '3yr';
       if (period === '5y') rapidApiPeriod = '5yr';
+      if (period === '10y') rapidApiPeriod = '10yr';
     }
 
-    // Fetch new data (use API-friendly name for RapidAPI)
-    const newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+    // Fetch new data: try RapidAPI first, fall back to Alpha Vantage
+    let newData = [];
+    try {
+      newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+      console.log(`[RapidAPI] ✅ ${dbSymbol}: ${newData.length} records`);
+    } catch (rapidErr) {
+      console.warn(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
+      try {
+        newData = await getAlphaVantageChartData(cleanSymbol);
+        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records`);
+      } catch (avErr) {
+        console.error(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
+        newData = [];
+      }
+    }
 
     // Save to Database (use the original symbol so Python can find it)
     if (newData && newData.length > 0) {
@@ -194,6 +211,26 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
  */
 export async function getBenchmarkData(period = '1y', forceRefresh = false) {
   return getHistoricalData(benchmark.symbol, period, forceRefresh);
+}
+
+/**
+ * Fetch historical data for all market indexes (NIFTY + SENSEX)
+ * Used by the Markov Chain and Mean Reversion strategies
+ */
+export async function fetchIndexData(period = '1y', forceRefresh = false) {
+  const results = {};
+  for (const idx of indexes) {
+    try {
+      console.log(`[IndexSync] Fetching ${idx.name} (${idx.symbol})...`);
+      const data = await getHistoricalData(idx.symbol, period, forceRefresh);
+      results[idx.symbol] = { name: idx.name, dataPoints: data.length };
+      console.log(`[IndexSync] ✅ ${idx.name}: ${data.length} records`);
+    } catch (err) {
+      console.error(`[IndexSync] ❌ ${idx.name}: ${err.message}`);
+      results[idx.symbol] = { name: idx.name, dataPoints: 0, error: err.message };
+    }
+  }
+  return results;
 }
 
 /**
