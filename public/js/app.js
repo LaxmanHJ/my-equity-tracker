@@ -54,6 +54,7 @@ function initNavigation() {
       // Load section data
       if (sectionId === 'quant') loadQuantScores();
       if (sectionId === 'index-analysis') loadIndexAnalysis();
+      if (sectionId === 'news') loadNews();
     });
   });
 
@@ -82,13 +83,16 @@ async function loadNews() {
     }
 
     container.innerHTML = news.map(article => `
-      <div style="margin-bottom:20px;border-bottom:1px solid #333;padding-bottom:15px;">
-        <h3>${article.title}</h3>
-        <p style="color:#94a3b8;font-size:14px;">
-          ${new Date(article.published_at).toLocaleString()}
-        </p>
-        <p>${article.description || ""}</p>
-        <a href="${article.url}" target="_blank">Read more →</a>
+      <div class="glass" style="padding: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem; transition: transform 0.2s; cursor: pointer;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='none'" onclick="window.open('${article.url}', '_blank')">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+          <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">NEWS</span>
+          <span style="color: var(--text-muted); font-size: 0.8rem;">${new Date(article.published_at).toLocaleDateString()}</span>
+        </div>
+        <h3 style="font-size: 1.1rem; color: var(--text-primary); margin: 0; line-height: 1.4;">${article.title}</h3>
+        <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; margin: 0.5rem 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">${article.description || ""}</p>
+        <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.05); text-align: right;">
+          <a href="${article.url}" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 500; font-size: 0.85rem;">Read full article →</a>
+        </div>
       </div>
     `).join("");
 

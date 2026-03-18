@@ -26,6 +26,7 @@
       <a href="#quant" class="nav-link" data-section="quant">Quant Signals</a>
       <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
       <a href="#index-analysis" class="nav-link" data-section="index-analysis">Index Analysis</a>
+      <a href="#news" class="nav-link" data-section="news">News</a>
       <a href="backtest.html" class="nav-link">Backtesting</a>
     </div>
     <div class="nav-status">
@@ -155,6 +156,20 @@
         <div class="glass" style="padding:2rem;text-align:center;">
           <div class="loading-spinner"></div>
           <p style="color:var(--text-muted);margin-top:1rem;">Loading index analysis...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- News Section -->
+    <section id="news" class="section">
+      <div class="section-header">
+        <h2>Market News</h2>
+        <p class="section-subtitle">Latest updates related to your portfolio stocks</p>
+      </div>
+      <div id="newsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+        <div class="glass" style="padding: 2rem; text-align: center; grid-column: 1 / -1;">
+          <div class="loading-spinner"></div>
+          <p style="color: var(--text-muted); margin-top: 1rem;">Loading news...</p>
         </div>
       </div>
     </section>
