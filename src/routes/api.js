@@ -21,6 +21,8 @@ import {
   saveDailyReport,
   getDailyReport
 } from '../database/db.js';
+import { getSymbols } from "../config/portfolio.js";
+
 
 const router = express.Router();
 
@@ -454,6 +456,7 @@ router.get('/quant/scores', async (req, res) => {
 // News Endpoints
 // ============================================
 
+
 router.get('/news', async (req, res) => {
   try {
 
@@ -466,37 +469,49 @@ router.get('/news', async (req, res) => {
       });
     }
 
-    const url = `https://api.marketaux.com/v1/news/all?language=en&limit=10&api_token=${token}`;
+    const symbols = getSymbols();
 
-    const response = await fetch(url);
+    let allArticles = [];
 
-    if (!response.ok) {
-      throw new Error(`MarketAux API error: ${response.status}`);
+    for (const symbol of symbols) {
+
+      const url =
+        `https://api.marketaux.com/v1/news/all?symbols=${symbol}&language=en&limit=5&api_token=${token}`;
+
+      const response = await fetch(url);
+
+      if (!response.ok) continue;
+
+      const result = await response.json();
+
+      const articles = result.data || [];
+
+      allArticles.push(...articles);
     }
 
-    const result = await response.json();
+    // remove duplicate news
+    const uniqueArticles = [
+      ...new Map(allArticles.map(a => [a.uuid, a])).values()
+    ];
 
-    const articles = result.data || [];
-
-    // Sort latest first
-    articles.sort(
+    // sort newest first
+    uniqueArticles.sort(
       (a, b) => new Date(b.published_at) - new Date(a.published_at)
     );
 
     res.json({
       success: true,
-      count: articles.length,
-      news: articles
+      count: uniqueArticles.length,
+      news: uniqueArticles.slice(0, 50)
     });
 
   } catch (error) {
 
-    console.error("News API error:", error.message);
+    console.error("News API error:", error);
 
     res.status(500).json({
       success: false,
-      message: "Failed to fetch news",
-      error: error.message
+      message: "Failed to fetch news"
     });
 
   }
