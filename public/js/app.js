@@ -120,27 +120,38 @@ async function loadPortfolio() {
 }
 
 async function forceSyncPortfolio() {
+  const btn = document.getElementById('forceSyncBtn');
   try {
-    const btn = document.getElementById('forceSyncBtn');
-    btn.innerHTML = '<span class="loading-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #fff;border-bottom-color:transparent;border-radius:50%;margin-right:5px;"></span> Syncing...';
+    btn.innerHTML = '<span class="loading-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #fff;border-bottom-color:transparent;border-radius:50%;margin-right:5px;animation:spin 0.8s linear infinite;"></span> Syncing...';
     btn.disabled = true;
 
-    const response = await fetch(`${API_BASE}/portfolio?force=true`);
-    if (!response.ok) throw new Error('Failed to force sync portfolio');
+    // Phase 1: Write fresh OHLCV data to SQLite (single source of truth)
+    const syncRes = await fetch(`${API_BASE}/portfolio/sync`, { method: 'POST' });
+    if (!syncRes.ok) throw new Error('Failed to sync data to database');
+    const syncData = await syncRes.json();
+    console.log(`[ForceSync] DB updated: ${syncData.synced} holdings`);
 
-    portfolioData = await response.json();
+    // Phase 2: Re-fetch portfolio summary from the now-updated DB
+    const portfolioRes = await fetch(`${API_BASE}/portfolio`);
+    if (!portfolioRes.ok) throw new Error('Failed to load portfolio from DB');
+    portfolioData = await portfolioRes.json();
     renderPortfolio(portfolioData);
     renderCharts(portfolioData);
     populateStockSelectors(portfolioData.holdings);
     updateLastUpdated();
 
-    showToast('Successfully synchronized latest market data', 'success');
+    // Phase 3: Re-fetch Quant Signals from the same updated DB
+    const quantSection = document.getElementById('quant');
+    if (quantSection) {
+      await loadQuantScores();
+    }
+
+    showToast('Successfully synchronized all pages from latest market data', 'success');
 
   } catch (error) {
     console.error('Error force syncing portfolio:', error);
     showToast('Failed to synchronize market data', 'error');
   } finally {
-    const btn = document.getElementById('forceSyncBtn');
     btn.innerHTML = '<span class="btn-icon">⚡</span> Force Sync';
     btn.disabled = false;
   }
@@ -372,10 +383,11 @@ async function loadAnalysis(symbol) {
 function renderAnalysis(technical, risk) {
   const container = document.getElementById('analysisContent');
   const { signals, indicators } = technical.analysis.signals;
+  const cmp = technical.analysis.cmp;
 
   container.innerHTML = `
     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
-      <h3 style="margin-bottom: var(--space-md);">Trading Signals - ${technical.symbol}</h3>
+      <h3 style="margin-bottom: var(--space-md);">Trading Signals - ${technical.symbol} , CMP - ₹${cmp?.toLocaleString('en-IN')}</h3>
       <div class="signal-cards">
         ${signals.map(s => `
           <div class="signal-card glass">

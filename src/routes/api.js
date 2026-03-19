@@ -406,6 +406,29 @@ function isMarketOpen() {
 // ============================================
 
 /**
+ * POST /api/portfolio/sync
+ * Force-refresh ALL portfolio + index data into SQLite (single source of truth).
+ * After this completes, both the Node.js portfolio endpoints and the Python
+ * quant engine will read today's prices from the same up-to-date DB.
+ */
+router.post('/portfolio/sync', async (req, res) => {
+  try {
+    console.log('[ForceSync] Starting full portfolio + index data refresh into SQLite...');
+    const quotes = await getAllQuotes(true); // fetches from RapidAPI/AlphaVantage → writes to SQLite
+    console.log(`[ForceSync] ✅ Synced ${quotes.length} holdings to SQLite`);
+    res.json({
+      success: true,
+      synced: quotes.length,
+      message: `Refreshed ${quotes.length} holdings in database`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[ForceSync] Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync portfolio data' });
+  }
+});
+
+/**
  * POST /api/sync/benchmark
  * Manually trigger NIFTY 50 benchmark data sync
  */
