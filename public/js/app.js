@@ -364,15 +364,17 @@ async function loadAnalysis(symbol) {
   container.innerHTML = '<div class="loading-spinner"></div>';
 
   try {
-    const [technicalRes, riskRes] = await Promise.all([
+    const [technicalRes, riskRes, sicilianRes] = await Promise.all([
       fetch(`${API_BASE}/analysis/technicals/${symbol}`),
-      fetch(`${API_BASE}/analysis/risk/${symbol}`)
+      fetch(`${API_BASE}/analysis/risk/${symbol}`),
+      fetch(`${API_BASE}/sicilian/${symbol}`).catch(() => null)
     ]);
 
     const technical = await technicalRes.json();
     const risk = await riskRes.json();
+    const sicilian = sicilianRes && sicilianRes.ok ? await sicilianRes.json() : null;
 
-    renderAnalysis(technical, risk);
+    renderAnalysis(technical, risk, sicilian);
 
   } catch (error) {
     console.error('Error loading analysis:', error);
@@ -380,12 +382,27 @@ async function loadAnalysis(symbol) {
   }
 }
 
-function renderAnalysis(technical, risk) {
+function renderAnalysis(technical, risk, sicilian) {
   const container = document.getElementById('analysisContent');
   const { signals, indicators } = technical.analysis.signals;
   const cmp = technical.analysis.cmp;
 
+  // ── The Sicilian card ─────────────────────────────────
+  const sicilianHtml = sicilian && sicilian.verdict && sicilian.verdict !== 'INSUFFICIENT_DATA'
+    ? renderSicilianCard(sicilian)
+    : (sicilian?.verdict === 'INSUFFICIENT_DATA'
+      ? `<div class="glass" style="padding:var(--space-lg);margin-bottom:var(--space-lg);text-align:center;border:1px solid var(--border-color);">
+           <h3 style="margin-bottom:0.5rem;">🏴 The Sicilian</h3>
+           <p style="color:var(--text-muted);">Insufficient data for this stock</p>
+         </div>`
+      : `<div class="glass" style="padding:var(--space-lg);margin-bottom:var(--space-lg);text-align:center;border:1px solid var(--border-color);">
+           <h3 style="margin-bottom:0.5rem;">🏴 The Sicilian</h3>
+           <p style="color:var(--text-muted);">Engine offline — start with: <code>python3 -m quant_engine.main</code></p>
+         </div>`);
+
   container.innerHTML = `
+    ${sicilianHtml}
+
     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
       <h3 style="margin-bottom: var(--space-md);">Trading Signals - ${technical.symbol} , CMP - ₹${cmp?.toLocaleString('en-IN')}</h3>
       <div class="signal-cards">
@@ -457,6 +474,125 @@ function renderAnalysis(technical, risk) {
     </div>
     ` : ''}
   `;
+}
+
+/**
+ * Render The Sicilian verdict card — the crown jewel of the analysis page.
+ */
+function renderSicilianCard(s) {
+  const verdictConfig = {
+    BUY:  { emoji: '🟢', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)', label: 'BUY', targetLabel: 'Next-Day Entry Price' },
+    SELL: { emoji: '🔴', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.25)',  label: 'SELL', targetLabel: 'Next-Day Exit Price' },
+    HOLD: { emoji: '⚪', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', label: 'HOLD', targetLabel: 'Fair Value' },
+  };
+  const v = verdictConfig[s.verdict] || verdictConfig.HOLD;
+
+  // Score color gradient
+  const scoreColor = s.sicilian_score > 0 ? '#10b981' : s.sicilian_score < 0 ? '#ef4444' : '#f59e0b';
+  const scorePct = ((s.sicilian_score + 1) / 2 * 100).toFixed(0);
+
+  // Confidence color
+  const confColor = s.confidence >= 75 ? '#10b981' : s.confidence >= 50 ? '#f59e0b' : '#ef4444';
+
+  // Sub-score bars
+  const subScoreBars = Object.entries(s.sub_scores).map(([key, val]) => {
+    const pct = ((val + 1) / 2 * 100).toFixed(0);
+    const barColor = val > 0.1 ? '#10b981' : val < -0.1 ? '#ef4444' : '#6b7280';
+    const weight = s.weights?.[key] ? `${(s.weights[key] * 100).toFixed(0)}%` : '';
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:6px;">
+        <span style="width:130px;font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;">${label}</span>
+        <div style="flex:1;height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden;position:relative;">
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,0.15);"></div>
+          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.6s ease;"></div>
+        </div>
+        <span style="width:45px;font-size:0.75rem;color:${barColor};text-align:right;font-weight:600;">${val > 0 ? '+' : ''}${val.toFixed(2)}</span>
+        <span style="width:30px;font-size:0.65rem;color:var(--text-muted);text-align:right;">${weight}</span>
+      </div>`;
+  }).join('');
+
+  // Support/resistance levels
+  const sr = s.support_resistance || {};
+  const levelsHtml = (sr.sma20 || sr.bollinger_upper) ? `
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);">
+      <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.5rem;">Key Levels</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.5rem;font-size:0.8rem;">
+        ${sr.bollinger_upper ? `<div><span style="color:var(--text-muted);">BB Upper:</span> <strong>₹${sr.bollinger_upper.toLocaleString('en-IN')}</strong></div>` : ''}
+        ${sr.sma20 ? `<div><span style="color:var(--text-muted);">SMA 20:</span> <strong>₹${sr.sma20.toLocaleString('en-IN')}</strong></div>` : ''}
+        ${sr.bollinger_middle ? `<div><span style="color:var(--text-muted);">BB Mid:</span> <strong>₹${sr.bollinger_middle.toLocaleString('en-IN')}</strong></div>` : ''}
+        ${sr.sma50 ? `<div><span style="color:var(--text-muted);">SMA 50:</span> <strong>₹${sr.sma50.toLocaleString('en-IN')}</strong></div>` : ''}
+        ${sr.bollinger_lower ? `<div><span style="color:var(--text-muted);">BB Lower:</span> <strong>₹${sr.bollinger_lower.toLocaleString('en-IN')}</strong></div>` : ''}
+      </div>
+    </div>` : '';
+
+  return `
+    <div style="background:${v.bg};border:2px solid ${v.border};border-radius:16px;padding:1.5rem;margin-bottom:var(--space-lg);position:relative;overflow:hidden;">
+      <!-- Decorative accent bar -->
+      <div style="position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,${v.color},transparent);"></div>
+
+      <!-- Header Row -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.2rem;flex-wrap:wrap;gap:1rem;">
+        <div>
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;">
+            <span style="font-size:1.5rem;">🏴</span>
+            <h3 style="margin:0;font-size:1.4rem;font-weight:700;">The Sicilian</h3>
+          </div>
+          <div style="font-size:0.8rem;color:var(--text-muted);">${s.symbol} • CMP ₹${s.current_price?.toLocaleString('en-IN')} • ${s.data_points} data points</div>
+        </div>
+
+        <!-- Verdict Badge -->
+        <div style="text-align:center;">
+          <div style="display:inline-block;padding:12px 28px;border-radius:12px;background:${v.color};color:#fff;font-weight:800;font-size:1.5rem;letter-spacing:1px;box-shadow:0 4px 15px ${v.color}44;">
+            ${v.emoji} ${v.label}
+          </div>
+        </div>
+      </div>
+
+      <!-- Metrics Row -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.2rem;">
+        <!-- Score -->
+        <div style="text-align:center;padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border-color);">
+          <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.3rem;">Sicilian Score</div>
+          <div style="font-size:1.8rem;font-weight:800;color:${scoreColor};">${s.sicilian_score > 0 ? '+' : ''}${s.sicilian_score.toFixed(2)}</div>
+          <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;margin-top:0.4rem;overflow:hidden;">
+            <div style="width:${scorePct}%;height:100%;background:${scoreColor};border-radius:3px;transition:width 0.6s;"></div>
+          </div>
+        </div>
+
+        <!-- Confidence -->
+        <div style="text-align:center;padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border-color);">
+          <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.3rem;">Confidence</div>
+          <div style="font-size:1.8rem;font-weight:800;color:${confColor};">${s.confidence}%</div>
+          <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;margin-top:0.4rem;overflow:hidden;">
+            <div style="width:${s.confidence}%;height:100%;background:${confColor};border-radius:3px;transition:width 0.6s;"></div>
+          </div>
+        </div>
+
+        <!-- Target Price -->
+        <div style="text-align:center;padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border-color);">
+          <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.3rem;">${v.targetLabel}</div>
+          <div style="font-size:1.8rem;font-weight:800;color:${v.color};">₹${s.target_price?.toLocaleString('en-IN')}</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.3rem;">
+            ${s.target_type === 'entry' ? '↓ Buy at or below' : s.target_type === 'exit' ? '↑ Sell at or above' : '≈ Fair value'}
+          </div>
+        </div>
+      </div>
+
+      <!-- Reasoning -->
+      <div style="padding:0.8rem 1rem;background:var(--bg-secondary);border-radius:10px;margin-bottom:1rem;border:1px solid var(--border-color);">
+        <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.3rem;">Reasoning</div>
+        <div style="font-size:0.85rem;color:var(--text-primary);">${s.reasoning}</div>
+      </div>
+
+      <!-- Sub-Score Breakdown -->
+      <div style="padding:1rem;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border-color);">
+        <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.8rem;">Sub-Score Breakdown</div>
+        ${subScoreBars}
+      </div>
+
+      ${levelsHtml}
+    </div>`;
 }
 
 function viewAnalysis(symbol) {

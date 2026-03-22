@@ -5,7 +5,7 @@ Runs on port 5001 alongside the Node.js app on port 3000.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from quant_engine.config import HOST, PORT
-from quant_engine.routers import scores, index_analysis, backtest
+from quant_engine.routers import scores, index_analysis, backtest, sicilian
 
 app = FastAPI(
     title="Stock Quant Engine",
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(scores.router)
 app.include_router(index_analysis.router)
 app.include_router(backtest.router)
+app.include_router(sicilian.router)
 
 
 @app.get("/health")

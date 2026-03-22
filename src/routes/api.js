@@ -454,6 +454,32 @@ router.post('/sync/benchmark', async (req, res) => {
 
 const QUANT_ENGINE_URL = 'http://localhost:5001';
 
+// ============================================
+// The Sicilian — Unified Decision Engine Proxy
+// ============================================
+
+router.get('/sicilian/:symbol', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/sicilian/${req.params.symbol}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Sicilian engine error:', error);
+    res.status(502).json({ error: 'Sicilian engine unavailable. Is the Python server running on port 5001?' });
+  }
+});
+
+router.get('/sicilian', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/sicilian`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Sicilian engine error:', error);
+    res.status(502).json({ error: 'Sicilian engine unavailable.' });
+  }
+});
+
 router.get('/quant/scores', async (req, res) => {
   try {
     const response = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
