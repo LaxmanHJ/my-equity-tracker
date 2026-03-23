@@ -26,7 +26,11 @@ import {
   getActiveAlerts,
   triggerAlert,
   saveDailyReport,
-  getDailyReport
+  getDailyReport,
+  getNews,
+  getAnalystRatings,
+  getShareholding,
+  getSectorMomentum
 } from '../database/db.js';
 
 const router = express.Router();
@@ -672,6 +676,69 @@ router.get('/fundamentals', async (req, res) => {
   } catch (error) {
     console.error('Fundamentals list error:', error);
     res.status(500).json({ error: 'Failed to list fundamentals' });
+  }
+});
+
+/**
+ * GET /api/fundamentals/:symbol/news
+ * Returns recent news articles for a stock
+ */
+router.get('/fundamentals/:symbol/news', (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const news = getNews(symbol);
+    res.json(news);
+  } catch (error) {
+    console.error('Fundamentals news error:', error);
+    res.status(500).json({ error: 'Failed to get news' });
+  }
+});
+
+/**
+ * GET /api/fundamentals/:symbol/analyst
+ * Returns analyst ratings for a stock
+ */
+router.get('/fundamentals/:symbol/analyst', (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const data = getAnalystRatings(symbol);
+    res.json(data || {});
+  } catch (error) {
+    console.error('Fundamentals analyst error:', error);
+    res.status(500).json({ error: 'Failed to get analyst ratings' });
+  }
+});
+
+/**
+ * GET /api/fundamentals/:symbol/shareholding
+ * Returns shareholding pattern for a stock
+ */
+router.get('/fundamentals/:symbol/shareholding', (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const data = getShareholding(symbol);
+    res.json(data);
+  } catch (error) {
+    console.error('Fundamentals shareholding error:', error);
+    res.status(500).json({ error: 'Failed to get shareholding data' });
+  }
+});
+
+// ============================================
+// Sectors
+// ============================================
+
+/**
+ * GET /api/sectors/momentum
+ * Returns computed sector momentum scores
+ */
+router.get('/sectors/momentum', (req, res) => {
+  try {
+    const data = getSectorMomentum();
+    res.json(data);
+  } catch (error) {
+    console.error('Sector momentum error:', error);
+    res.status(500).json({ error: 'Failed to get sector momentum' });
   }
 });
 

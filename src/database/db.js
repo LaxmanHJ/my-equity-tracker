@@ -155,6 +155,49 @@ export function initDatabase() {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_news (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      headline TEXT,
+      news_date TEXT,
+      url TEXT,
+      source TEXT,
+      thumbnail_url TEXT,
+      UNIQUE(symbol, headline),
+      FOREIGN KEY (symbol) REFERENCES stock_fundamentals(symbol)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_analyst_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL UNIQUE,
+      strong_buy INTEGER DEFAULT 0,
+      buy INTEGER DEFAULT 0,
+      hold INTEGER DEFAULT 0,
+      sell INTEGER DEFAULT 0,
+      strong_sell INTEGER DEFAULT 0,
+      total_analysts INTEGER DEFAULT 0,
+      mean_rating REAL,
+      risk_category TEXT,
+      risk_std_dev REAL,
+      FOREIGN KEY (symbol) REFERENCES stock_fundamentals(symbol)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_shareholding (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      category TEXT NOT NULL,
+      holding_date TEXT NOT NULL,
+      percentage REAL,
+      UNIQUE(symbol, category, holding_date),
+      FOREIGN KEY (symbol) REFERENCES stock_fundamentals(symbol)
+    )
+  `);
+
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol);
@@ -164,6 +207,9 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_peers_symbol ON stock_peer_comparison(symbol);
     CREATE INDEX IF NOT EXISTS idx_financials_symbol ON stock_financials(symbol);
     CREATE INDEX IF NOT EXISTS idx_sync_symbol ON stock_fundamentals_sync(symbol);
+    CREATE INDEX IF NOT EXISTS idx_news_symbol ON stock_news(symbol);
+    CREATE INDEX IF NOT EXISTS idx_analyst_symbol ON stock_analyst_ratings(symbol);
+    CREATE INDEX IF NOT EXISTS idx_shareholding_symbol ON stock_shareholding(symbol);
   `);
 
   console.log('✅ Database initialized');
@@ -435,6 +481,126 @@ export function getFundamentalsSyncDate() {
     WHERE status = 'success'
   `).get();
   return row;
+}
+
+/**
+ * Save news articles (replaces existing if headline matches)
+ */
+export function saveNews(symbol, newsItems) {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO stock_news (
+      symbol, headline, news_date, url, source, thumbnail_url
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((items) => {
+    for (const item of items) {
+      insert.run(
+        symbol, item.headline, item.news_date, item.url,
+        item.source, item.thumbnail_url
+      );
+    }
+  });
+
+  insertMany(newsItems);
+}
+
+/**
+ * Get news articles for a stock
+ */
+export function getNews(symbol, limit = 10) {
+  return db.prepare(`
+    SELECT * FROM stock_news
+    WHERE symbol = ?
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(symbol, limit);
+}
+
+/**
+ * Save analyst ratings
+ */
+export function saveAnalystRatings(symbol, data) {
+  db.prepare(`
+    INSERT OR REPLACE INTO stock_analyst_ratings (
+      symbol, strong_buy, buy, hold, sell, strong_sell,
+      total_analysts, mean_rating, risk_category, risk_std_dev
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    symbol, data.strong_buy, data.buy, data.hold, data.sell, data.strong_sell,
+    data.total_analysts, data.mean_rating, data.risk_category, data.risk_std_dev
+  );
+}
+
+/**
+ * Get analyst ratings for a stock
+ */
+export function getAnalystRatings(symbol) {
+  return db.prepare(`
+    SELECT * FROM stock_analyst_ratings
+    WHERE symbol = ?
+  `).get(symbol);
+}
+
+/**
+ * Save shareholding data
+ */
+export function saveShareholding(symbol, data) {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO stock_shareholding (
+      symbol, category, holding_date, percentage
+    ) VALUES (?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((items) => {
+    for (const item of items) {
+      insert.run(symbol, item.category, item.holding_date, item.percentage);
+    }
+  });
+
+  insertMany(data);
+}
+
+/**
+ * Get shareholding data for a stock
+ */
+export function getShareholding(symbol) {
+  return db.prepare(`
+    SELECT * FROM stock_shareholding
+    WHERE symbol = ?
+    ORDER BY holding_date ASC
+  `).all(symbol);
+}
+
+/**
+ * Get sector momentum scores
+ */
+export function getSectorMomentum() {
+  // We compute sector momentum by averaging the percent change of all stocks in a sector.
+  // We join stock_fundamentals with the latest price_history record.
+  return db.prepare(`
+    WITH RankedPrices AS (
+      SELECT symbol, close,
+             ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY date DESC) as rn
+      FROM price_history
+    ),
+    PrevPrices AS (
+      SELECT curr.symbol, 
+             ((curr.close - prev.close) / prev.close * 100.0) as pct_change
+      FROM RankedPrices curr
+      JOIN RankedPrices prev ON curr.symbol = prev.symbol AND prev.rn = 2
+      WHERE curr.rn = 1 AND prev.close > 0
+    )
+    SELECT
+      f.industry,
+      COUNT(f.symbol) as stock_count,
+      AVG(p.pct_change) as momentum_score
+    FROM stock_fundamentals f
+    JOIN PrevPrices p ON f.symbol = p.symbol
+    WHERE f.industry IS NOT NULL AND f.industry != ''
+    GROUP BY f.industry
+    ORDER BY momentum_score DESC
+  `).all();
 }
 
 // Initialize on import

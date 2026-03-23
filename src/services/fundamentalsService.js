@@ -9,12 +9,17 @@ import {
   saveFundamentalsSync,
   savePeers,
   saveFinancials,
+  saveNews,
+  saveAnalystRatings,
+  saveShareholding,
   getFundamentals,
   getAllFundamentals,
-  getFundamentalsSyncDate
+  getFundamentalsSyncDate,
+  getSectorMomentum
 } from '../database/db.js';
 import { portfolio } from '../config/portfolio.js';
 import dotenv from 'dotenv';
+import { readFileSync } from 'fs';
 
 dotenv.config();
 
@@ -220,26 +225,107 @@ export function extractFundamentals(apiData, symbol) {
 }
 
 // ═══════════════════════════════════════════════════════
+// Extractors for New Data Points
+// ═══════════════════════════════════════════════════════
+
+export function extractNews(apiData) {
+  return (apiData.recentNews || []).map(n => ({
+    headline: n.headline,
+    news_date: n.date,
+    url: n.url,
+    source: n.source || null,
+    thumbnail_url: n.thumbnailImage || n.listimage || null
+  }));
+}
+
+export function extractAnalystRatings(apiData) {
+  const av = apiData.analystView || [];
+  const rb = apiData.recosBar || {};
+  const rm = apiData.riskMeter || {};
+
+  // Find counts from analystView (1=Strong Buy, 2=Buy, 3=Hold, 4=Sell, 5=Strong Sell)
+  const strongBuy = safeNum(av.find(a => a.ratingValue === 1)?.numberOfAnalystsLatest) || 0;
+  const buy = safeNum(av.find(a => a.ratingValue === 2)?.numberOfAnalystsLatest) || 0;
+  const hold = safeNum(av.find(a => a.ratingValue === 3)?.numberOfAnalystsLatest) || 0;
+  const sell = safeNum(av.find(a => a.ratingValue === 4)?.numberOfAnalystsLatest) || 0;
+  const strongSell = safeNum(av.find(a => a.ratingValue === 5)?.numberOfAnalystsLatest) || 0;
+
+  // Use the total from the API or compute it
+  const total = safeNum(av.find(a => a.ratingValue === 6)?.numberOfAnalystsLatest) || 
+               (strongBuy + buy + hold + sell + strongSell);
+
+  return {
+    strong_buy: strongBuy,
+    buy: buy,
+    hold: hold,
+    sell: sell,
+    strong_sell: strongSell,
+    total_analysts: total,
+    mean_rating: safeNum(rb.meanValue),
+    risk_category: rm.categoryName || null,
+    risk_std_dev: safeNum(rm.stdDev)
+  };
+}
+
+export function extractShareholding(apiData) {
+  const result = [];
+  const sh = apiData.shareholding || [];
+  
+  for (const category of sh) {
+    const catName = category.displayName || category.categoryName || 'Unknown';
+    if (category.categories && Array.isArray(category.categories)) {
+      for (const quarter of category.categories) {
+        result.push({
+          category: catName,
+          holding_date: quarter.holdingDate,
+          percentage: safeNum(quarter.percentage)
+        });
+      }
+    }
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════
 // Sync: Fetch + extract + save for one stock
 // ═══════════════════════════════════════════════════════
 export async function syncStockFundamentals(symbol) {
   try {
     // Use ticker symbol directly — more reliable than company display name
     console.log(`[Fundamentals] Fetching ${symbol}...`);
-    const apiData = await fetchStockFromAPI(symbol);
+    let apiData;
+    
+    // For local testing with Mock JSON
+    if (process.env.USE_MOCK_FUNDAMENTALS === 'true') {
+      console.log(`[Fundamentals] Using Mock JSON for ${symbol}`);
+      apiData = JSON.parse(readFileSync('FundamentalsMock.json', 'utf8'));
+    } else {
+      apiData = await fetchStockFromAPI(symbol);
+    }
 
     if (!apiData.companyName) {
       throw new Error(`Stock not found in API with ticker "${symbol}"`);
     }
 
     const { fundamentals, peers, financials } = extractFundamentals(apiData, symbol);
+    
+    // New extractors
+    const news = extractNews(apiData);
+    const analystRatings = extractAnalystRatings(apiData);
+    const shareholding = extractShareholding(apiData);
 
     saveFundamentals(symbol, fundamentals);
     savePeers(symbol, peers);
     saveFinancials(symbol, financials);
+    
+    // Save new data
+    if (news.length > 0) saveNews(symbol, news);
+    saveAnalystRatings(symbol, analystRatings);
+    if (shareholding.length > 0) saveShareholding(symbol, shareholding);
+
     saveFundamentalsSync(symbol, 'success', null);
 
-    console.log(`[Fundamentals] ✅ ${symbol}: PE=${fundamentals.pe_ratio}, PB=${fundamentals.pb_ratio}, EPS=${fundamentals.eps_diluted}, MktCap=${fundamentals.market_cap}, peers=${peers.length}`);
+    console.log(`[Fundamentals] ✅ ${symbol}: PE=${fundamentals.pe_ratio}, MktCap=${fundamentals.market_cap}, News=${news.length}, Analysts=${analystRatings.total_analysts}`);
     return { symbol, status: 'success', data: fundamentals };
   } catch (error) {
     console.error(`[Fundamentals] ❌ ${symbol}: ${error.message}`);
@@ -288,4 +374,4 @@ export async function syncAllFundamentals(progressCallback) {
 }
 
 // Re-export DB read functions for convenience
-export { getFundamentals, getAllFundamentals, getFundamentalsSyncDate };
+export { getFundamentals, getAllFundamentals, getFundamentalsSyncDate, getSectorMomentum };

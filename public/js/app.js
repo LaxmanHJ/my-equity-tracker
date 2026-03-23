@@ -190,7 +190,7 @@ async function fetchFundamentals() {
 function renderFundamentalsCard(f) {
   const fmt = (v, decimals = 2) => v != null ? Number(v).toFixed(decimals) : 'N/A';
   const fmtPct = (v) => v != null ? `${Number(v).toFixed(2)}%` : 'N/A';
-  const fmtCr = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN', {maximumFractionDigits:0})} Cr` : 'N/A';
+  const fmtCr = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr` : 'N/A';
   const valColor = (v, goodAbove, badBelow) => {
     if (v == null) return 'var(--text-muted)';
     if (goodAbove !== undefined && v >= goodAbove) return 'var(--success)';
@@ -240,7 +240,7 @@ function renderFundamentalsCard(f) {
           <div><div style="color: var(--text-muted); font-size: 0.75rem;">EPS (Diluted)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.eps_diluted, 0, 0)}">${fmt(f.eps_diluted)}</div></div>
           <div><div style="color: var(--text-muted); font-size: 0.75rem;">Dividend Yield</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtPct(f.dividend_yield)}</div></div>
           <div><div style="color: var(--text-muted); font-size: 0.75rem;">Mkt Cap</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtCr(f.market_cap)}</div></div>
-          <div><div style="color: var(--text-muted); font-size: 0.75rem;">52W Range</div><div style="font-size: 1.15rem; font-weight: 600;">₹${fmt(f.year_low,0)} — ₹${fmt(f.year_high,0)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">52W Range</div><div style="font-size: 1.15rem; font-weight: 600;">₹${fmt(f.year_low, 0)} — ₹${fmt(f.year_high, 0)}</div></div>
         </div>
       </div>
 
@@ -524,19 +524,27 @@ async function loadAnalysis(symbol) {
   container.innerHTML = '<div class="loading-spinner"></div>';
 
   try {
-    const [technicalRes, riskRes, sicilianRes, fundRes] = await Promise.all([
+    const [technicalRes, riskRes, sicilianRes, fundRes, analystRes, shareholdingRes, newsRes, momentumRes] = await Promise.all([
       fetch(`${API_BASE}/analysis/technicals/${symbol}`),
       fetch(`${API_BASE}/analysis/risk/${symbol}`),
       fetch(`${API_BASE}/sicilian/${symbol}`).catch(() => null),
-      fetch(`${API_BASE}/fundamentals/${symbol}`).catch(() => null)
+      fetch(`${API_BASE}/fundamentals/${symbol}`).catch(() => null),
+      fetch(`${API_BASE}/fundamentals/${symbol}/analyst`).catch(() => null),
+      fetch(`${API_BASE}/fundamentals/${symbol}/shareholding`).catch(() => null),
+      fetch(`${API_BASE}/fundamentals/${symbol}/news`).catch(() => null),
+      fetch(`${API_BASE}/sectors/momentum`).catch(() => null)
     ]);
 
     const technical = await technicalRes.json();
     const risk = await riskRes.json();
     const sicilian = sicilianRes && sicilianRes.ok ? await sicilianRes.json() : null;
     const fundamentals = fundRes && fundRes.ok ? await fundRes.json() : null;
+    const analystRatings = analystRes && analystRes.ok ? await analystRes.json() : null;
+    const shareholding = shareholdingRes && shareholdingRes.ok ? await shareholdingRes.json() : null;
+    const news = newsRes && newsRes.ok ? await newsRes.json() : null;
+    const momentum = momentumRes && momentumRes.ok ? await momentumRes.json() : null;
 
-    renderAnalysis(technical, risk, sicilian, fundamentals);
+    renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentum);
 
   } catch (error) {
     console.error('Error loading analysis:', error);
@@ -544,7 +552,7 @@ async function loadAnalysis(symbol) {
   }
 }
 
-function renderAnalysis(technical, risk, sicilian, fundamentals) {
+function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentumData) {
   const container = document.getElementById('analysisContent');
   const { signals, indicators } = technical.analysis.signals;
   const cmp = technical.analysis.cmp;
@@ -565,6 +573,26 @@ function renderAnalysis(technical, risk, sicilian, fundamentals) {
   // ── Fundamentals card ─────────────────────────────────
   const fundamentalsHtml = fundamentals ? renderFundamentalsCard(fundamentals) : '';
 
+  // Sector Momentum Badge
+  let sectorBadgeHtml = '';
+  if (momentumData && fundamentals && fundamentals.industry) {
+    const sectorInfo = momentumData.find(m => m.industry === fundamentals.industry);
+    if (sectorInfo) {
+      const score = sectorInfo.momentum_score;
+      const isBullish = score > 1;
+      const isBearish = score < -1;
+      const bColor = isBullish ? '#10b981' : isBearish ? '#ef4444' : '#f59e0b';
+      const bText = isBullish ? 'Bullish' : isBearish ? 'Bearish' : 'Neutral';
+
+      sectorBadgeHtml = `
+        <div style="margin-top: 1rem; padding: 0.8rem; background: var(--bg-tertiary); border-radius: 8px; display: inline-flex; align-items: center; gap: 0.8rem; border: 1px solid ${bColor}44;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Sector Momentum (${fundamentals.industry})</div>
+          <div style="font-size: 0.9rem; font-weight: 700; color: ${bColor};">${score > 0 ? '+' : ''}${score.toFixed(2)}% (${bText})</div>
+        </div>
+      `;
+    }
+  }
+
   container.innerHTML = `
     ${sicilianHtml}
 
@@ -582,6 +610,7 @@ function renderAnalysis(technical, risk, sicilian, fundamentals) {
           </div>
         `).join('')}
       </div>
+      ${sectorBadgeHtml}
     </div>
     
     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
@@ -608,7 +637,11 @@ function renderAnalysis(technical, risk, sicilian, fundamentals) {
       </div>
     </div>
 
+    ${analystRatings ? renderAnalystConsensus(analystRatings) : ''}
+    ${shareholding && shareholding.length > 0 ? renderShareholdingPattern(shareholding) : ''}
     ${fundamentalsHtml}
+    
+    ${news && news.length > 0 ? renderRecentNews(news) : ''}
     
     ${risk.risk ? `
     <div class="glass" style="padding: var(--space-lg);">
@@ -648,8 +681,8 @@ function renderAnalysis(technical, risk, sicilian, fundamentals) {
  */
 function renderSicilianCard(s) {
   const verdictConfig = {
-    BUY:  { emoji: '🟢', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)', label: 'BUY', targetLabel: 'Next-Day Entry Price' },
-    SELL: { emoji: '🔴', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',  border: 'rgba(239,68,68,0.25)',  label: 'SELL', targetLabel: 'Next-Day Exit Price' },
+    BUY: { emoji: '🟢', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)', label: 'BUY', targetLabel: 'Next-Day Entry Price' },
+    SELL: { emoji: '🔴', color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)', label: 'SELL', targetLabel: 'Next-Day Exit Price' },
     HOLD: { emoji: '⚪', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)', label: 'HOLD', targetLabel: 'Fair Value' },
   };
   const v = verdictConfig[s.verdict] || verdictConfig.HOLD;
@@ -761,6 +794,115 @@ function renderSicilianCard(s) {
       ${levelsHtml}
     </div>`;
 }
+
+// =============================================
+// New Component Renderers
+// =============================================
+
+function renderAnalystConsensus(data) {
+  if (!data || !data.total_analysts) return '';
+
+  const total = data.total_analysts;
+  const metrics = [
+    { label: 'Strong Buy', value: data.strong_buy, color: '#02552E' },
+    { label: 'Buy', value: data.buy, color: '#06AA5A' },
+    { label: 'Hold', value: data.hold, color: '#898989' },
+    { label: 'Sell', value: data.sell, color: '#FF0000' },
+    { label: 'Strong Sell', value: data.strong_sell, color: '#B40000' }
+  ];
+
+  const segments = metrics.map(m => {
+    if (m.value === 0) return '';
+    const pct = (m.value / total * 100).toFixed(1);
+    return `<div style="width: ${pct}%; background: ${m.color}; height: 100%;" title="${m.label}: ${m.value} (${pct}%)"></div>`;
+  }).join('');
+
+  const legend = metrics.map(m => `
+    <div style="text-align: center; flex: 1;">
+      <div style="font-size: 1.2rem; font-weight: 700; color: ${m.color};">${m.value}</div>
+      <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">${m.label}</div>
+    </div>
+  `).join('');
+
+  return `
+    <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: var(--space-md);">
+        <h3 style="margin: 0;">Analyst Consensus</h3>
+        ${data.mean_rating ? `<div style="font-size: 0.85rem; color: var(--text-muted);">Mean Rating: <strong>${data.mean_rating.toFixed(2)}</strong> (1=Strong Buy, 5=Strong Sell)</div>` : ''}
+      </div>
+      
+      <div style="display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 1rem; background: var(--bg-tertiary);">
+        ${segments}
+      </div>
+      
+      <div style="display: flex; justify-content: space-between; gap: 0.5rem;">
+        ${legend}
+      </div>
+      
+      ${data.risk_category ? `
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Risk Meter Category</span>
+          <span style="font-size: 0.85rem; font-weight: 600; padding: 4px 10px; background: var(--bg-tertiary); border-radius: 12px;">${data.risk_category}</span>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderShareholdingPattern(data) {
+  if (!data || data.length === 0) return '';
+
+  // Group by holding_date to find the latest quarter
+  const dates = [...new Set(data.map(d => d.holding_date))].sort().reverse();
+  const latestDate = dates[0];
+
+  if (!latestDate) return '';
+  const latestData = data.filter(d => d.holding_date === latestDate);
+
+  return `
+    <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: var(--space-md);">
+        <h3 style="margin: 0;">Shareholding Pattern</h3>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">As of ${latestDate}</div>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md);">
+        ${latestData.map(d => `
+          <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+            <div style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.3rem;">${d.category}</div>
+            <div style="font-size: 1.5rem; font-weight: 700;">${d.percentage}%</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+// function renderRecentNews(news) {
+//   if (!news || news.length === 0) return '';
+
+//   return `
+//     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
+//       <h3 style="margin-bottom: var(--space-md);">Recent News</h3>
+//       <div style="display: flex; flex-direction: column; gap: 1rem;">
+//         ${news.map(article => {
+//           const dateStr = new Date(article.news_date).toLocaleDateString();
+//           return `
+//           <a href="${article.url}" target="_blank" style="display: flex; gap: 1rem; text-decoration: none; color: inherit; padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); transition: border-color 0.2s;">
+//             ${article.thumbnail_url ? `<img src="${article.thumbnail_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;" alt="News thumbnail">` : ''}
+//             <div style="display: flex; flex-direction: column; justify-content: space-between;">
+//               <div style="font-weight: 600; font-size: 0.95rem; line-height: 1.4; margin-bottom: 0.5rem; color: var(--text-primary);">${article.headline}</div>
+//               <div style="display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-muted);">
+//                 ${article.source && article.source !== 'undefined' ? `<span>${article.source}</span>` : ''}
+//                 <span>${dateStr !== 'Invalid Date' ? dateStr : article.news_date}</span>
+//               </div>
+//             </div>
+//           </a>
+//         `}).join('')}
+//       </div>
+//     </div>
+//   `;
+// }
 
 function viewAnalysis(symbol) {
   // Switch to analysis tab
