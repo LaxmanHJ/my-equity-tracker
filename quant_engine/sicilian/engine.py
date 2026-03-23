@@ -1,8 +1,8 @@
 """
 The Sicilian — Unified Buy/Sell Decision Engine.
 
-Aggregates 8 sub-scores from across the system into a single
-BUY / SELL / HOLD verdict with next-day target prices and confidence level.
+Aggregates 11 sub-scores (8 technical + 3 fundamental) from across the system
+into a single BUY / SELL / HOLD verdict with next-day target prices and confidence.
 """
 import numpy as np
 import pandas as pd
@@ -10,18 +10,24 @@ from typing import Optional
 
 from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD
 from quant_engine.data.loader import load_price_history, load_benchmark
+from quant_engine.data.fundamentals_loader import load_fundamentals
 from quant_engine.scoring.composite import score_single_stock
 
-# ── Sicilian weights for sub-scores ──────────────────────────────
+# ── Sicilian weights for sub-scores (11 total, sum = 1.0) ──────
 SICILIAN_WEIGHTS = {
-    "composite_factor": 0.30,
-    "rsi":              0.12,
-    "macd":             0.12,
-    "trend_ma":         0.12,
-    "bollinger":        0.10,
-    "volume":           0.08,
-    "volatility":       0.08,
-    "relative_strength": 0.08,
+    # Technical (80%)
+    "composite_factor":  0.22,
+    "rsi":               0.10,
+    "macd":              0.10,
+    "trend_ma":          0.10,
+    "bollinger":         0.08,
+    "volume":            0.07,
+    "volatility":        0.06,
+    "relative_strength": 0.07,
+    # Fundamental (20%)
+    "valuation":         0.08,
+    "financial_health":  0.06,
+    "growth":            0.06,
 }
 
 # Verdict thresholds on –1 to +1 scale
@@ -183,6 +189,100 @@ def _score_relative_strength(df: pd.DataFrame, benchmark_df: pd.DataFrame, perio
     return float(np.clip(excess / 0.20, -1.0, 1.0))
 
 
+# ── Fundamental sub-score calculators ────────────────────────────
+
+def _score_valuation(fund: dict) -> float:
+    """
+    Valuation score based on P/E, P/B, and price-to-sales.
+    Lower valuations → more positive (buy signal).
+    """
+    if not fund:
+        return 0.0
+    scores = []
+    pe = fund.get("pe_ratio")
+    if pe is not None and pe > 0:
+        # PE < 12 = very undervalued (+1), PE 20 = fair (0), PE > 35 = very overvalued (-1)
+        val = np.clip((20 - pe) / 15.0, -1.0, 1.0)
+        scores.append(val)
+    pb = fund.get("pb_ratio")
+    if pb is not None and pb > 0:
+        # PB < 1 = undervalued (+0.8), PB = 3 = fair (0), PB > 5 = overvalued (-0.8)
+        val = np.clip((3 - pb) / 3.0, -1.0, 1.0)
+        scores.append(val)
+    ps = fund.get("price_to_sales")
+    if ps is not None and ps > 0:
+        # P/S < 1 = great (+0.6), P/S = 3 = fair (0), P/S > 8 = expensive (-0.6)
+        val = np.clip((3 - ps) / 5.0, -1.0, 1.0)
+        scores.append(val)
+    return float(np.mean(scores)) if scores else 0.0
+
+
+def _score_financial_health(fund: dict) -> float:
+    """
+    Financial health score based on current ratio, debt/equity,
+    interest coverage, and free cash flow.
+    """
+    if not fund:
+        return 0.0
+    scores = []
+    cr = fund.get("current_ratio")
+    if cr is not None:
+        # CR > 2 = strong (+0.8), CR = 1.5 = fair (0), CR < 1 = weak (-0.8)
+        val = np.clip((cr - 1.5) / 1.0, -1.0, 1.0)
+        scores.append(val)
+    de = fund.get("debt_to_equity")
+    if de is not None:
+        # D/E < 0.5 = great (+0.8), D/E = 1 = ok (0), D/E > 2 = risky (-0.8)
+        val = np.clip((1.0 - de) / 1.0, -1.0, 1.0)
+        scores.append(val)
+    ic = fund.get("interest_coverage")
+    if ic is not None and ic > 0:
+        # IC > 5 = great (+0.8), IC = 3 = ok (0.2), IC < 1.5 = danger (-0.8)
+        val = np.clip((ic - 3.0) / 4.0, -1.0, 1.0)
+        scores.append(val)
+    fcf = fund.get("free_cash_flow")
+    if fcf is not None:
+        # Positive FCF = good, negative = bad
+        val = 0.5 if fcf > 0 else -0.5
+        scores.append(val)
+    return float(np.mean(scores)) if scores else 0.0
+
+
+def _score_growth(fund: dict) -> float:
+    """
+    Growth score based on revenue and EPS growth rates (5Y and 3Y),
+    and net profit margin trend.
+    """
+    if not fund:
+        return 0.0
+    scores = []
+    rg5 = fund.get("revenue_growth_5y")
+    if rg5 is not None:
+        # 15%+ growth = excellent (+0.8), 5% = decent (0.2), negative = bad (-0.6)
+        val = np.clip(rg5 / 15.0, -1.0, 1.0)
+        scores.append(val)
+    eg5 = fund.get("eps_growth_5y")
+    if eg5 is not None:
+        val = np.clip(eg5 / 15.0, -1.0, 1.0)
+        scores.append(val)
+    rg3 = fund.get("revenue_growth_3y")
+    if rg3 is not None:
+        val = np.clip(rg3 / 15.0, -1.0, 1.0)
+        scores.append(val)
+    eg3 = fund.get("eps_growth_3y")
+    if eg3 is not None:
+        val = np.clip(eg3 / 15.0, -1.0, 1.0)
+        scores.append(val)
+    # Margin trend: compare TTM vs 5Y average
+    npm_ttm = fund.get("net_profit_margin_ttm")
+    npm_5y = fund.get("net_profit_margin_5y_avg")
+    if npm_ttm is not None and npm_5y is not None and npm_5y != 0:
+        margin_trend = (npm_ttm - npm_5y) / abs(npm_5y)
+        val = np.clip(margin_trend / 0.3, -1.0, 1.0)
+        scores.append(val)
+    return float(np.mean(scores)) if scores else 0.0
+
+
 # ── Target price calculators ────────────────────────────────────
 
 def _compute_buy_target(current_price: float, sma20: float, bb_lower: float, z_score_20: float) -> float:
@@ -257,8 +357,12 @@ def run_sicilian(symbol: str) -> dict:
     sma50 = _compute_sma(close, 50)
     bb = _compute_bollinger(close)
 
-    # ── Calculate all 8 sub-scores ───────────────────────────────
+    # ── Load fundamentals (from cached SQLite data) ──────────────
+    fund = load_fundamentals(symbol)
+
+    # ── Calculate all 11 sub-scores ──────────────────────────────
     sub_scores = {
+        # Technical (8)
         "composite_factor": round(_score_composite(composite_score), 4),
         "rsi":              round(_score_rsi(rsi_val), 4),
         "macd":             round(_score_macd(macd_info, current_price), 4),
@@ -267,6 +371,10 @@ def run_sicilian(symbol: str) -> dict:
         "volume":           round(_score_volume(df), 4),
         "volatility":       round(_score_volatility(df), 4),
         "relative_strength": round(_score_relative_strength(df, benchmark_df), 4),
+        # Fundamental (3)
+        "valuation":        round(_score_valuation(fund), 4),
+        "financial_health": round(_score_financial_health(fund), 4),
+        "growth":           round(_score_growth(fund), 4),
     }
 
     # ── Weighted aggregation ─────────────────────────────────────

@@ -16,6 +16,12 @@ import {
 } from '../analysis/correlation.js';
 import { getFullRiskAnalysis } from '../analysis/risk.js';
 import {
+  syncAllFundamentals,
+  getFundamentals,
+  getAllFundamentals,
+  getFundamentalsSyncDate
+} from '../services/fundamentalsService.js';
+import {
   createAlert,
   getActiveAlerts,
   triggerAlert,
@@ -615,6 +621,59 @@ router.post('/sync/indexes', async (req, res) => {
   }
 });
 
+
+// ============================================
+// Fundamentals — RapidAPI Stock Fundamentals
+// ============================================
+
+/**
+ * POST /api/fundamentals/sync
+ * Triggers a full sync of fundamental data for all portfolio stocks.
+ * This calls the RapidAPI, so it's expensive — only on explicit button press.
+ */
+router.post('/fundamentals/sync', async (req, res) => {
+  try {
+    console.log('[Fundamentals] Sync triggered via API...');
+    const result = await syncAllFundamentals();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Fundamentals sync error:', error);
+    res.status(500).json({ error: 'Failed to sync fundamentals', message: error.message });
+  }
+});
+
+/**
+ * GET /api/fundamentals/:symbol
+ * Returns cached fundamental data for a single stock.
+ */
+router.get('/fundamentals/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const data = getFundamentals(symbol);
+    if (!data) {
+      return res.status(404).json({ error: `No fundamental data for ${symbol}. Run sync first.` });
+    }
+    res.json(data);
+  } catch (error) {
+    console.error('Fundamentals get error:', error);
+    res.status(500).json({ error: 'Failed to get fundamentals' });
+  }
+});
+
+/**
+ * GET /api/fundamentals
+ * Returns cached fundamental data for all stocks + sync metadata.
+ */
+router.get('/fundamentals', async (req, res) => {
+  try {
+    const data = getAllFundamentals();
+    const syncInfo = getFundamentalsSyncDate();
+    res.json({ stocks: data, syncInfo });
+  } catch (error) {
+    console.error('Fundamentals list error:', error);
+    res.status(500).json({ error: 'Failed to list fundamentals' });
+  }
+});
 
 // console.log("NEWS TOKEN:", process.env.NEWS_API_TOKEN);
 export default router;

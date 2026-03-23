@@ -57,8 +57,8 @@ function initNavigation() {
     });
   });
 
-  // Refresh button
-  document.getElementById('refreshBtn').addEventListener('click', loadPortfolio);
+  // Fetch Fundamentals button
+  document.getElementById('fetchFundamentalsBtn').addEventListener('click', fetchFundamentals);
   document.getElementById('forceSyncBtn').addEventListener('click', forceSyncPortfolio);
 }
 
@@ -155,6 +155,166 @@ async function forceSyncPortfolio() {
     btn.innerHTML = '<span class="btn-icon">⚡</span> Force Sync';
     btn.disabled = false;
   }
+}
+
+// =============================================
+// Fetch Fundamentals (RapidAPI)
+// =============================================
+async function fetchFundamentals() {
+  const btn = document.getElementById('fetchFundamentalsBtn');
+  try {
+    btn.innerHTML = '<span class="loading-spinner" style="display:inline-block;width:12px;height:12px;border:2px solid #fff;border-bottom-color:transparent;border-radius:50%;margin-right:5px;animation:spin 0.8s linear infinite;"></span> Fetching...';
+    btn.disabled = true;
+
+    showToast('📊 Fetching fundamentals from RapidAPI... This may take 15-20 seconds', 'info');
+
+    const res = await fetch(`${API_BASE}/fundamentals/sync`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to sync fundamentals');
+    const data = await res.json();
+
+    const { summary } = data;
+    showToast(`📊 Fundamentals synced: ${summary.success}/${summary.total} stocks fetched successfully`, 'success');
+
+  } catch (error) {
+    console.error('Error fetching fundamentals:', error);
+    showToast('Failed to fetch fundamentals data', 'error');
+  } finally {
+    btn.innerHTML = '<span class="btn-icon">📊</span> Fetch Fundamentals';
+    btn.disabled = false;
+  }
+}
+
+// =============================================
+// Render Fundamentals Card (Analysis Tab)
+// =============================================
+function renderFundamentalsCard(f) {
+  const fmt = (v, decimals = 2) => v != null ? Number(v).toFixed(decimals) : 'N/A';
+  const fmtPct = (v) => v != null ? `${Number(v).toFixed(2)}%` : 'N/A';
+  const fmtCr = (v) => v != null ? `₹${Number(v).toLocaleString('en-IN', {maximumFractionDigits:0})} Cr` : 'N/A';
+  const valColor = (v, goodAbove, badBelow) => {
+    if (v == null) return 'var(--text-muted)';
+    if (goodAbove !== undefined && v >= goodAbove) return 'var(--success)';
+    if (badBelow !== undefined && v <= badBelow) return 'var(--danger)';
+    return 'var(--text-primary)';
+  };
+
+  const staleness = f.fetched_at
+    ? `<span style="font-size:0.75rem;color:var(--text-muted);margin-left:0.5rem;">Last updated: ${new Date(f.fetched_at + 'Z').toLocaleDateString('en-IN')}</span>`
+    : '';
+
+  const peerRows = (f.peers || []).slice(0, 5).map(p => `
+    <tr>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color)">${p.peer_name}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmt(p.peer_pe)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmt(p.peer_pb)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtPct(p.peer_npm_ttm)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtCr(p.peer_market_cap)}</td>
+    </tr>
+  `).join('');
+
+  const annualFin = (f.financials || []).filter(x => x.statement_type === 'Annual').slice(0, 4);
+  const finRows = annualFin.map(yr => `
+    <tr>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color)">${yr.fiscal_year}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtCr(yr.revenue)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtCr(yr.net_income)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmt(yr.eps_diluted)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtCr(yr.total_debt)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid var(--border-color);text-align:right">${fmtCr(yr.free_cash_flow)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg); border: 1px solid rgba(139,92,246,0.2);">
+      <h3 style="margin-bottom: var(--space-md); display: flex; align-items: center; gap: 0.5rem;">
+        📊 Fundamentals — ${f.company_name || 'Unknown'} <span style="font-size:0.85rem;color:var(--text-muted);font-weight:400;">(${f.industry || '—'})</span>
+        ${staleness}
+      </h3>
+
+      <!-- Valuation -->
+      <div style="margin-bottom: var(--space-lg);">
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Valuation</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-md);">
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">P/E Ratio</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.pe_ratio, undefined, 0)}">${fmt(f.pe_ratio)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">P/B Ratio</div><div style="font-size: 1.15rem; font-weight: 600;">${fmt(f.pb_ratio)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">EPS (Diluted)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.eps_diluted, 0, 0)}">${fmt(f.eps_diluted)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Dividend Yield</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtPct(f.dividend_yield)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Mkt Cap</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtCr(f.market_cap)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">52W Range</div><div style="font-size: 1.15rem; font-weight: 600;">₹${fmt(f.year_low,0)} — ₹${fmt(f.year_high,0)}</div></div>
+        </div>
+      </div>
+
+      <!-- Profitability -->
+      <div style="margin-bottom: var(--space-lg);">
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Profitability</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md);">
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Net Profit Margin (TTM)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.net_profit_margin_ttm, 5, 0)}">${fmtPct(f.net_profit_margin_ttm)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">NPM (5Y Avg)</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtPct(f.net_profit_margin_5y_avg)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Gross Margin (TTM)</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtPct(f.gross_margin_ttm)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">ROE (5Y Avg)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.roe_5y_avg, 15, 5)}">${fmtPct(f.roe_5y_avg)}</div></div>
+        </div>
+      </div>
+
+      <!-- Growth -->
+      <div style="margin-bottom: var(--space-lg);">
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Growth</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md);">
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Revenue Growth (5Y)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.revenue_growth_5y, 10, 0)}">${fmtPct(f.revenue_growth_5y)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">EPS Growth (5Y)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.eps_growth_5y, 10, 0)}">${fmtPct(f.eps_growth_5y)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Revenue Growth (3Y)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.revenue_growth_3y, 10, 0)}">${fmtPct(f.revenue_growth_3y)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">EPS Growth (3Y)</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.eps_growth_3y, 10, 0)}">${fmtPct(f.eps_growth_3y)}</div></div>
+        </div>
+      </div>
+
+      <!-- Financial Strength -->
+      <div style="margin-bottom: var(--space-lg);">
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Financial Strength</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md);">
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Debt/Equity</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.debt_to_equity, undefined, 1)}">${fmt(f.debt_to_equity)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Current Ratio</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.current_ratio, 1.5, 1)}">${fmt(f.current_ratio)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Interest Coverage</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.interest_coverage, 3, 1.5)}">${fmt(f.interest_coverage)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Free Cash Flow</div><div style="font-size: 1.15rem; font-weight: 600; color: ${valColor(f.free_cash_flow, 0, 0)}">${fmtCr(f.free_cash_flow)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Beta</div><div style="font-size: 1.15rem; font-weight: 600;">${fmt(f.beta)}</div></div>
+          <div><div style="color: var(--text-muted); font-size: 0.75rem;">Payout Ratio</div><div style="font-size: 1.15rem; font-weight: 600;">${fmtPct(f.payout_ratio)}</div></div>
+        </div>
+      </div>
+
+      ${peerRows ? `
+      <div style="margin-bottom: var(--space-lg);">
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Peer Comparison</h4>
+        <div style="overflow-x: auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead><tr style="border-bottom:2px solid var(--border-color);">
+              <th style="padding:8px 10px;text-align:left;">Company</th>
+              <th style="padding:8px 10px;text-align:right;">P/E</th>
+              <th style="padding:8px 10px;text-align:right;">P/B</th>
+              <th style="padding:8px 10px;text-align:right;">NPM (TTM)</th>
+              <th style="padding:8px 10px;text-align:right;">Mkt Cap</th>
+            </tr></thead>
+            <tbody>${peerRows}</tbody>
+          </table>
+        </div>
+      </div>` : ''}
+
+      ${finRows ? `
+      <div>
+        <h4 style="font-size:0.9rem; color: var(--accent); margin-bottom: var(--space-sm);">Historical Financials (Annual)</h4>
+        <div style="overflow-x: auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+            <thead><tr style="border-bottom:2px solid var(--border-color);">
+              <th style="padding:8px 10px;text-align:left;">FY</th>
+              <th style="padding:8px 10px;text-align:right;">Revenue</th>
+              <th style="padding:8px 10px;text-align:right;">Net Income</th>
+              <th style="padding:8px 10px;text-align:right;">EPS</th>
+              <th style="padding:8px 10px;text-align:right;">Total Debt</th>
+              <th style="padding:8px 10px;text-align:right;">FCF</th>
+            </tr></thead>
+            <tbody>${finRows}</tbody>
+          </table>
+        </div>
+      </div>` : ''}
+    </div>
+  `;
 }
 
 function renderPortfolio(data) {
@@ -364,17 +524,19 @@ async function loadAnalysis(symbol) {
   container.innerHTML = '<div class="loading-spinner"></div>';
 
   try {
-    const [technicalRes, riskRes, sicilianRes] = await Promise.all([
+    const [technicalRes, riskRes, sicilianRes, fundRes] = await Promise.all([
       fetch(`${API_BASE}/analysis/technicals/${symbol}`),
       fetch(`${API_BASE}/analysis/risk/${symbol}`),
-      fetch(`${API_BASE}/sicilian/${symbol}`).catch(() => null)
+      fetch(`${API_BASE}/sicilian/${symbol}`).catch(() => null),
+      fetch(`${API_BASE}/fundamentals/${symbol}`).catch(() => null)
     ]);
 
     const technical = await technicalRes.json();
     const risk = await riskRes.json();
     const sicilian = sicilianRes && sicilianRes.ok ? await sicilianRes.json() : null;
+    const fundamentals = fundRes && fundRes.ok ? await fundRes.json() : null;
 
-    renderAnalysis(technical, risk, sicilian);
+    renderAnalysis(technical, risk, sicilian, fundamentals);
 
   } catch (error) {
     console.error('Error loading analysis:', error);
@@ -382,7 +544,7 @@ async function loadAnalysis(symbol) {
   }
 }
 
-function renderAnalysis(technical, risk, sicilian) {
+function renderAnalysis(technical, risk, sicilian, fundamentals) {
   const container = document.getElementById('analysisContent');
   const { signals, indicators } = technical.analysis.signals;
   const cmp = technical.analysis.cmp;
@@ -399,6 +561,9 @@ function renderAnalysis(technical, risk, sicilian) {
            <h3 style="margin-bottom:0.5rem;">🏴 The Sicilian</h3>
            <p style="color:var(--text-muted);">Engine offline — start with: <code>python3 -m quant_engine.main</code></p>
          </div>`);
+
+  // ── Fundamentals card ─────────────────────────────────
+  const fundamentalsHtml = fundamentals ? renderFundamentalsCard(fundamentals) : '';
 
   container.innerHTML = `
     ${sicilianHtml}
@@ -442,6 +607,8 @@ function renderAnalysis(technical, risk, sicilian) {
         </div>
       </div>
     </div>
+
+    ${fundamentalsHtml}
     
     ${risk.risk ? `
     <div class="glass" style="padding: var(--space-lg);">

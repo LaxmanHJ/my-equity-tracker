@@ -15,6 +15,9 @@ from quant_engine.sicilian.engine import (
     _score_bollinger,
     _score_volume,
     _score_volatility,
+    _score_valuation,
+    _score_financial_health,
+    _score_growth,
     BUY_THRESHOLD,
     SELL_THRESHOLD,
     SICILIAN_WEIGHTS,
@@ -105,6 +108,9 @@ class TestWeightsSum(unittest.TestCase):
         total = sum(SICILIAN_WEIGHTS.values())
         self.assertAlmostEqual(total, 1.0)
 
+    def test_weight_count(self):
+        self.assertEqual(len(SICILIAN_WEIGHTS), 11)
+
 
 class TestThresholds(unittest.TestCase):
     """Verify thresholds are symmetric and sensible."""
@@ -144,5 +150,58 @@ class TestVolumeScore(unittest.TestCase):
         self.assertGreater(score, 0)  # Uptrend with volume spike
 
 
+class TestFundamentalScores(unittest.TestCase):
+    """Test fundamental sub-score calculations."""
+
+    # ── Valuation ──
+    def test_valuation_undervalued(self):
+        fund = {"pe_ratio": 10, "pb_ratio": 0.8, "price_to_sales": 0.5}
+        score = _score_valuation(fund)
+        self.assertGreater(score, 0.4)  # Should be strongly positive
+
+    def test_valuation_overvalued(self):
+        fund = {"pe_ratio": 45, "pb_ratio": 6, "price_to_sales": 10}
+        score = _score_valuation(fund)
+        self.assertLess(score, -0.4)  # Should be strongly negative
+
+    def test_valuation_none(self):
+        self.assertAlmostEqual(_score_valuation(None), 0.0)
+        self.assertAlmostEqual(_score_valuation({}), 0.0)
+
+    # ── Financial Health ──
+    def test_health_strong(self):
+        fund = {"current_ratio": 2.5, "debt_to_equity": 0.3, "interest_coverage": 8, "free_cash_flow": 1000}
+        score = _score_financial_health(fund)
+        self.assertGreater(score, 0.3)
+
+    def test_health_weak(self):
+        fund = {"current_ratio": 0.5, "debt_to_equity": 3.0, "interest_coverage": 1.0, "free_cash_flow": -500}
+        score = _score_financial_health(fund)
+        self.assertLess(score, -0.3)
+
+    def test_health_none(self):
+        self.assertAlmostEqual(_score_financial_health(None), 0.0)
+
+    # ── Growth ──
+    def test_growth_strong(self):
+        fund = {"revenue_growth_5y": 20, "eps_growth_5y": 25, "revenue_growth_3y": 18, "eps_growth_3y": 22}
+        score = _score_growth(fund)
+        self.assertGreater(score, 0.5)
+
+    def test_growth_declining(self):
+        fund = {"revenue_growth_5y": -5, "eps_growth_5y": -10, "revenue_growth_3y": -8, "eps_growth_3y": -15}
+        score = _score_growth(fund)
+        self.assertLess(score, -0.3)
+
+    def test_growth_none(self):
+        self.assertAlmostEqual(_score_growth(None), 0.0)
+
+    def test_growth_margin_trend(self):
+        fund = {"net_profit_margin_ttm": 15, "net_profit_margin_5y_avg": 10}
+        score = _score_growth(fund)
+        self.assertGreater(score, 0)  # Expanding margins = positive
+
+
 if __name__ == "__main__":
     unittest.main()
+
