@@ -641,7 +641,6 @@ function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings,
     ${shareholding && shareholding.length > 0 ? renderShareholdingPattern(shareholding) : ''}
     ${fundamentalsHtml}
     
-    ${news && news.length > 0 ? renderRecentNews(news) : ''}
     
     ${risk.risk ? `
     <div class="glass" style="padding: var(--space-lg);">
@@ -673,8 +672,12 @@ function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings,
       </div>
     </div>
     ` : ''}
+        ${news && news.length > 0 ? renderRecentNews(news) : ''}
   `;
+
+
 }
+
 
 /**
  * Render The Sicilian verdict card — the crown jewel of the analysis page.
@@ -878,31 +881,31 @@ function renderShareholdingPattern(data) {
   `;
 }
 
-// function renderRecentNews(news) {
-//   if (!news || news.length === 0) return '';
+function renderRecentNews(news) {
+  if (!news || news.length === 0) return '';
 
-//   return `
-//     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
-//       <h3 style="margin-bottom: var(--space-md);">Recent News</h3>
-//       <div style="display: flex; flex-direction: column; gap: 1rem;">
-//         ${news.map(article => {
-//           const dateStr = new Date(article.news_date).toLocaleDateString();
-//           return `
-//           <a href="${article.url}" target="_blank" style="display: flex; gap: 1rem; text-decoration: none; color: inherit; padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); transition: border-color 0.2s;">
-//             ${article.thumbnail_url ? `<img src="${article.thumbnail_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;" alt="News thumbnail">` : ''}
-//             <div style="display: flex; flex-direction: column; justify-content: space-between;">
-//               <div style="font-weight: 600; font-size: 0.95rem; line-height: 1.4; margin-bottom: 0.5rem; color: var(--text-primary);">${article.headline}</div>
-//               <div style="display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-muted);">
-//                 ${article.source && article.source !== 'undefined' ? `<span>${article.source}</span>` : ''}
-//                 <span>${dateStr !== 'Invalid Date' ? dateStr : article.news_date}</span>
-//               </div>
-//             </div>
-//           </a>
-//         `}).join('')}
-//       </div>
-//     </div>
-//   `;
-// }
+  return `
+    <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
+      <h3 style="margin-bottom: var(--space-md);">Recent News</h3>
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        ${news.map(article => {
+    const dateStr = new Date(article.news_date).toLocaleDateString();
+    return `
+          <a href="${article.url}" target="_blank" style="display: flex; gap: 1rem; text-decoration: none; color: inherit; padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); transition: border-color 0.2s;">
+            ${article.thumbnail_url ? `<img src="${article.thumbnail_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 6px;" alt="News thumbnail">` : ''}
+            <div style="display: flex; flex-direction: column; justify-content: space-between;">
+              <div style="font-weight: 600; font-size: 0.95rem; line-height: 1.4; margin-bottom: 0.5rem; color: var(--text-primary);">${article.headline}</div>
+              <div style="display: flex; gap: 1rem; font-size: 0.75rem; color: var(--text-muted);">
+                ${article.source && article.source !== 'undefined' ? `<span>${article.source}</span>` : ''}
+                <span>${dateStr !== 'Invalid Date' ? dateStr : article.news_date}</span>
+              </div>
+            </div>
+          </a>
+        `}).join('')}
+      </div>
+    </div>
+  `;
+}
 
 function viewAnalysis(symbol) {
   // Switch to analysis tab
