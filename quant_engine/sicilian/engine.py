@@ -8,26 +8,32 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 
-from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD
-from quant_engine.data.loader import load_price_history, load_benchmark
+from quant_engine.data.loader import (
+    load_price_history, load_benchmark,
+    load_industry_map, load_analyst_consensus,
+)
 from quant_engine.data.fundamentals_loader import load_fundamentals
 from quant_engine.scoring.composite import score_single_stock
+from quant_engine.ml import predictor as ml_predictor
 
-# ── Sicilian weights for sub-scores (11 total, sum = 1.0) ──────
+# ── Sicilian weights for sub-scores (13 total, sum = 1.0) ──────
 SICILIAN_WEIGHTS = {
-    # Technical (80%)
-    "composite_factor":  0.22,
+    # Technical (74%)
+    "composite_factor":  0.16,   # trimmed to make room for new features
     "rsi":               0.10,
     "macd":              0.10,
     "trend_ma":          0.10,
     "bollinger":         0.08,
-    "volume":            0.07,
-    "volatility":        0.06,
+    "volume":            0.05,   # trimmed
+    "volatility":        0.04,   # trimmed
     "relative_strength": 0.07,
-    # Fundamental (20%)
+    # Cross-stock / external (12%)
+    "sector_rotation":   0.07,   # industry peers vs benchmark
+    "analyst_consensus": 0.05,   # analyst buy/sell ratio
+    # Fundamental (14%)
     "valuation":         0.08,
     "financial_health":  0.06,
-    "growth":            0.06,
+    "growth":            0.04,   # trimmed
 }
 
 # Verdict thresholds on –1 to +1 scale
@@ -283,20 +289,70 @@ def _score_growth(fund: dict) -> float:
     return float(np.mean(scores)) if scores else 0.0
 
 
+# ── Cross-stock / external sub-score calculators ────────────────
+
+def _score_sector_rotation(symbol: str, industry: str, benchmark_df: pd.DataFrame, period: int = 20) -> float:
+    """
+    Average 20-day return of all stocks in the same industry, minus the
+    benchmark 20-day return, normalised to [-1, +1] (±20% excess = ±1).
+
+    The stock itself is excluded so its own price doesn't inflate the peer average.
+    Peers are capped at 20 to keep live latency bounded.
+    """
+    if not industry:
+        return 0.0
+
+    industry_map = load_industry_map()
+    peers = [s for s, ind in industry_map.items() if ind == industry and s != symbol]
+    if not peers:
+        return 0.0
+
+    bench_ret: Optional[float] = None
+    if not benchmark_df.empty and len(benchmark_df) >= period:
+        bench_ret = float(benchmark_df["close"].iloc[-1] / benchmark_df["close"].iloc[-period] - 1)
+
+    peer_returns: list[float] = []
+    for peer in peers[:20]:
+        try:
+            peer_df = load_price_history(peer, limit=period + 5)
+            if len(peer_df) >= period:
+                peer_returns.append(
+                    float(peer_df["close"].iloc[-1] / peer_df["close"].iloc[-period] - 1)
+                )
+        except Exception:
+            pass
+
+    if not peer_returns:
+        return 0.0
+
+    sector_ret = float(np.mean(peer_returns))
+    excess = sector_ret - bench_ret if bench_ret is not None else sector_ret
+    return float(np.clip(excess / 0.20, -1.0, 1.0))
+
+
+def _score_analyst_consensus(symbol: str) -> float:
+    """
+    Returns the analyst consensus score for a stock in [-1, +1].
+
+    Score = (strong_buy + buy - sell - strong_sell) / total_analysts.
+    Positive = more analysts bullish than bearish; 0 if no coverage.
+    """
+    clean = symbol.replace(".NS", "").replace(".BO", "")
+    consensus_map = load_analyst_consensus()
+    return consensus_map.get(clean, 0.0)
+
+
 # ── Target price calculators ────────────────────────────────────
 
-def _compute_buy_target(current_price: float, sma20: float, bb_lower: float, z_score_20: float) -> float:
+def _compute_buy_target(current_price: float, sma20: float, bb_lower: float) -> float:
     """
-    BUY target: blend of SMA20 with a slight discount (based on Z-score)
-    and the lower Bollinger band as support.
+    BUY target: midpoint between lower Bollinger band and SMA20,
+    floored at 5% below current price.
     """
     if sma20 is None or bb_lower is None:
-        return round(current_price * 0.99, 2)  # simple 1% discount fallback
-    # Ideal entry: midpoint between lower band and SMA20
+        return round(current_price * 0.99, 2)
     ideal_entry = (bb_lower + sma20) / 2.0
-    # If stock is already below SMA20, use current price area
     target = min(current_price, ideal_entry)
-    # Don't suggest a target more than 5% below current price
     floor = current_price * 0.95
     return round(max(target, floor), 2)
 
@@ -357,10 +413,11 @@ def run_sicilian(symbol: str) -> dict:
     sma50 = _compute_sma(close, 50)
     bb = _compute_bollinger(close)
 
-    # ── Load fundamentals (from cached SQLite data) ──────────────
+    # ── Load fundamentals + external data ────────────────────────
     fund = load_fundamentals(symbol)
+    industry = load_industry_map().get(symbol.replace(".NS", "").replace(".BO", ""))
 
-    # ── Calculate all 11 sub-scores ──────────────────────────────
+    # ── Calculate all 13 sub-scores ──────────────────────────────
     sub_scores = {
         # Technical (8)
         "composite_factor": round(_score_composite(composite_score), 4),
@@ -371,45 +428,55 @@ def run_sicilian(symbol: str) -> dict:
         "volume":           round(_score_volume(df), 4),
         "volatility":       round(_score_volatility(df), 4),
         "relative_strength": round(_score_relative_strength(df, benchmark_df), 4),
+        # Cross-stock / external (2)
+        "sector_rotation":  round(_score_sector_rotation(symbol, industry, benchmark_df), 4),
+        "analyst_consensus": round(_score_analyst_consensus(symbol), 4),
         # Fundamental (3)
         "valuation":        round(_score_valuation(fund), 4),
         "financial_health": round(_score_financial_health(fund), 4),
         "growth":           round(_score_growth(fund), 4),
     }
 
-    # ── Weighted aggregation ─────────────────────────────────────
+    # ── Weighted aggregation (linear baseline) ───────────────────
     sicilian_score = 0.0
     for key, weight in SICILIAN_WEIGHTS.items():
         sicilian_score += sub_scores.get(key, 0.0) * weight
     sicilian_score = round(float(np.clip(sicilian_score, -1.0, 1.0)), 4)
 
-    # ── Confidence: how many sub-scores agree in direction ───────
-    if sicilian_score > 0:
-        agreeing = sum(1 for v in sub_scores.values() if v > 0)
-    elif sicilian_score < 0:
-        agreeing = sum(1 for v in sub_scores.values() if v < 0)
-    else:
-        agreeing = sum(1 for v in sub_scores.values() if v == 0)
-    confidence = round(agreeing / len(sub_scores) * 100, 1)
+    # ── Verdict + confidence ──────────────────────────────────────
+    # Try the ML model first (learns non-linear interactions between indicators).
+    # Falls back to the linear weighted approach if the model hasn't been trained.
+    ml_result = ml_predictor.predict(sub_scores)
+    scoring_method: str
 
-    # ── Verdict ──────────────────────────────────────────────────
-    if sicilian_score >= BUY_THRESHOLD:
-        verdict = "BUY"
-    elif sicilian_score <= SELL_THRESHOLD:
-        verdict = "SELL"
+    if ml_result is not None:
+        verdict = ml_result["verdict"]
+        confidence = ml_result["confidence"]
+        ml_probabilities = ml_result["probabilities"]
+        scoring_method = "ml_random_forest"
     else:
-        verdict = "HOLD"
+        # Linear fallback: threshold on weighted sum + naive vote-count confidence
+        if sicilian_score >= BUY_THRESHOLD:
+            verdict = "BUY"
+        elif sicilian_score <= SELL_THRESHOLD:
+            verdict = "SELL"
+        else:
+            verdict = "HOLD"
+
+        if sicilian_score > 0:
+            agreeing = sum(1 for v in sub_scores.values() if v > 0)
+        elif sicilian_score < 0:
+            agreeing = sum(1 for v in sub_scores.values() if v < 0)
+        else:
+            agreeing = sum(1 for v in sub_scores.values() if v == 0)
+        confidence = round(agreeing / len(sub_scores) * 100, 1)
+        ml_probabilities = None
+        scoring_method = "linear_weighted"
 
     # ── Target price ─────────────────────────────────────────────
     # Z-score for buy target discount
-    z_score_20 = 0.0
-    if sma20 is not None and len(close) >= 20:
-        std_20 = float(close.rolling(20).std().iloc[-1])
-        if std_20 > 0:
-            z_score_20 = (current_price - sma20) / std_20
-
     if verdict == "BUY":
-        target_price = _compute_buy_target(current_price, sma20, bb["lower"], z_score_20)
+        target_price = _compute_buy_target(current_price, sma20, bb["lower"])
         target_type = "entry"
     elif verdict == "SELL":
         target_price = _compute_sell_target(current_price, sma20, bb["upper"])
@@ -443,6 +510,8 @@ def run_sicilian(symbol: str) -> dict:
         "verdict": verdict,
         "sicilian_score": sicilian_score,
         "confidence": confidence,
+        "scoring_method": scoring_method,
+        "ml_probabilities": ml_probabilities,
         "target_price": target_price,
         "target_type": target_type,
         "reasoning": reasoning,

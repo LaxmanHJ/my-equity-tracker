@@ -1,0 +1,42 @@
+{
+  "trained_at": "2026-03-24T20:33:59.891130+00:00",
+  "n_samples": 8813,
+  "cv_accuracy_mean": 0.3946,
+  "cv_accuracy_folds": [
+    0.4346,
+    0.4162,
+    0.4475,
+    0.3794,
+    0.295
+  ],
+  "class_distribution": {
+    "1": 3700,
+    "-1": 3599,
+    "0": 1514
+  },
+  "feature_importances": {
+    "rsi": 0.168366,
+    "macd": 0.092769,
+    "trend_ma": 0.035954,
+    "bollinger": 0.132151,
+    "volume": 0.024978,
+    "volatility": 0.183677,
+    "relative_strength": 0.098546,
+    "sector_rotation": 0.124541,
+    "analyst_consensus": 0.139019
+  },
+  "classes": [
+    -1,
+    0,
+    1
+  ],
+  "rf_params": {
+    "n_estimators": 300,
+    "max_depth": null,
+    "min_samples_leaf": 5,
+    "max_features": "sqrt",
+    "class_weight": "balanced",
+    "random_state": 42,
+    "n_jobs": -1
+  }
+}

@@ -1,7 +1,6 @@
 """
 Quant Engine Configuration
 """
-import os
 from pathlib import Path
 
 # The Node.js app's SQLite database path
@@ -29,3 +28,6 @@ SHORT_THRESHOLD = -40
 
 # Risk-free rate for Sharpe calculations (Indian govt bond ~6%)
 RISK_FREE_RATE = 0.06
+
+# ML model storage path
+ML_MODEL_DIR = Path(__file__).parent / "ml" / "models"

@@ -71,6 +71,52 @@ INDEX_SYMBOL_MAP = {
 }
 
 
+def load_industry_map() -> dict:
+    """
+    Returns {symbol: industry} for every stock that has industry data in
+    stock_fundamentals.  Used by the trainer to group peers for sector rotation.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT symbol, industry FROM stock_fundamentals WHERE industry IS NOT NULL"
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def load_analyst_consensus() -> dict:
+    """
+    Returns {symbol: score} where score ∈ [-1, +1].
+
+    Score = (strong_buy + buy - sell - strong_sell) / total_analysts.
+    Positive means more analysts are bullish than bearish; negative means the
+    opposite.  Stocks with no analyst coverage get 0 (neutral).
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT symbol, strong_buy, buy, hold, sell, strong_sell, total_analysts
+            FROM stock_analyst_ratings
+            WHERE total_analysts > 0
+            """
+        ).fetchall()
+        result = {}
+        for row in rows:
+            sym, sb, b, h, s, ss, total = row
+            net_bullish = (sb + b) - (s + ss)
+            result[sym] = round(float(net_bullish) / float(total), 4)
+        return result
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
 def load_index_data(index_name: str, limit: int = 365) -> pd.DataFrame:
     """
     Load index price data from SQLite.
