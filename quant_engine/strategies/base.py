@@ -13,7 +13,7 @@ class BaseStrategy(ABC):
         self.params = params or {}
 
     @abstractmethod
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+    def generate_signals(self, data: pd.DataFrame, **kwargs) -> pd.Series:
         """
         Takes OHLCV dataframe (and potentially sentiment).
         Returns a pandas Series of signals (-1, 0, or 1) aligned with the dataframe index.

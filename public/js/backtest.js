@@ -54,7 +54,7 @@ async function runSimulation() {
 
         // Render UI
         updateMetrics(data.metrics);
-        renderChart(data.chart_data, data.strategy);
+        renderChart(data.chart_data, data.baseline_data, data.strategy, data.symbol);
 
         resultsArea.style.display = 'block';
     } catch (err) {
@@ -81,7 +81,7 @@ function updateMetrics(metrics) {
     document.getElementById('resSharpe').textContent = formatNum(metrics.sharpe_ratio);
 }
 
-function renderChart(chartData, strategyName) {
+function renderChart(chartData, baselineData, strategyName, symbol) {
     const ctx = document.getElementById('equityChart').getContext('2d');
 
     if (equityChartInstance) {
@@ -91,17 +91,31 @@ function renderChart(chartData, strategyName) {
     equityChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            datasets: [{
-                label: `${strategyName} Equity Curve`,
-                data: chartData,
-                borderColor: '#10b981', // positive green
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                pointRadius: 0,
-                pointHitRadius: 10,
-                tension: 0.1
-            }]
+            datasets: [
+                {
+                    label: `${strategyName} Equity Curve`,
+                    data: chartData,
+                    borderColor: '#10b981', // positive green
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                    tension: 0.1
+                },
+                {
+                    label: `${symbol} Buy & Hold`,
+                    data: baselineData,
+                    borderColor: 'rgba(255, 255, 255, 0.45)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                    borderWidth: 1.5,
+                    borderDash: [6, 3],
+                    fill: false,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                    tension: 0.1
+                }
+            ]
         },
         options: {
             responsive: true,
@@ -116,7 +130,7 @@ function renderChart(chartData, strategyName) {
                 },
                 tooltip: {
                     callbacks: {
-                        label: (context) => `₹${context.parsed.y.toLocaleString()}`
+                        label: (context) => `${context.dataset.label}: ₹${context.parsed.y.toLocaleString()}`
                     }
                 }
             },

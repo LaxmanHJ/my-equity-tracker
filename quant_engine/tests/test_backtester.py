@@ -33,7 +33,8 @@ def test_buy_and_hold():
     
     # Zero friction just to verify raw math first
     backtester = VectorizedBacktester(df, initial_capital=10000.0, commission=0.0, slippage=0.0)
-    equity_curve = backtester.run(signals)
+    result = backtester.run(signals)
+    equity_curve = result['strategy']
     
     # Calculate metrics
     metrics = calculate_metrics(equity_curve)

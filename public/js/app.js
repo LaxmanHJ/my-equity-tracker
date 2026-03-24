@@ -884,11 +884,13 @@ function renderShareholdingPattern(data) {
 function renderRecentNews(news) {
   if (!news || news.length === 0) return '';
 
+  const sortedNews = [...news].sort((a, b) => new Date(b.news_date) - new Date(a.news_date));
+
   return `
     <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
       <h3 style="margin-bottom: var(--space-md);">Recent News</h3>
       <div style="display: flex; flex-direction: column; gap: 1rem;">
-        ${news.map(article => {
+        ${sortedNews.map(article => {
     const dateStr = new Date(article.news_date).toLocaleDateString();
     return `
           <a href="${article.url}" target="_blank" style="display: flex; gap: 1rem; text-decoration: none; color: inherit; padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); transition: border-color 0.2s;">
