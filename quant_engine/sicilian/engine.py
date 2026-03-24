@@ -12,28 +12,31 @@ from quant_engine.data.loader import (
     load_price_history, load_benchmark,
     load_industry_map, load_analyst_consensus,
 )
+from quant_engine.data.market_regime_loader import load_vix_score_today
 from quant_engine.data.fundamentals_loader import load_fundamentals
 from quant_engine.scoring.composite import score_single_stock
 from quant_engine.ml import predictor as ml_predictor
 
-# ── Sicilian weights for sub-scores (13 total, sum = 1.0) ──────
+# ── Sicilian weights for sub-scores (15 total, sum = 1.0) ──────
 SICILIAN_WEIGHTS = {
-    # Technical (74%)
-    "composite_factor":  0.16,   # trimmed to make room for new features
-    "rsi":               0.10,
-    "macd":              0.10,
-    "trend_ma":          0.10,
-    "bollinger":         0.08,
-    "volume":            0.05,   # trimmed
-    "volatility":        0.04,   # trimmed
-    "relative_strength": 0.07,
-    # Cross-stock / external (12%)
-    "sector_rotation":   0.07,   # industry peers vs benchmark
-    "analyst_consensus": 0.05,   # analyst buy/sell ratio
-    # Fundamental (14%)
+    # Technical (62%)
+    "composite_factor":  0.14,
+    "rsi":               0.09,
+    "macd":              0.09,
+    "trend_ma":          0.08,
+    "bollinger":         0.07,
+    "volume":            0.05,
+    "volatility":        0.04,
+    "relative_strength": 0.06,
+    # Cross-stock / external + market regime (20%)
+    "sector_rotation":   0.06,
+    "analyst_consensus": 0.04,
+    "vix_regime":        0.05,
+    "nifty_trend":       0.05,
+    # Fundamental (18%)
     "valuation":         0.08,
     "financial_health":  0.06,
-    "growth":            0.04,   # trimmed
+    "growth":            0.04,
 }
 
 # Verdict thresholds on –1 to +1 scale
@@ -330,6 +333,40 @@ def _score_sector_rotation(symbol: str, industry: str, benchmark_df: pd.DataFram
     return float(np.clip(excess / 0.20, -1.0, 1.0))
 
 
+def _score_vix_regime() -> float:
+    """
+    Returns today's VIX regime score from the market_regime table.
+    Low VIX (calm) → +1, high VIX (fearful) → -1.  0 if no data available.
+    """
+    score = load_vix_score_today()
+    return score if score is not None else 0.0
+
+
+def _score_nifty_trend(benchmark_df: pd.DataFrame) -> float:
+    """
+    How far NIFTY sits above/below its SMA50 and SMA200.
+
+    vs_sma50  = clip((nifty - sma50)  / sma50  × 10, -1, +1)
+    vs_sma200 = clip((nifty - sma200) / sma200 × 10, -1, +1)
+    score     = 0.5 × vs_sma50 + 0.5 × vs_sma200
+
+    Positive = uptrend (reinforces BUY signals).
+    Negative = downtrend (weakens BUY signals).
+    """
+    if benchmark_df.empty or len(benchmark_df) < 50:
+        return 0.0
+
+    close = benchmark_df["close"]
+    sma50  = float(close.rolling(50,  min_periods=30).mean().iloc[-1])
+    sma200 = float(close.rolling(200, min_periods=100).mean().iloc[-1]) if len(close) >= 100 else sma50
+    current = float(close.iloc[-1])
+
+    vs_sma50  = float(np.clip((current - sma50)  / sma50  * 10 if sma50  else 0, -1.0, 1.0))
+    vs_sma200 = float(np.clip((current - sma200) / sma200 * 10 if sma200 else 0, -1.0, 1.0))
+
+    return round(0.5 * vs_sma50 + 0.5 * vs_sma200, 4)
+
+
 def _score_analyst_consensus(symbol: str) -> float:
     """
     Returns the analyst consensus score for a stock in [-1, +1].
@@ -428,9 +465,11 @@ def run_sicilian(symbol: str) -> dict:
         "volume":           round(_score_volume(df), 4),
         "volatility":       round(_score_volatility(df), 4),
         "relative_strength": round(_score_relative_strength(df, benchmark_df), 4),
-        # Cross-stock / external (2)
+        # Cross-stock / external + market regime (4)
         "sector_rotation":  round(_score_sector_rotation(symbol, industry, benchmark_df), 4),
         "analyst_consensus": round(_score_analyst_consensus(symbol), 4),
+        "vix_regime":       round(_score_vix_regime(), 4),
+        "nifty_trend":      round(_score_nifty_trend(benchmark_df), 4),
         # Fundamental (3)
         "valuation":        round(_score_valuation(fund), 4),
         "financial_health": round(_score_financial_health(fund), 4),

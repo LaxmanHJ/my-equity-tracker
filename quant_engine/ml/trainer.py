@@ -35,6 +35,7 @@ from quant_engine.data.loader import (
     load_all_symbols, load_benchmark, load_price_history,
     load_industry_map, load_analyst_consensus,
 )
+from quant_engine.data.market_regime_loader import load_vix_series, vix_to_score
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,12 @@ FEATURE_COLS = [
     "volume",
     "volatility",
     "relative_strength",
-    # New orthogonal features
+    # Cross-stock / external
     "sector_rotation",    # avg 20d return of industry peers vs benchmark
     "analyst_consensus",  # (strong_buy+buy - sell-strong_sell) / total_analysts
+    # Market regime (same value for every stock on the same date)
+    "vix_regime",         # India VIX rolling percentile → [-1 fear, +1 calm]
+    "nifty_trend",        # NIFTY position vs SMA50 + SMA200 → [-1 downtrend, +1 uptrend]
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -73,6 +77,33 @@ RF_PARAMS = {
     "random_state": 42,
     "n_jobs": -1,
 }
+
+
+def _build_nifty_trend_series(benchmark_df: pd.DataFrame) -> pd.Series:
+    """
+    Rolling NIFTY trend score in [-1, +1].
+
+    Blends two continuous signals:
+      vs_sma50  = (nifty - sma50)  / sma50  × 10  — how far above/below 50-day MA
+      vs_sma200 = (nifty - sma200) / sma200 × 10  — how far above/below 200-day MA
+
+    score = 0.5 × vs_sma50 + 0.5 × vs_sma200, clipped to [-1, +1].
+
+    Positive = broad market uptrend (reinforces per-stock BUY signals).
+    Negative = broad market downtrend (weakens per-stock BUY signals).
+    """
+    if benchmark_df.empty:
+        return pd.Series(dtype=float)
+
+    close = benchmark_df["close"]
+    sma50  = close.rolling(50,  min_periods=30).mean()
+    sma200 = close.rolling(200, min_periods=100).mean()
+
+    vs_sma50  = ((close - sma50)  / sma50.replace(0, float("nan"))  * 10).clip(-1.0, 1.0)
+    vs_sma200 = ((close - sma200) / sma200.replace(0, float("nan")) * 10).clip(-1.0, 1.0)
+
+    trend = (0.5 * vs_sma50 + 0.5 * vs_sma200).fillna(0.0)
+    return trend
 
 
 def _build_sector_series(
@@ -120,19 +151,27 @@ def _build_feature_frame(
     benchmark_df: pd.DataFrame,
     sector_score: pd.Series,
     analyst_score: float,
+    vix_score: pd.Series,
+    nifty_trend: pd.Series,
 ) -> pd.DataFrame:
     """
     Compute all sub-scores for every bar in df.
 
     sector_score  – pre-computed industry series aligned by date; reindexed to df.
     analyst_score – static scalar for this stock (same value across all bars).
+    vix_score     – market-wide VIX percentile score series; reindexed to df.
+    nifty_trend   – market-wide NIFTY trend score series; reindexed to df.
     """
     strat = SicilianStrategy("_trainer")
     close = df["close"]
     volume = df["volume"]
 
-    # Align sector series to this stock's date index (forward-fill gaps, e.g. holidays)
-    sector_aligned = sector_score.reindex(df.index, method="ffill").fillna(0.0)
+    def _align(series: pd.Series) -> pd.Series:
+        """Reindex a market-level series to this stock's date index.
+        Returns zeros if series is empty (e.g. VIX table not yet populated)."""
+        if series.empty:
+            return pd.Series(0.0, index=df.index)
+        return series.reindex(df.index, method="ffill").fillna(0.0)
 
     return pd.DataFrame(
         {
@@ -143,8 +182,10 @@ def _build_feature_frame(
             "volume":            strat._rolling_volume_score(close, volume),
             "volatility":        strat._rolling_volatility_score(close),
             "relative_strength": strat._rolling_relative_strength_score(close, benchmark_df),
-            "sector_rotation":   sector_aligned,
+            "sector_rotation":   _align(sector_score),
             "analyst_consensus": pd.Series(analyst_score, index=df.index),
+            "vix_regime":        _align(vix_score),
+            "nifty_trend":       _align(nifty_trend),
         },
         index=df.index,
     )
@@ -179,6 +220,18 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     sector_series = _build_sector_series(all_prices, industry_map, benchmark_df)
     logger.info("Sector rotation computed for %d industries", len(sector_series))
 
+    # Market regime series (same value for every stock on the same calendar date).
+    # VIX: rolling percentile of India VIX → [-1 fear, +1 calm].
+    raw_vix = load_vix_series(limit=2000)
+    vix_score_series = vix_to_score(raw_vix) if not raw_vix.empty else pd.Series(dtype=float)
+    if vix_score_series.empty:
+        logger.warning("No VIX data found — vix_regime will be 0 for all bars. "
+                       "Run: python -m data.backfill_regime")
+
+    # NIFTY trend: distance from SMA50/SMA200 → [-1 downtrend, +1 uptrend].
+    nifty_trend_series = _build_nifty_trend_series(benchmark_df)
+    logger.info("NIFTY trend series: %d bars", len(nifty_trend_series))
+
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
 
@@ -188,7 +241,11 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
             sector_score   = sector_series.get(industry, pd.Series(dtype=float))
             analyst_score  = analyst_map.get(symbol, 0.0)   # 0 = neutral if no coverage
 
-            features = _build_feature_frame(df, benchmark_df, sector_score, analyst_score)
+            features = _build_feature_frame(
+                df, benchmark_df,
+                sector_score, analyst_score,
+                vix_score_series, nifty_trend_series,
+            )
 
             # 20-day forward return (labelled without look-ahead: we shift backward)
             forward_return = df["close"].shift(-20) / df["close"] - 1

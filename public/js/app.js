@@ -763,6 +763,28 @@ function renderSicilianCard(s) {
           </div>
         </div>
 
+        <!-- ML Probabilities -->
+        ${s.ml_probabilities ? (() => {
+          const p = s.ml_probabilities;
+          const rows = [
+            { label: 'BUY',  val: p.BUY  ?? 0, color: '#10b981' },
+            { label: 'HOLD', val: p.HOLD ?? 0, color: '#f59e0b' },
+            { label: 'SELL', val: p.SELL ?? 0, color: '#ef4444' },
+          ];
+          return `
+          <div style="padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border-color);">
+            <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.6rem;">ML Signal</div>
+            ${rows.map(r => `
+              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.35rem;">
+                <span style="font-size:0.65rem;color:${r.color};font-weight:700;width:28px;">${r.label}</span>
+                <div style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+                  <div style="width:${(r.val*100).toFixed(1)}%;height:100%;background:${r.color};border-radius:3px;transition:width 0.6s;"></div>
+                </div>
+                <span style="font-size:0.7rem;color:var(--text-muted);width:34px;text-align:right;">${(r.val*100).toFixed(1)}%</span>
+              </div>`).join('')}
+          </div>`;
+        })() : ''}
+
         <!-- Confidence -->
         <div style="text-align:center;padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border-color);">
           <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:0.3rem;">Confidence</div>

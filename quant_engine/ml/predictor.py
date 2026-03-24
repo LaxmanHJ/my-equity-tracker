@@ -30,6 +30,8 @@ FEATURE_COLS = [
     "relative_strength",
     "sector_rotation",
     "analyst_consensus",
+    "vix_regime",
+    "nifty_trend",
 ]
 
 _model_cache = None   # module-level cache so we only load from disk once

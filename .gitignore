@@ -19,3 +19,4 @@ data/*.db-*
 *.log
 quant_engine/__pycache__/
 quant_engine/**/__pycache__/
+docs/ml_data_quality.md
