@@ -13,19 +13,16 @@ VIX score design:
 This makes the feature robust to absolute VIX level shifts over years:
 what matters is whether VIX is high or low *relative to recent history*.
 """
-import sqlite3
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
-from quant_engine.config import DB_PATH
+from quant_engine.data.turso_client import connect
 
 
 def _get_connection():
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect()
 
 
 def load_vix_series(limit: int = 2000) -> pd.Series:

@@ -2,6 +2,10 @@
 Quant Engine — FastAPI entry point.
 Runs on port 5001 alongside the Node.js app on port 3000.
 """
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from quant_engine.config import HOST, PORT

@@ -314,22 +314,22 @@ export async function syncStockFundamentals(symbol) {
     const analystRatings = extractAnalystRatings(apiData);
     const shareholding = extractShareholding(apiData);
 
-    saveFundamentals(symbol, fundamentals);
-    savePeers(symbol, peers);
-    saveFinancials(symbol, financials);
-    
-    // Save new data
-    if (news.length > 0) saveNews(symbol, news);
-    saveAnalystRatings(symbol, analystRatings);
-    if (shareholding.length > 0) saveShareholding(symbol, shareholding);
+    await saveFundamentals(symbol, fundamentals);
+    await savePeers(symbol, peers);
+    await saveFinancials(symbol, financials);
 
-    saveFundamentalsSync(symbol, 'success', null);
+    // Save new data
+    if (news.length > 0) await saveNews(symbol, news);
+    await saveAnalystRatings(symbol, analystRatings);
+    if (shareholding.length > 0) await saveShareholding(symbol, shareholding);
+
+    await saveFundamentalsSync(symbol, 'success', null);
 
     console.log(`[Fundamentals] ✅ ${symbol}: PE=${fundamentals.pe_ratio}, MktCap=${fundamentals.market_cap}, News=${news.length}, Analysts=${analystRatings.total_analysts}`);
     return { symbol, status: 'success', data: fundamentals };
   } catch (error) {
     console.error(`[Fundamentals] ❌ ${symbol}: ${error.message}`);
-    saveFundamentalsSync(symbol, 'error', error.message);
+    await saveFundamentalsSync(symbol, 'error', error.message);
     return { symbol, status: 'error', error: error.message };
   }
 }

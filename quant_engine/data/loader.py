@@ -1,17 +1,14 @@
 """
-Data Loader — reads price history from the shared SQLite database.
+Data Loader — reads price history from the Turso cloud database.
 """
-import sqlite3
 from typing import List
 import pandas as pd
-from quant_engine.config import DB_PATH
+from quant_engine.data.turso_client import connect
 
 
 def get_connection():
-    """Get a read-only SQLite connection."""
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get a Turso connection."""
+    return connect()
 
 
 def load_price_history(symbol: str, limit: int = 365) -> pd.DataFrame:

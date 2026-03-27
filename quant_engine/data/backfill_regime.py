@@ -20,7 +20,6 @@ Run:
 import argparse
 import logging
 import os
-import sqlite3
 import time
 from pathlib import Path
 
@@ -30,7 +29,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from quant_engine.config import DB_PATH
+from quant_engine.data.turso_client import connect, TursoConnection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -47,10 +46,8 @@ CREATE TABLE IF NOT EXISTS market_regime (
 """
 
 
-def _get_rw_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+def _get_rw_connection() -> TursoConnection:
+    return connect()
 
 
 # ── CSV import ────────────────────────────────────────────────────
@@ -115,7 +112,7 @@ def _parse_vix_csv(csv_path: str) -> list[dict]:
     return rows
 
 
-def import_from_csv(conn: sqlite3.Connection, csv_path: str) -> int:
+def import_from_csv(conn: TursoConnection, csv_path: str) -> int:
     rows = _parse_vix_csv(csv_path)
     if not rows:
         logger.error("No valid rows parsed from %s", csv_path)

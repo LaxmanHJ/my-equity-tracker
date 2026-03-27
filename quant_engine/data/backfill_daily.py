@@ -23,7 +23,6 @@ Flags:
 import argparse
 import logging
 import os
-import sqlite3
 import time
 from pathlib import Path
 
@@ -33,7 +32,7 @@ from dotenv import load_dotenv
 # Load .env from project root (two levels above this file)
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from quant_engine.config import DB_PATH
+from quant_engine.data.turso_client import connect, TursoConnection
 from quant_engine.data.loader import load_all_symbols
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -51,10 +50,8 @@ def _api_key() -> str:
     return key
 
 
-def _get_rw_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+def _get_rw_connection() -> TursoConnection:
+    return connect()
 
 
 def _fetch_bars(symbol: str, period: str) -> list[dict]:
@@ -109,7 +106,7 @@ def _fetch_bars(symbol: str, period: str) -> list[dict]:
     return bars
 
 
-def _upsert_bars(conn: sqlite3.Connection, symbol: str, bars: list[dict]) -> int:
+def _upsert_bars(conn: TursoConnection, symbol: str, bars: list[dict]) -> int:
     if not bars:
         return 0
     rows = [(symbol, b["date"], b["open"], b["high"], b["low"], b["close"], b["volume"])
@@ -123,7 +120,7 @@ def _upsert_bars(conn: sqlite3.Connection, symbol: str, bars: list[dict]) -> int
     return len(rows)
 
 
-def backfill_symbol(conn: sqlite3.Connection, symbol: str, period: str) -> int:
+def backfill_symbol(conn: TursoConnection, symbol: str, period: str) -> int:
     bars = _fetch_bars(symbol, period)
     if not bars:
         return 0

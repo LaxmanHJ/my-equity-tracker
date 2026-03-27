@@ -144,8 +144,8 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
     const apiSymbol = INDEX_SYMBOL_MAP[cleanSymbol] || cleanSymbol;
 
     // 1. Check database for existing data
-    const localData = forceRefresh ? [] : getPriceHistory(dbSymbol);
-    const latestDateStr = forceRefresh ? null : getLatestPriceDate(dbSymbol);
+    const localData = forceRefresh ? [] : await getPriceHistory(dbSymbol);
+    const latestDateStr = forceRefresh ? null : await getLatestPriceDate(dbSymbol);
 
     // Determine what we need to fetch
     let rapidApiPeriod = period;
@@ -194,11 +194,11 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
 
     // Save to Database (use the original symbol so Python can find it)
     if (newData && newData.length > 0) {
-      savePriceHistory(dbSymbol, newData);
+      await savePriceHistory(dbSymbol, newData);
     }
 
     // Return all local data (combined old + fresh inserted)
-    return getPriceHistory(dbSymbol);
+    return await getPriceHistory(dbSymbol);
 
   } catch (error) {
     console.error(`Error fetching historical data for ${symbol}:`, error.message);

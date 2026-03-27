@@ -1,28 +1,20 @@
-import Database from 'better-sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import 'dotenv/config';
+import { createClient } from '@libsql/client';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '../../data');
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
-// Ensure data directory exists
-if (!existsSync(dataDir)) {
-  mkdirSync(dataDir, { recursive: true });
-}
-
-const dbPath = join(dataDir, 'portfolio.db');
-const db = new Database(dbPath);
-
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
+// @libsql/client rejects undefined — coerce every arg to null if undefined
+const nn = (...args) => args.map(v => v ?? null);
 
 /**
  * Initialize database tables
  */
-export function initDatabase() {
+export async function initDatabase() {
   // Price history table
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -39,7 +31,7 @@ export function initDatabase() {
   `);
 
   // Alerts table
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -53,7 +45,7 @@ export function initDatabase() {
   `);
 
   // Daily reports table
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS daily_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL UNIQUE,
@@ -62,8 +54,8 @@ export function initDatabase() {
     )
   `);
 
-  // ── Fundamental data tables (normalized) ─────────────────────────
-  db.exec(`
+  // Fundamental data tables (normalized)
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_fundamentals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL UNIQUE,
@@ -102,7 +94,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_fundamentals_sync (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL UNIQUE,
@@ -113,7 +105,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_peer_comparison (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -131,7 +123,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_financials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -155,7 +147,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_news (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -169,7 +161,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_analyst_ratings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL UNIQUE,
@@ -186,7 +178,7 @@ export function initDatabase() {
     )
   `);
 
-  db.exec(`
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS stock_shareholding (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL,
@@ -198,21 +190,19 @@ export function initDatabase() {
     )
   `);
 
-  // Create indexes
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol);
-    CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date);
-    CREATE INDEX IF NOT EXISTS idx_alerts_active ON alerts(is_active);
-    CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON stock_fundamentals(symbol);
-    CREATE INDEX IF NOT EXISTS idx_peers_symbol ON stock_peer_comparison(symbol);
-    CREATE INDEX IF NOT EXISTS idx_financials_symbol ON stock_financials(symbol);
-    CREATE INDEX IF NOT EXISTS idx_sync_symbol ON stock_fundamentals_sync(symbol);
-    CREATE INDEX IF NOT EXISTS idx_news_symbol ON stock_news(symbol);
-    CREATE INDEX IF NOT EXISTS idx_analyst_symbol ON stock_analyst_ratings(symbol);
-    CREATE INDEX IF NOT EXISTS idx_shareholding_symbol ON stock_shareholding(symbol);
-  `);
+  // Create indexes — each statement separately
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_alerts_active ON alerts(is_active)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol ON stock_fundamentals(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_peers_symbol ON stock_peer_comparison(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_financials_symbol ON stock_financials(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_sync_symbol ON stock_fundamentals_sync(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_news_symbol ON stock_news(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_analyst_symbol ON stock_analyst_ratings(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_shareholding_symbol ON stock_shareholding(symbol)`);
 
-  console.log('✅ Database initialized');
+  console.log('Database initialized');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -222,43 +212,36 @@ export function initDatabase() {
 /**
  * Save historical price data
  */
-export function savePriceHistory(symbol, data) {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO price_history (symbol, date, open, high, low, close, volume, adj_close)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertMany = db.transaction((items) => {
-    for (const item of items) {
-      insert.run(symbol, item.date, item.open, item.high, item.low, item.close, item.volume, item.adjClose);
-    }
-  });
-
-  insertMany(data);
+export async function savePriceHistory(symbol, data) {
+  for (const item of data) {
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO price_history (symbol, date, open, high, low, close, volume, adj_close)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: nn(symbol, item.date, item.open, item.high, item.low, item.close, item.volume, item.adjClose)
+    });
+  }
 }
 
 /**
  * Get historical price data from database
  */
-export function getPriceHistory(symbol, days = 365) {
-  return db.prepare(`
-    SELECT * FROM price_history 
-    WHERE symbol = ? 
-    ORDER BY date ASC 
-  `).all(symbol);
+export async function getPriceHistory(symbol, days = 365) {
+  const result = await db.execute({
+    sql: `SELECT * FROM price_history WHERE symbol = ? ORDER BY date ASC`,
+    args: [symbol]
+  });
+  return result.rows;
 }
 
 /**
  * Get the most recent date we have data for a symbol
  */
-export function getLatestPriceDate(symbol) {
-  const row = db.prepare(`
-    SELECT date FROM price_history 
-    WHERE symbol = ? 
-    ORDER BY date DESC 
-    LIMIT 1
-  `).get(symbol);
-
+export async function getLatestPriceDate(symbol) {
+  const result = await db.execute({
+    sql: `SELECT date FROM price_history WHERE symbol = ? ORDER BY date DESC LIMIT 1`,
+    args: [symbol]
+  });
+  const row = result.rows[0] ?? null;
   return row ? row.date : null;
 }
 
@@ -269,33 +252,33 @@ export function getLatestPriceDate(symbol) {
 /**
  * Create a price alert
  */
-export function createAlert(symbol, type, threshold, direction) {
-  const result = db.prepare(`
-    INSERT INTO alerts (symbol, type, threshold, direction)
-    VALUES (?, ?, ?, ?)
-  `).run(symbol, type, threshold, direction);
-
+export async function createAlert(symbol, type, threshold, direction) {
+  const result = await db.execute({
+    sql: `INSERT INTO alerts (symbol, type, threshold, direction) VALUES (?, ?, ?, ?)`,
+    args: [symbol, type, threshold, direction]
+  });
   return result.lastInsertRowid;
 }
 
 /**
  * Get active alerts
  */
-export function getActiveAlerts() {
-  return db.prepare(`
-    SELECT * FROM alerts WHERE is_active = 1
-  `).all();
+export async function getActiveAlerts() {
+  const result = await db.execute({
+    sql: `SELECT * FROM alerts WHERE is_active = 1`,
+    args: []
+  });
+  return result.rows;
 }
 
 /**
  * Mark alert as triggered
  */
-export function triggerAlert(id) {
-  db.prepare(`
-    UPDATE alerts 
-    SET is_active = 0, triggered_at = datetime('now')
-    WHERE id = ?
-  `).run(id);
+export async function triggerAlert(id) {
+  await db.execute({
+    sql: `UPDATE alerts SET is_active = 0, triggered_at = datetime('now') WHERE id = ?`,
+    args: [id]
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -305,21 +288,22 @@ export function triggerAlert(id) {
 /**
  * Save daily report
  */
-export function saveDailyReport(date, reportData) {
-  db.prepare(`
-    INSERT OR REPLACE INTO daily_reports (date, report_data)
-    VALUES (?, ?)
-  `).run(date, JSON.stringify(reportData));
+export async function saveDailyReport(date, reportData) {
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO daily_reports (date, report_data) VALUES (?, ?)`,
+    args: [date, JSON.stringify(reportData)]
+  });
 }
 
 /**
  * Get daily report
  */
-export function getDailyReport(date) {
-  const row = db.prepare(`
-    SELECT * FROM daily_reports WHERE date = ?
-  `).get(date);
-
+export async function getDailyReport(date) {
+  const result = await db.execute({
+    sql: `SELECT * FROM daily_reports WHERE date = ?`,
+    args: [date]
+  });
+  const row = result.rows[0] ?? null;
   if (row) {
     row.report_data = JSON.parse(row.report_data);
   }
@@ -333,9 +317,9 @@ export function getDailyReport(date) {
 /**
  * Save or update fundamental data for a stock
  */
-export function saveFundamentals(symbol, data) {
-  db.prepare(`
-    INSERT OR REPLACE INTO stock_fundamentals (
+export async function saveFundamentals(symbol, data) {
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO stock_fundamentals (
       symbol, company_name, industry,
       pe_ratio, pb_ratio, eps_diluted, dividend_yield,
       roe_5y_avg, roe_ttm, net_profit_margin_ttm, net_profit_margin_5y_avg,
@@ -355,104 +339,104 @@ export function saveFundamentals(symbol, data) {
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?, ?
+    )`,
+    args: nn(
+      symbol, data.company_name, data.industry,
+      data.pe_ratio, data.pb_ratio, data.eps_diluted, data.dividend_yield,
+      data.roe_5y_avg, data.roe_ttm, data.net_profit_margin_ttm, data.net_profit_margin_5y_avg,
+      data.gross_margin_ttm, data.operating_margin_ttm,
+      data.revenue_growth_5y, data.eps_growth_5y, data.eps_growth_3y, data.revenue_growth_3y,
+      data.debt_to_equity, data.current_ratio, data.quick_ratio, data.interest_coverage,
+      data.free_cash_flow, data.market_cap, data.year_high, data.year_low, data.beta,
+      data.book_value_per_share, data.revenue_ttm, data.price_to_sales, data.price_to_cash_flow,
+      data.payout_ratio, data.total_debt, data.total_equity
     )
-  `).run(
-    symbol, data.company_name, data.industry,
-    data.pe_ratio, data.pb_ratio, data.eps_diluted, data.dividend_yield,
-    data.roe_5y_avg, data.roe_ttm, data.net_profit_margin_ttm, data.net_profit_margin_5y_avg,
-    data.gross_margin_ttm, data.operating_margin_ttm,
-    data.revenue_growth_5y, data.eps_growth_5y, data.eps_growth_3y, data.revenue_growth_3y,
-    data.debt_to_equity, data.current_ratio, data.quick_ratio, data.interest_coverage,
-    data.free_cash_flow, data.market_cap, data.year_high, data.year_low, data.beta,
-    data.book_value_per_share, data.revenue_ttm, data.price_to_sales, data.price_to_cash_flow,
-    data.payout_ratio, data.total_debt, data.total_equity
-  );
+  });
 }
 
 /**
  * Save sync metadata for a stock
  */
-export function saveFundamentalsSync(symbol, status = 'success', errorMessage = null) {
-  db.prepare(`
-    INSERT OR REPLACE INTO stock_fundamentals_sync (symbol, fetched_at, status, error_message)
-    VALUES (?, datetime('now'), ?, ?)
-  `).run(symbol, status, errorMessage);
+export async function saveFundamentalsSync(symbol, status = 'success', errorMessage = null) {
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO stock_fundamentals_sync (symbol, fetched_at, status, error_message)
+          VALUES (?, datetime('now'), ?, ?)`,
+    args: [symbol, status, errorMessage]
+  });
 }
 
 /**
  * Save peer comparison data (replaces all peers for a symbol)
  */
-export function savePeers(symbol, peers) {
-  db.prepare(`DELETE FROM stock_peer_comparison WHERE symbol = ?`).run(symbol);
-
-  const insert = db.prepare(`
-    INSERT INTO stock_peer_comparison (
-      symbol, peer_name, peer_pe, peer_pb, peer_market_cap,
-      peer_roe_ttm, peer_npm_ttm, peer_debt_to_equity, peer_dividend_yield,
-      peer_price, peer_change_pct
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertMany = db.transaction((items) => {
-    for (const p of items) {
-      insert.run(
+export async function savePeers(symbol, peers) {
+  await db.execute({
+    sql: `DELETE FROM stock_peer_comparison WHERE symbol = ?`,
+    args: [symbol]
+  });
+  for (const p of peers) {
+    await db.execute({
+      sql: `INSERT INTO stock_peer_comparison (
+              symbol, peer_name, peer_pe, peer_pb, peer_market_cap,
+              peer_roe_ttm, peer_npm_ttm, peer_debt_to_equity, peer_dividend_yield,
+              peer_price, peer_change_pct
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: nn(
         symbol, p.peer_name, p.peer_pe, p.peer_pb, p.peer_market_cap,
         p.peer_roe_ttm, p.peer_npm_ttm, p.peer_debt_to_equity, p.peer_dividend_yield,
         p.peer_price, p.peer_change_pct
-      );
-    }
-  });
-
-  insertMany(peers);
+      )
+    });
+  }
 }
 
 /**
  * Save financial statements (replaces all for a symbol)
  */
-export function saveFinancials(symbol, financials) {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO stock_financials (
-      symbol, fiscal_year, end_date, statement_type,
-      revenue, gross_profit, operating_income, net_income, eps_diluted,
-      total_assets, total_liabilities, total_equity, total_debt,
-      cash_from_operations, capex, free_cash_flow
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertMany = db.transaction((items) => {
-    for (const f of items) {
-      insert.run(
+export async function saveFinancials(symbol, financials) {
+  for (const f of financials) {
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO stock_financials (
+              symbol, fiscal_year, end_date, statement_type,
+              revenue, gross_profit, operating_income, net_income, eps_diluted,
+              total_assets, total_liabilities, total_equity, total_debt,
+              cash_from_operations, capex, free_cash_flow
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: nn(
         symbol, f.fiscal_year, f.end_date, f.statement_type,
         f.revenue, f.gross_profit, f.operating_income, f.net_income, f.eps_diluted,
         f.total_assets, f.total_liabilities, f.total_equity, f.total_debt,
         f.cash_from_operations, f.capex, f.free_cash_flow
-      );
-    }
-  });
-
-  insertMany(financials);
+      )
+    });
+  }
 }
 
 /**
  * Get fundamentals for a single stock (with sync info and peers)
  */
-export function getFundamentals(symbol) {
-  const fundamentals = db.prepare(`
-    SELECT f.*, s.fetched_at, s.status as sync_status
-    FROM stock_fundamentals f
-    LEFT JOIN stock_fundamentals_sync s ON f.symbol = s.symbol
-    WHERE f.symbol = ?
-  `).get(symbol);
+export async function getFundamentals(symbol) {
+  const fundResult = await db.execute({
+    sql: `SELECT f.*, s.fetched_at, s.status as sync_status
+          FROM stock_fundamentals f
+          LEFT JOIN stock_fundamentals_sync s ON f.symbol = s.symbol
+          WHERE f.symbol = ?`,
+    args: [symbol]
+  });
+  const fundamentals = fundResult.rows[0] ?? null;
 
   if (!fundamentals) return null;
 
-  fundamentals.peers = db.prepare(`
-    SELECT * FROM stock_peer_comparison WHERE symbol = ?
-  `).all(symbol);
+  const peersResult = await db.execute({
+    sql: `SELECT * FROM stock_peer_comparison WHERE symbol = ?`,
+    args: [symbol]
+  });
+  fundamentals.peers = peersResult.rows;
 
-  fundamentals.financials = db.prepare(`
-    SELECT * FROM stock_financials WHERE symbol = ? ORDER BY end_date DESC
-  `).all(symbol);
+  const financialsResult = await db.execute({
+    sql: `SELECT * FROM stock_financials WHERE symbol = ? ORDER BY end_date DESC`,
+    args: [symbol]
+  });
+  fundamentals.financials = financialsResult.rows;
 
   return fundamentals;
 }
@@ -460,150 +444,135 @@ export function getFundamentals(symbol) {
 /**
  * Get fundamentals for all stocks
  */
-export function getAllFundamentals() {
-  const rows = db.prepare(`
-    SELECT f.*, s.fetched_at, s.status as sync_status
-    FROM stock_fundamentals f
-    LEFT JOIN stock_fundamentals_sync s ON f.symbol = s.symbol
-    ORDER BY f.symbol
-  `).all();
-
-  return rows;
+export async function getAllFundamentals() {
+  const result = await db.execute({
+    sql: `SELECT f.*, s.fetched_at, s.status as sync_status
+          FROM stock_fundamentals f
+          LEFT JOIN stock_fundamentals_sync s ON f.symbol = s.symbol
+          ORDER BY f.symbol`,
+    args: []
+  });
+  return result.rows;
 }
 
 /**
  * Get the last sync date for fundamentals
  */
-export function getFundamentalsSyncDate() {
-  const row = db.prepare(`
-    SELECT MIN(fetched_at) as oldest, MAX(fetched_at) as newest, COUNT(*) as count
-    FROM stock_fundamentals_sync
-    WHERE status = 'success'
-  `).get();
-  return row;
+export async function getFundamentalsSyncDate() {
+  const result = await db.execute({
+    sql: `SELECT MIN(fetched_at) as oldest, MAX(fetched_at) as newest, COUNT(*) as count
+          FROM stock_fundamentals_sync
+          WHERE status = 'success'`,
+    args: []
+  });
+  return result.rows[0] ?? null;
 }
 
 /**
  * Save news articles (replaces existing if headline matches)
  */
-export function saveNews(symbol, newsItems) {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO stock_news (
-      symbol, headline, news_date, url, source, thumbnail_url
-    ) VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertMany = db.transaction((items) => {
-    for (const item of items) {
-      insert.run(
-        symbol, item.headline, item.news_date, item.url,
-        item.source, item.thumbnail_url
-      );
-    }
-  });
-
-  insertMany(newsItems);
+export async function saveNews(symbol, newsItems) {
+  for (const item of newsItems) {
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO stock_news (symbol, headline, news_date, url, source, thumbnail_url)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: nn(symbol, item.headline, item.news_date, item.url, item.source, item.thumbnail_url)
+    });
+  }
 }
 
 /**
  * Get news articles for a stock
  */
-export function getNews(symbol, limit = 10) {
-  return db.prepare(`
-    SELECT * FROM stock_news
-    WHERE symbol = ?
-    ORDER BY id DESC
-    LIMIT ?
-  `).all(symbol, limit);
+export async function getNews(symbol, limit = 10) {
+  const result = await db.execute({
+    sql: `SELECT * FROM stock_news WHERE symbol = ? ORDER BY id DESC LIMIT ?`,
+    args: [symbol, limit]
+  });
+  return result.rows;
 }
 
 /**
  * Save analyst ratings
  */
-export function saveAnalystRatings(symbol, data) {
-  db.prepare(`
-    INSERT OR REPLACE INTO stock_analyst_ratings (
-      symbol, strong_buy, buy, hold, sell, strong_sell,
-      total_analysts, mean_rating, risk_category, risk_std_dev
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    symbol, data.strong_buy, data.buy, data.hold, data.sell, data.strong_sell,
-    data.total_analysts, data.mean_rating, data.risk_category, data.risk_std_dev
-  );
+export async function saveAnalystRatings(symbol, data) {
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO stock_analyst_ratings (
+            symbol, strong_buy, buy, hold, sell, strong_sell,
+            total_analysts, mean_rating, risk_category, risk_std_dev
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: nn(
+      symbol, data.strong_buy, data.buy, data.hold, data.sell, data.strong_sell,
+      data.total_analysts, data.mean_rating, data.risk_category, data.risk_std_dev
+    )
+  });
 }
 
 /**
  * Get analyst ratings for a stock
  */
-export function getAnalystRatings(symbol) {
-  return db.prepare(`
-    SELECT * FROM stock_analyst_ratings
-    WHERE symbol = ?
-  `).get(symbol);
+export async function getAnalystRatings(symbol) {
+  const result = await db.execute({
+    sql: `SELECT * FROM stock_analyst_ratings WHERE symbol = ?`,
+    args: [symbol]
+  });
+  return result.rows[0] ?? null;
 }
 
 /**
  * Save shareholding data
  */
-export function saveShareholding(symbol, data) {
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO stock_shareholding (
-      symbol, category, holding_date, percentage
-    ) VALUES (?, ?, ?, ?)
-  `);
-
-  const insertMany = db.transaction((items) => {
-    for (const item of items) {
-      insert.run(symbol, item.category, item.holding_date, item.percentage);
-    }
-  });
-
-  insertMany(data);
+export async function saveShareholding(symbol, data) {
+  for (const item of data) {
+    await db.execute({
+      sql: `INSERT OR REPLACE INTO stock_shareholding (symbol, category, holding_date, percentage)
+            VALUES (?, ?, ?, ?)`,
+      args: nn(symbol, item.category, item.holding_date, item.percentage)
+    });
+  }
 }
 
 /**
  * Get shareholding data for a stock
  */
-export function getShareholding(symbol) {
-  return db.prepare(`
-    SELECT * FROM stock_shareholding
-    WHERE symbol = ?
-    ORDER BY holding_date ASC
-  `).all(symbol);
+export async function getShareholding(symbol) {
+  const result = await db.execute({
+    sql: `SELECT * FROM stock_shareholding WHERE symbol = ? ORDER BY holding_date ASC`,
+    args: [symbol]
+  });
+  return result.rows;
 }
 
 /**
  * Get sector momentum scores
  */
-export function getSectorMomentum() {
-  // We compute sector momentum by averaging the percent change of all stocks in a sector.
-  // We join stock_fundamentals with the latest price_history record.
-  return db.prepare(`
-    WITH RankedPrices AS (
-      SELECT symbol, close,
-             ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY date DESC) as rn
-      FROM price_history
-    ),
-    PrevPrices AS (
-      SELECT curr.symbol, 
-             ((curr.close - prev.close) / prev.close * 100.0) as pct_change
-      FROM RankedPrices curr
-      JOIN RankedPrices prev ON curr.symbol = prev.symbol AND prev.rn = 2
-      WHERE curr.rn = 1 AND prev.close > 0
-    )
-    SELECT
-      f.industry,
-      COUNT(f.symbol) as stock_count,
-      AVG(p.pct_change) as momentum_score
-    FROM stock_fundamentals f
-    JOIN PrevPrices p ON f.symbol = p.symbol
-    WHERE f.industry IS NOT NULL AND f.industry != ''
-    GROUP BY f.industry
-    ORDER BY momentum_score DESC
-  `).all();
+export async function getSectorMomentum() {
+  const result = await db.execute({
+    sql: `WITH RankedPrices AS (
+            SELECT symbol, close,
+                   ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY date DESC) as rn
+            FROM price_history
+          ),
+          PrevPrices AS (
+            SELECT curr.symbol,
+                   ((curr.close - prev.close) / prev.close * 100.0) as pct_change
+            FROM RankedPrices curr
+            JOIN RankedPrices prev ON curr.symbol = prev.symbol AND prev.rn = 2
+            WHERE curr.rn = 1 AND prev.close > 0
+          )
+          SELECT
+            f.industry,
+            COUNT(f.symbol) as stock_count,
+            AVG(p.pct_change) as momentum_score
+          FROM stock_fundamentals f
+          JOIN PrevPrices p ON f.symbol = p.symbol
+          WHERE f.industry IS NOT NULL AND f.industry != ''
+          GROUP BY f.industry
+          ORDER BY momentum_score DESC`,
+    args: []
+  });
+  return result.rows;
 }
 
 // Initialize on import
-initDatabase();
-
-export default db;
+await initDatabase();

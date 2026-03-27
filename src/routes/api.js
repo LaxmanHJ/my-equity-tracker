@@ -279,9 +279,9 @@ router.get('/analysis/risk/:symbol', async (req, res) => {
  * GET /api/alerts
  * Get all active alerts
  */
-router.get('/alerts', (req, res) => {
+router.get('/alerts', async (req, res) => {
   try {
-    const alerts = getActiveAlerts();
+    const alerts = await getActiveAlerts();
     res.json({ alerts });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch alerts' });
@@ -292,7 +292,7 @@ router.get('/alerts', (req, res) => {
  * POST /api/alerts
  * Create a new price alert
  */
-router.post('/alerts', (req, res) => {
+router.post('/alerts', async (req, res) => {
   try {
     const { symbol, type, threshold, direction } = req.body;
 
@@ -308,7 +308,7 @@ router.post('/alerts', (req, res) => {
       return res.status(404).json({ error: 'Stock not found in portfolio' });
     }
 
-    const alertId = createAlert(stock.symbol, type || 'price', threshold, direction);
+    const alertId = await createAlert(stock.symbol, type || 'price', threshold, direction);
 
     res.json({
       success: true,
@@ -324,9 +324,9 @@ router.post('/alerts', (req, res) => {
  * DELETE /api/alerts/:id
  * Delete an alert
  */
-router.delete('/alerts/:id', (req, res) => {
+router.delete('/alerts/:id', async (req, res) => {
   try {
-    triggerAlert(parseInt(req.params.id));
+    await triggerAlert(parseInt(req.params.id));
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete alert' });
@@ -346,7 +346,7 @@ router.get('/reports/daily', async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
 
     // Check if report already exists
-    let report = getDailyReport(today);
+    let report = await getDailyReport(today);
 
     if (!report) {
       // Generate new report
@@ -380,7 +380,7 @@ router.get('/reports/daily', async (req, res) => {
         generatedAt: new Date().toISOString()
       };
 
-      saveDailyReport(today, reportData);
+      await saveDailyReport(today, reportData);
       report = { report_data: reportData };
     }
 
@@ -653,7 +653,7 @@ router.post('/fundamentals/sync', async (req, res) => {
 router.get('/fundamentals/:symbol', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const data = getFundamentals(symbol);
+    const data = await getFundamentals(symbol);
     if (!data) {
       return res.status(404).json({ error: `No fundamental data for ${symbol}. Run sync first.` });
     }
@@ -670,8 +670,8 @@ router.get('/fundamentals/:symbol', async (req, res) => {
  */
 router.get('/fundamentals', async (req, res) => {
   try {
-    const data = getAllFundamentals();
-    const syncInfo = getFundamentalsSyncDate();
+    const data = await getAllFundamentals();
+    const syncInfo = await getFundamentalsSyncDate();
     res.json({ stocks: data, syncInfo });
   } catch (error) {
     console.error('Fundamentals list error:', error);
@@ -683,10 +683,10 @@ router.get('/fundamentals', async (req, res) => {
  * GET /api/fundamentals/:symbol/news
  * Returns recent news articles for a stock
  */
-router.get('/fundamentals/:symbol/news', (req, res) => {
+router.get('/fundamentals/:symbol/news', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const news = getNews(symbol);
+    const news = await getNews(symbol);
     res.json(news);
   } catch (error) {
     console.error('Fundamentals news error:', error);
@@ -698,10 +698,10 @@ router.get('/fundamentals/:symbol/news', (req, res) => {
  * GET /api/fundamentals/:symbol/analyst
  * Returns analyst ratings for a stock
  */
-router.get('/fundamentals/:symbol/analyst', (req, res) => {
+router.get('/fundamentals/:symbol/analyst', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const data = getAnalystRatings(symbol);
+    const data = await getAnalystRatings(symbol);
     res.json(data || {});
   } catch (error) {
     console.error('Fundamentals analyst error:', error);
@@ -713,10 +713,10 @@ router.get('/fundamentals/:symbol/analyst', (req, res) => {
  * GET /api/fundamentals/:symbol/shareholding
  * Returns shareholding pattern for a stock
  */
-router.get('/fundamentals/:symbol/shareholding', (req, res) => {
+router.get('/fundamentals/:symbol/shareholding', async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const data = getShareholding(symbol);
+    const data = await getShareholding(symbol);
     res.json(data);
   } catch (error) {
     console.error('Fundamentals shareholding error:', error);
@@ -732,9 +732,9 @@ router.get('/fundamentals/:symbol/shareholding', (req, res) => {
  * GET /api/sectors/momentum
  * Returns computed sector momentum scores
  */
-router.get('/sectors/momentum', (req, res) => {
+router.get('/sectors/momentum', async (req, res) => {
   try {
-    const data = getSectorMomentum();
+    const data = await getSectorMomentum();
     res.json(data);
   } catch (error) {
     console.error('Sector momentum error:', error);

@@ -1,10 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import sqlite3
 import pandas as pd
 from typing import List
 
-from quant_engine.config import DB_PATH
+from quant_engine.data.turso_client import connect
 from quant_engine.backtest.engine import VectorizedBacktester
 from quant_engine.backtest.metrics import calculate_metrics
 from quant_engine.strategies.base import BaseStrategy
@@ -34,10 +33,10 @@ def fetch_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         # DB stores 'RELIANCE', not 'RELIANCE.NS'
         db_symbol = symbol.replace('.NS', '').replace('.BO', '')
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = connect()
         query = """
-            SELECT date, open, high, low, close, volume 
-            FROM price_history 
+            SELECT date, open, high, low, close, volume
+            FROM price_history
             WHERE symbol = ? AND date >= ? AND date <= ?
             ORDER BY date ASC
         """
