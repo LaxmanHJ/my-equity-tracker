@@ -13,6 +13,7 @@ from quant_engine.data.loader import (
     load_industry_map, load_analyst_consensus,
 )
 from quant_engine.data.market_regime_loader import load_vix_score_today
+from quant_engine.strategies import markov_regime as markov_regime_strategy
 from quant_engine.data.fundamentals_loader import load_fundamentals
 from quant_engine.scoring.composite import score_single_stock
 from quant_engine.ml import predictor as ml_predictor
@@ -29,10 +30,11 @@ SICILIAN_WEIGHTS = {
     "volatility":        0.04,
     "relative_strength": 0.06,
     # Cross-stock / external + market regime (20%)
-    "sector_rotation":   0.06,
-    "analyst_consensus": 0.04,
-    "vix_regime":        0.05,
-    "nifty_trend":       0.05,
+    "sector_rotation":   0.05,
+    "analyst_consensus": 0.03,
+    "vix_regime":        0.04,
+    "nifty_trend":       0.04,
+    "markov_regime":     0.04,
     # Fundamental (18%)
     "valuation":         0.08,
     "financial_health":  0.06,
@@ -367,6 +369,26 @@ def _score_nifty_trend(benchmark_df: pd.DataFrame) -> float:
     return round(0.5 * vs_sma50 + 0.5 * vs_sma200, 4)
 
 
+def _score_markov_regime(benchmark_df: pd.DataFrame) -> float:
+    """
+    Run Markov chain regime analysis on the NIFTY benchmark and return
+    P(next = Bull) - P(next = Bear) from the current state.
+
+    Positive → transition matrix predicts Bull tomorrow.
+    Negative → transition matrix predicts Bear tomorrow.
+    Returns 0 if insufficient benchmark data.
+    """
+    if benchmark_df.empty or len(benchmark_df) < 30:
+        return 0.0
+    result = markov_regime_strategy.calculate(benchmark_df)
+    if result.get("current_regime") == "Unknown":
+        return 0.0
+    probs = result.get("next_day_probabilities", {})
+    bull_p = probs.get("Bull", 0.0)
+    bear_p = probs.get("Bear", 0.0)
+    return float(np.clip(bull_p - bear_p, -1.0, 1.0))
+
+
 def _score_analyst_consensus(symbol: str) -> float:
     """
     Returns the analyst consensus score for a stock in [-1, +1].
@@ -470,6 +492,7 @@ def run_sicilian(symbol: str) -> dict:
         "analyst_consensus": round(_score_analyst_consensus(symbol), 4),
         "vix_regime":       round(_score_vix_regime(), 4),
         "nifty_trend":      round(_score_nifty_trend(benchmark_df), 4),
+        "markov_regime":    round(_score_markov_regime(benchmark_df), 4),
         # Fundamental (3)
         "valuation":        round(_score_valuation(fund), 4),
         "financial_health": round(_score_financial_health(fund), 4),

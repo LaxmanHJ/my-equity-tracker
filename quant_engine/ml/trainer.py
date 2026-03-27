@@ -35,7 +35,7 @@ from quant_engine.data.loader import (
     load_all_symbols, load_benchmark, load_price_history,
     load_industry_map, load_analyst_consensus,
 )
-from quant_engine.data.market_regime_loader import load_vix_series, vix_to_score
+from quant_engine.data.market_regime_loader import load_vix_series, vix_to_score, build_markov_score_series
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ FEATURE_COLS = [
     # Market regime (same value for every stock on the same date)
     "vix_regime",         # India VIX rolling percentile → [-1 fear, +1 calm]
     "nifty_trend",        # NIFTY position vs SMA50 + SMA200 → [-1 downtrend, +1 uptrend]
+    "markov_regime",      # Markov P(Bull) - P(Bear) from 252-day rolling transition matrix
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -153,6 +154,7 @@ def _build_feature_frame(
     analyst_score: float,
     vix_score: pd.Series,
     nifty_trend: pd.Series,
+    markov_score: pd.Series,
 ) -> pd.DataFrame:
     """
     Compute all sub-scores for every bar in df.
@@ -161,6 +163,7 @@ def _build_feature_frame(
     analyst_score – static scalar for this stock (same value across all bars).
     vix_score     – market-wide VIX percentile score series; reindexed to df.
     nifty_trend   – market-wide NIFTY trend score series; reindexed to df.
+    markov_score  – rolling Markov P(Bull)-P(Bear) series; reindexed to df.
     """
     strat = SicilianStrategy("_trainer")
     close = df["close"]
@@ -186,6 +189,7 @@ def _build_feature_frame(
             "analyst_consensus": pd.Series(analyst_score, index=df.index),
             "vix_regime":        _align(vix_score),
             "nifty_trend":       _align(nifty_trend),
+            "markov_regime":     _align(markov_score),
         },
         index=df.index,
     )
@@ -232,6 +236,10 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     nifty_trend_series = _build_nifty_trend_series(benchmark_df)
     logger.info("NIFTY trend series: %d bars", len(nifty_trend_series))
 
+    # Markov regime: rolling P(Bull) - P(Bear) from 252-day transition matrix.
+    markov_score_series = build_markov_score_series(benchmark_df)
+    logger.info("Markov regime series: %d bars", len(markov_score_series))
+
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
 
@@ -245,6 +253,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 df, benchmark_df,
                 sector_score, analyst_score,
                 vix_score_series, nifty_trend_series,
+                markov_score_series,
             )
 
             # 20-day forward return (labelled without look-ahead: we shift backward)

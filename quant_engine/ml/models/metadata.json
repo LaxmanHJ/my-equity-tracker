@@ -1,31 +1,32 @@
 {
-  "trained_at": "2026-03-24T21:12:23.496839+00:00",
-  "n_samples": 8813,
-  "cv_accuracy_mean": 0.3868,
+  "trained_at": "2026-03-27T09:05:00.840679+00:00",
+  "n_samples": 8841,
+  "cv_accuracy_mean": 0.3844,
   "cv_accuracy_folds": [
-    0.4346,
-    0.4094,
-    0.453,
-    0.3624,
-    0.2745
+    0.4345,
+    0.4182,
+    0.4487,
+    0.3544,
+    0.2661
   ],
   "class_distribution": {
-    "1": 3700,
-    "-1": 3599,
-    "0": 1514
+    "1": 3704,
+    "-1": 3619,
+    "0": 1518
   },
   "feature_importances": {
-    "rsi": 0.138779,
-    "macd": 0.077149,
-    "trend_ma": 0.03512,
-    "bollinger": 0.110436,
-    "volume": 0.02034,
-    "volatility": 0.15205,
-    "relative_strength": 0.070168,
-    "sector_rotation": 0.093055,
-    "analyst_consensus": 0.122226,
-    "vix_regime": 0.120855,
-    "nifty_trend": 0.059823
+    "rsi": 0.13649,
+    "macd": 0.074808,
+    "trend_ma": 0.034873,
+    "bollinger": 0.10722,
+    "volume": 0.021284,
+    "volatility": 0.14532,
+    "relative_strength": 0.068752,
+    "sector_rotation": 0.09002,
+    "analyst_consensus": 0.116741,
+    "vix_regime": 0.116401,
+    "nifty_trend": 0.049825,
+    "markov_regime": 0.038266
   },
   "classes": [
     -1,

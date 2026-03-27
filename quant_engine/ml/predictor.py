@@ -12,6 +12,7 @@ from typing import Optional
 
 import joblib
 import numpy as np
+import pandas as pd
 
 from quant_engine.config import ML_MODEL_DIR
 
@@ -32,6 +33,7 @@ FEATURE_COLS = [
     "analyst_consensus",
     "vix_regime",
     "nifty_trend",
+    "markov_regime",
 ]
 
 _model_cache = None   # module-level cache so we only load from disk once
@@ -86,7 +88,7 @@ def predict(sub_scores: dict) -> Optional[dict]:
         return None
 
     # Build feature vector in the exact column order the model was trained on
-    X = np.array([[sub_scores.get(col, 0.0) for col in FEATURE_COLS]])
+    X = pd.DataFrame([[sub_scores.get(col, 0.0) for col in FEATURE_COLS]], columns=FEATURE_COLS)
 
     proba = model.predict_proba(X)[0]          # shape: (n_classes,)
     classes = model.classes_                    # e.g. [-1, 0, 1]

@@ -65,6 +65,54 @@ def vix_to_score(vix_series: pd.Series, window: int = 252) -> pd.Series:
     return score
 
 
+def build_markov_score_series(benchmark_df: pd.DataFrame, window: int = 60) -> pd.Series:
+    """
+    Rolling Markov next-day regime score in [-1, +1].
+
+    For each bar, builds a transition matrix from the trailing `window` days
+    of NIFTY daily returns (classified as Bear/Sideways/Bull), then returns:
+        P(next = Bull | current state) - P(next = Bear | current state)
+
+    Positive → market likely to continue in / transition to Bull.
+    Negative → market likely to stay in / transition to Bear.
+    Returns zeros for the first `window` bars (warm-up period).
+    """
+    if benchmark_df.empty or len(benchmark_df) < window + 1:
+        return pd.Series(dtype=float)
+
+    close = benchmark_df["close"].astype(float)
+    returns = close.pct_change().dropna()
+
+    BULL_T = 0.005   # > +0.5% → Bull
+    BEAR_T = -0.005  # < -0.5% → Bear
+
+    # Classify each day: 0=Bear, 1=Sideways, 2=Bull
+    states = np.ones(len(returns), dtype=int)
+    states[returns.values > BULL_T] = 2
+    states[returns.values < BEAR_T] = 0
+
+    scores = np.zeros(len(states), dtype=float)
+
+    for i in range(window, len(states)):
+        win = states[i - window:i]
+        curr = win[-1]
+
+        # 3×3 transition count matrix
+        counts = np.zeros((3, 3), dtype=float)
+        for j in range(len(win) - 1):
+            counts[win[j], win[j + 1]] += 1
+
+        row_sums = counts.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        trans = counts / row_sums
+
+        scores[i] = trans[curr, 2] - trans[curr, 0]   # P(Bull) - P(Bear)
+
+    result = pd.Series(scores, index=returns.index, dtype=float).clip(-1.0, 1.0)
+    result.iloc[:window] = 0.0
+    return result
+
+
 def load_vix_score_today() -> Optional[float]:
     """
     Returns today's (or most recent available) VIX regime score for live inference.
