@@ -205,6 +205,25 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_delivery_symbol ON delivery_data(symbol)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_delivery_date ON delivery_data(date)`);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sector_indices (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      date        TEXT NOT NULL,
+      index_name  TEXT NOT NULL,
+      open        REAL,
+      high        REAL,
+      low         REAL,
+      close       REAL,
+      pct_change  REAL,
+      pe_ratio    REAL,
+      pb_ratio    REAL,
+      div_yield   REAL,
+      UNIQUE(date, index_name)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_date ON sector_indices(date)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_index_name ON sector_indices(index_name)`);
+
   // Create indexes — each statement separately
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)`);

@@ -36,3 +36,22 @@ RISK_FREE_RATE = 0.06
 
 # ML model storage path
 ML_MODEL_DIR = Path(__file__).parent / "ml" / "models"
+
+# Industry → NSE sector index mapping (used for sector_rotation ML feature)
+# If a stock's industry has no exact match, fall back to "Nifty 500"
+INDUSTRY_TO_NSE_INDEX = {
+    "Information Technology":   "Nifty IT",
+    "Power":                    "Nifty Energy",
+    "Steel":                    "Nifty Metal",
+    "Banking":                  "Nifty Bank",
+    "Financial Services":       "Nifty Financial Services",
+    "Non-Banking Finance":      "Nifty Financial Services",
+    "Chemicals":                "Nifty Chemicals",
+    "Sugar":                    "Nifty FMCG",
+    "Telecom":                  "Nifty IT",          # closest proxy for CPaaS/tech
+    "Automobiles":              "Nifty Auto",
+    "Pharmaceuticals":          "Nifty Pharma",
+    "Real Estate":              "Nifty Realty",
+    "Consumer Goods":           "Nifty FMCG",
+    "Infrastructure":           "Nifty Infrastructure",
+}

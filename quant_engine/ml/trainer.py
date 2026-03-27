@@ -24,19 +24,23 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import TimeSeriesSplit
 
-from quant_engine.config import ML_MODEL_DIR
+from quant_engine.config import ML_MODEL_DIR, INDUSTRY_TO_NSE_INDEX
 from quant_engine.data.loader import (
     load_all_symbols, load_benchmark, load_price_history,
     load_industry_map, load_analyst_consensus,
 )
 from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.market_regime_loader import load_vix_series, vix_to_score, build_markov_score_series
+from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 logger = logging.getLogger(__name__)
@@ -415,3 +419,7 @@ def run_training_pipeline() -> dict:
     X, y = build_training_dataset()
     logger.info("Training Random Forest …")
     return train(X, y)
+
+
+if __name__ == "__main__":
+    run_training_pipeline()
