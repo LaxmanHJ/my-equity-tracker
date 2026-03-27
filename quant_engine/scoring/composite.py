@@ -7,6 +7,7 @@ from typing import Optional, List
 import pandas as pd
 from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD
 from quant_engine.data.loader import load_price_history, load_all_symbols, load_benchmark
+from quant_engine.data.delivery_loader import load_circuit_status
 from quant_engine.factors import (
     momentum,
     mean_reversion,
@@ -54,6 +55,13 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
     elif composite_score <= SHORT_THRESHOLD:
         signal = "SHORT"
     else:
+        signal = "HOLD"
+
+    # Circuit breaker override: lower circuit means stock is locked at lower limit.
+    # Cannot enter a LONG position — override to HOLD so we don't send buy signals
+    # into a stock that can't be sold the same day if needed.
+    circuit = load_circuit_status(symbol)
+    if circuit == -1 and signal == "LONG":
         signal = "HOLD"
 
     return {

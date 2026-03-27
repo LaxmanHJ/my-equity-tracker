@@ -35,6 +35,7 @@ from quant_engine.data.loader import (
     load_all_symbols, load_benchmark, load_price_history,
     load_industry_map, load_analyst_consensus,
 )
+from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.market_regime_loader import load_vix_series, vix_to_score, build_markov_score_series
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
@@ -57,6 +58,8 @@ FEATURE_COLS = [
     "vix_regime",         # India VIX rolling percentile → [-1 fear, +1 calm]
     "nifty_trend",        # NIFTY position vs SMA50 + SMA200 → [-1 downtrend, +1 uptrend]
     "markov_regime",      # Markov P(Bull) - P(Bear) from 252-day rolling transition matrix
+    # NSE delivery data
+    "delivery_score",     # rolling z-score of delivery_pct vs 60-day mean, clipped to [-1, +1]
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -155,15 +158,17 @@ def _build_feature_frame(
     vix_score: pd.Series,
     nifty_trend: pd.Series,
     markov_score: pd.Series,
+    delivery_score: pd.Series,
 ) -> pd.DataFrame:
     """
     Compute all sub-scores for every bar in df.
 
-    sector_score  – pre-computed industry series aligned by date; reindexed to df.
-    analyst_score – static scalar for this stock (same value across all bars).
-    vix_score     – market-wide VIX percentile score series; reindexed to df.
-    nifty_trend   – market-wide NIFTY trend score series; reindexed to df.
-    markov_score  – rolling Markov P(Bull)-P(Bear) series; reindexed to df.
+    sector_score   – pre-computed industry series aligned by date; reindexed to df.
+    analyst_score  – static scalar for this stock (same value across all bars).
+    vix_score      – market-wide VIX percentile score series; reindexed to df.
+    nifty_trend    – market-wide NIFTY trend score series; reindexed to df.
+    markov_score   – rolling Markov P(Bull)-P(Bear) series; reindexed to df.
+    delivery_score – rolling z-score of NSE delivery pct vs 60-day mean; reindexed to df.
     """
     strat = SicilianStrategy("_trainer")
     close = df["close"]
@@ -190,6 +195,7 @@ def _build_feature_frame(
             "vix_regime":        _align(vix_score),
             "nifty_trend":       _align(nifty_trend),
             "markov_regime":     _align(markov_score),
+            "delivery_score":    _align(delivery_score),
         },
         index=df.index,
     )
@@ -249,11 +255,22 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
             sector_score   = sector_series.get(industry, pd.Series(dtype=float))
             analyst_score  = analyst_map.get(symbol, 0.0)   # 0 = neutral if no coverage
 
+            # delivery_score: rolling z-score of delivery_pct vs 60-day mean, clipped to [-1, +1]
+            delivery_df = load_delivery_series(symbol, limit=2000)
+            if not delivery_df.empty and "delivery_pct" in delivery_df.columns:
+                delivery_pct = delivery_df["delivery_pct"].reindex(df.index)
+                roll_mean = delivery_pct.rolling(60, min_periods=10).mean()
+                roll_std  = delivery_pct.rolling(60, min_periods=10).std().replace(0, 1)
+                delivery_score_series = ((delivery_pct - roll_mean) / roll_std).clip(-3, 3) / 3
+            else:
+                delivery_score_series = pd.Series(dtype=float)
+
             features = _build_feature_frame(
                 df, benchmark_df,
                 sector_score, analyst_score,
                 vix_score_series, nifty_trend_series,
                 markov_score_series,
+                delivery_score_series,
             )
 
             # 20-day forward return (labelled without look-ahead: we shift backward)

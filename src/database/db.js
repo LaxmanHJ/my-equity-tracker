@@ -190,6 +190,21 @@ export async function initDatabase() {
     )
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS delivery_data (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol        TEXT NOT NULL,
+      date          TEXT NOT NULL,
+      traded_qty    INTEGER,
+      delivery_qty  INTEGER,
+      delivery_pct  REAL,
+      circuit_hit   INTEGER DEFAULT 0,
+      UNIQUE(symbol, date)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_delivery_symbol ON delivery_data(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_delivery_date ON delivery_data(date)`);
+
   // Create indexes — each statement separately
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)`);
