@@ -524,7 +524,7 @@ async function loadAnalysis(symbol) {
   container.innerHTML = '<div class="loading-spinner"></div>';
 
   try {
-    const [technicalRes, riskRes, sicilianRes, fundRes, analystRes, shareholdingRes, newsRes, momentumRes] = await Promise.all([
+    const [technicalRes, riskRes, sicilianRes, fundRes, analystRes, shareholdingRes, newsRes, momentumRes, bulkDealsRes] = await Promise.all([
       fetch(`${API_BASE}/analysis/technicals/${symbol}`),
       fetch(`${API_BASE}/analysis/risk/${symbol}`),
       fetch(`${API_BASE}/sicilian/${symbol}`).catch(() => null),
@@ -532,7 +532,8 @@ async function loadAnalysis(symbol) {
       fetch(`${API_BASE}/fundamentals/${symbol}/analyst`).catch(() => null),
       fetch(`${API_BASE}/fundamentals/${symbol}/shareholding`).catch(() => null),
       fetch(`${API_BASE}/fundamentals/${symbol}/news`).catch(() => null),
-      fetch(`${API_BASE}/sectors/momentum`).catch(() => null)
+      fetch(`${API_BASE}/sectors/momentum`).catch(() => null),
+      fetch(`${API_BASE}/bulk-deals/${symbol}`).catch(() => null)
     ]);
 
     const technical = await technicalRes.json();
@@ -543,8 +544,9 @@ async function loadAnalysis(symbol) {
     const shareholding = shareholdingRes && shareholdingRes.ok ? await shareholdingRes.json() : null;
     const news = newsRes && newsRes.ok ? await newsRes.json() : null;
     const momentum = momentumRes && momentumRes.ok ? await momentumRes.json() : null;
+    const bulkDealsData = bulkDealsRes && bulkDealsRes.ok ? await bulkDealsRes.json() : null;
 
-    renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentum);
+    renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentum, bulkDealsData);
 
   } catch (error) {
     console.error('Error loading analysis:', error);
@@ -552,7 +554,7 @@ async function loadAnalysis(symbol) {
   }
 }
 
-function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentumData) {
+function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings, shareholding, news, momentumData, bulkDealsData) {
   const container = document.getElementById('analysisContent');
   const { signals, indicators } = technical.analysis.signals;
   const cmp = technical.analysis.cmp;
@@ -639,6 +641,7 @@ function renderAnalysis(technical, risk, sicilian, fundamentals, analystRatings,
 
     ${analystRatings ? renderAnalystConsensus(analystRatings) : ''}
     ${shareholding && shareholding.length > 0 ? renderShareholdingPattern(shareholding) : ''}
+    ${bulkDealsData && bulkDealsData.deals && bulkDealsData.deals.length > 0 ? renderBulkDeals(bulkDealsData.deals) : ''}
     ${fundamentalsHtml}
     
     
@@ -898,6 +901,54 @@ function renderShareholdingPattern(data) {
             <div style="font-size: 1.5rem; font-weight: 700;">${d.percentage}%</div>
           </div>
         `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderBulkDeals(deals) {
+  if (!deals || deals.length === 0) return '';
+
+  const typeColor = (t) => {
+    const upper = (t || '').toUpperCase();
+    if (upper === 'BUY') return 'var(--success)';
+    if (upper === 'SELL') return 'var(--danger)';
+    return 'var(--text-secondary)';
+  };
+  const dealBadge = (d) => d === 'BULK' ? '#f59e0b' : '#8b5cf6';
+
+  return `
+    <div class="glass" style="padding: var(--space-lg); margin-bottom: var(--space-lg);">
+      <h3 style="margin-bottom: var(--space-md);">Bulk &amp; Block Deals</h3>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+          <thead>
+            <tr style="color: var(--text-muted); border-bottom: 1px solid var(--border-color);">
+              <th style="text-align: left; padding: 0.5rem 0.75rem;">Date</th>
+              <th style="text-align: left; padding: 0.5rem 0.75rem;">Type</th>
+              <th style="text-align: left; padding: 0.5rem 0.75rem;">Client</th>
+              <th style="text-align: center; padding: 0.5rem 0.75rem;">B/S</th>
+              <th style="text-align: right; padding: 0.5rem 0.75rem;">Qty</th>
+              <th style="text-align: right; padding: 0.5rem 0.75rem;">Price (₹)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${deals.map(d => `
+              <tr style="border-bottom: 1px solid var(--border-color)22;">
+                <td style="padding: 0.5rem 0.75rem; color: var(--text-secondary);">${d.date}</td>
+                <td style="padding: 0.5rem 0.75rem;">
+                  <span style="font-size: 0.7rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: ${dealBadge(d.deal_type)}22; color: ${dealBadge(d.deal_type)};">
+                    ${d.deal_type}
+                  </span>
+                </td>
+                <td style="padding: 0.5rem 0.75rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${d.client_name}">${d.client_name || '—'}</td>
+                <td style="padding: 0.5rem 0.75rem; text-align: center; font-weight: 700; color: ${typeColor(d.trade_type)};">${d.trade_type || '—'}</td>
+                <td style="padding: 0.5rem 0.75rem; text-align: right;">${d.quantity ? Number(d.quantity).toLocaleString('en-IN') : '—'}</td>
+                <td style="padding: 0.5rem 0.75rem; text-align: right;">₹${d.price ? Number(d.price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
       </div>
     </div>
   `;

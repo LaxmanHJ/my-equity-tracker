@@ -8,7 +8,7 @@
 import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
 import { getAlphaVantageChartData } from './alphaVantageService.js';
-import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii } from '../database/db.js';
+import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii, saveBulkDeals } from '../database/db.js';
 import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
 
@@ -308,6 +308,63 @@ export async function fetchFiiDiiToday() {
   } catch (err) {
     console.warn('[FII/DII] Daily fetch failed (non-critical):', err.message);
   }
+}
+
+/**
+ * Fetch today's bulk and block deals from NSE archives and persist to DB.
+ * Called on every force-sync. Silently no-ops on failure.
+ */
+export async function fetchBulkDealsToday() {
+  const URLS = {
+    BULK:  'https://nsearchives.nseindia.com/content/equities/bulk.csv',
+    BLOCK: 'https://nsearchives.nseindia.com/content/equities/block.csv',
+  };
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  const parseDate = (val) => {
+    // "27-MAR-2026" → "2026-03-27"
+    const d = new Date(val);
+    return isNaN(d) ? val : d.toISOString().slice(0, 10);
+  };
+
+  let total = 0;
+  for (const [dealType, url] of Object.entries(URLS)) {
+    try {
+      const resp = await fetch(url, { headers: HEADERS });
+      if (!resp.ok) continue;
+      const text = await resp.text();
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) continue;
+
+      // Header: Date,Symbol,Security Name,Client Name,Buy/Sell,Quantity Traded,Trade Price / Wght. Avg. Price
+      const deals = [];
+      for (const line of lines.slice(1)) {
+        const cols = line.split(',');
+        if (cols.length < 7) continue;
+        const [date, symbol, , clientName, tradeType, quantity, price] = cols.map(c => c.trim());
+        deals.push({
+          date:       parseDate(date),
+          symbol:     symbol.trim(),
+          clientName: clientName.trim(),
+          tradeType:  tradeType.trim().toUpperCase(),
+          quantity:   parseInt(quantity.replace(/,/g, '')) || 0,
+          price:      parseFloat(price.replace(/,/g, '')) || 0,
+          dealType,
+        });
+      }
+
+      if (deals.length > 0) {
+        await saveBulkDeals(deals);
+        console.log(`[BulkDeals] ${dealType}: ${deals.length} deals saved`);
+        total += deals.length;
+      }
+    } catch (err) {
+      console.warn(`[BulkDeals] ${dealType} fetch failed (non-critical):`, err.message);
+    }
+  }
+  return total;
 }
 
 // Export for testing

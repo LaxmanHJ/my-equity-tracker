@@ -1,70 +1,60 @@
-# Phase 4 — Bulk Deals, Block Deals & Short Selling
+# Phase 4 — Bulk Deals & Block Deals
 
-**Status:** Planned
-**Priority:** Medium — alert triggers and contrarian signals, lower ML value
+**Status:** Implemented
+**Priority:** Medium — event-based institutional signal; ML feature pending data accumulation
 
 ---
 
 ## Why This Matters
 
-Phases 1–3 improve the model's continuous signals. Phase 4 adds **event-based signals** — discrete, high-information events that happen irregularly but carry outsized informational value.
+Phases 1–3 improved the model's continuous signals: delivery percentage, sector rotation, and FII/DII flows. Phase 4 adds **event-based institutional signals** — discrete, high-information events that happen irregularly but carry outsized informational value.
 
-### Bulk & Block Deals
-When a single entity buys or sells more than 0.5% of a company's shares in one day, NSE classifies it as a **bulk deal**. These are often institutional funds, promoters, or large investors making significant position changes.
+When a single entity buys or sells more than 0.5% of a company's shares in one day, NSE classifies it as a **bulk deal**. These are typically institutional funds, promoters, or large investors making significant position changes.
 
-For a 15-stock portfolio, if INFY appears in a bulk deal with a PE firm selling ₹500 crore worth of shares, that is more informative than 10 days of price action. The current system has no awareness of these events.
+For a 15-stock portfolio, a bulk deal by a known institution is more informative than 10 days of price action. A PE firm selling ₹500 crore worth of INFY shares is a data point that the existing model would have no awareness of — it would see only the resulting price movement, not the cause.
 
-**Block deals** are pre-negotiated large trades executed in the first 35 minutes of trading. They indicate planned institutional accumulation or distribution.
+**Block deals** are pre-negotiated large trades executed in the first 35 minutes of trading. They indicate planned institutional accumulation or distribution and often precede multi-day directional moves.
 
-### Short Selling
-NSE publishes weekly short selling data showing which institutional participants sold short and how much. High short interest in a mid-cap like REPCOHOME or TANLA can mean:
-- **Bearish signal:** Smart money has a thesis that the stock is overvalued
-- **Contrarian signal:** Very high short interest = potential short squeeze setup if news turns positive
+**The current model has zero awareness of these events.** This phase gives it a path to awareness — first via dashboard visibility and alerts, then via an ML feature once sufficient history accumulates.
+
+Note: Short selling data was investigated but no accessible archive was found. It is skipped for now and may be revisited in a future phase.
 
 ---
 
 ## Data Sources
 
-### Bulk & Block Deals — NSE API
+### Bulk Deals CSV
 
-**Live endpoints:**
 ```
-https://www.nseindia.com/api/bulk-deal
-https://www.nseindia.com/api/block-deal
-```
-**Authentication:** NSE session cookie (same mechanism as `nse_fetcher.py` in the existing codebase)
-**Response format:**
-```json
-[
-  {
-    "symbol": "INFY",
-    "date": "26-Mar-2025",
-    "clientName": "SOME FUND LTD",
-    "dealType": "BUY",
-    "quantity": 2500000,
-    "price": 1285.50
-  },
-  ...
-]
+https://nsearchives.nseindia.com/content/equities/bulk.csv
 ```
 
-**Historical data:** Download from NSE website → `nseindia.com/report-detail/display-bulk-and-block-deals` → select date range → Export CSV.
+### Block Deals CSV
 
-### Short Selling
-
-**URL:** Short selling archive — exact URL to be confirmed (NSE moved this page).
-Fallback: Manual CSV download from `nseindia.com/products/content/equities/equities/bulk.htm` → Short Selling tab.
-
-**File format:**
-```csv
-Symbol, Short Selling Qty, % of Total Short Selling, ISIN
-INFY, 125000, 0.12, INE009A01021
-TATASTEEL, 85000, 0.08, INE081A01020
 ```
+https://nsearchives.nseindia.com/content/equities/block.csv
+```
+
+**Authentication:** None required. A standard `User-Agent` header is sufficient. No NSE session cookie needed.
+
+**Update frequency:** Both files update daily with the current trading day's deals.
+
+**Historical data:** No archive files exist for either source. Data accumulates from the implementation date onwards. There is no way to backfill historical bulk or block deals from these endpoints.
+
+**CSV format** (identical for both files):
+
+```
+Date,Symbol,Security Name,Client Name,Buy/Sell,Quantity Traded,Trade Price / Wght. Avg. Price
+27-MAR-2026,CUBEINVIT,Cube Highways Trust,SPARK FINANCIAL HOLDINGS,BUY,1800000,146.00
+```
+
+Both files are filtered to portfolio symbols only before being saved to the database.
 
 ---
 
-## Database Tables
+## Database Schema
+
+A single table stores both bulk and block deals, distinguished by the `deal_type` column:
 
 ```sql
 CREATE TABLE bulk_block_deals (
@@ -80,129 +70,133 @@ CREATE TABLE bulk_block_deals (
 );
 CREATE INDEX idx_bulk_symbol ON bulk_block_deals(symbol);
 CREATE INDEX idx_bulk_date   ON bulk_block_deals(date);
-
-CREATE TABLE short_selling (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  symbol    TEXT NOT NULL,
-  date      TEXT NOT NULL,
-  short_qty REAL,
-  short_pct REAL,
-  UNIQUE(symbol, date)
-);
-CREATE INDEX idx_short_symbol ON short_selling(symbol);
 ```
+
+The unique constraint on `(date, symbol, client_name, deal_type)` makes upserts safe — re-running the fetch on the same day will not create duplicate rows.
 
 ---
 
-## Backfill Scripts
+## Files Changed
 
-### `quant_engine/data/backfill_bulk_deals.py`
-
-```bash
-# Historical import from manually downloaded CSV
-python3 -m quant_engine.data.backfill_bulk_deals --from-csv ~/Downloads/bulk_deals.csv
-
-# Live fetch for today (requires NSE session)
-python3 -m quant_engine.data.backfill_bulk_deals --today
-```
-
-Uses the existing `nse_fetcher.py` session management pattern for the live API call.
-
-### `quant_engine/data/backfill_short_selling.py`
-
-```bash
-# Weekly CSV import
-python3 -m quant_engine.data.backfill_short_selling --from-csv ~/Downloads/shortselling.csv
-```
-
-Short selling data is published weekly, so this script is run once per week after downloading the CSV.
+| File | Change |
+|------|--------|
+| `src/database/db.js` | Added `bulk_block_deals` table + indexes in schema; added `saveBulkDeals(deals)` and `getBulkDeals(symbol, limit)` functions |
+| `quant_engine/data/backfill_bulk_deals.py` | New script — downloads both CSVs, filters for portfolio symbols, upserts to DB |
+| `src/services/stockData.js` | Added `fetchBulkDealsToday()` — fetches both CSVs via HTTP, saves to DB |
+| `src/routes/api.js` | Added `GET /api/bulk-deals/:symbol` endpoint; `fetchBulkDealsToday()` is also called during force sync |
+| `public/js/app.js` | Added bulk deals panel to individual stock analysis page |
 
 ---
 
-## API Endpoints (Node.js)
-
-Add to `src/routes/api.js`:
+## API Endpoints
 
 ### `GET /api/bulk-deals/:symbol`
-Returns recent bulk/block deals for a stock.
+
+Returns the most recent bulk and block deals for a given stock symbol.
+
+**Example request:**
+```
+GET /api/bulk-deals/INFY
+```
+
+**Example response:**
 ```json
 {
   "symbol": "INFY",
   "deals": [
-    {"date": "2025-03-26", "clientName": "SOME FUND LTD", "tradeType": "SELL", "quantity": 2500000, "price": 1285.50, "dealType": "BULK"},
-    {"date": "2025-03-20", "clientName": "ANOTHER FUND", "tradeType": "BUY",  "quantity": 1200000, "price": 1270.00, "dealType": "BLOCK"}
+    {
+      "date": "2026-03-27",
+      "clientName": "SOME FUND LTD",
+      "tradeType": "SELL",
+      "quantity": 2500000,
+      "price": 1285.50,
+      "dealType": "BULK"
+    },
+    {
+      "date": "2026-03-27",
+      "clientName": "ANOTHER FUND",
+      "tradeType": "BUY",
+      "quantity": 1200000,
+      "price": 1270.00,
+      "dealType": "BLOCK"
+    }
   ]
 }
 ```
 
-### `GET /api/short-selling/:symbol`
-Returns short interest trend for a stock.
-```json
-{
-  "symbol": "TANLA",
-  "shortSelling": [
-    {"date": "2025-03-22", "shortQty": 85000, "shortPct": 0.42},
-    {"date": "2025-03-15", "shortQty": 62000, "shortPct": 0.31}
-  ]
-}
-```
+Returns up to 20 most recent deals by default. Returns an empty `deals` array if no deals are recorded for the symbol.
 
 ---
 
 ## Frontend Integration
 
-Surface on the individual stock analysis page:
+The bulk deals panel appears on the individual stock analysis page when viewing a specific stock.
 
-**Bulk Deals panel:** Show last 10 bulk/block deals for the currently viewed stock. Color-code: green for BUY, red for SELL. Include client name, quantity, price.
+**Display:** A table showing the last 20 bulk and block deals for the currently viewed stock.
 
-**Short Interest panel:** Mini chart showing short selling % over the last 8 weeks. A rising trend is bearish; a sudden spike followed by price strength is a squeeze signal.
+**Columns:** Date, Client Name, Type (BULK / BLOCK), Buy/Sell, Quantity, Price.
 
-**Alert integration:** If a new SELL bulk deal is detected for a portfolio stock during today's session, trigger an alert via the existing alerts system with `type = "BULK_SELL"`.
+**Color coding:** BUY rows are highlighted green; SELL rows are highlighted red.
+
+**Empty state:** Displays "No bulk or block deals recorded yet" when no data is available (expected for the first days after implementation, and for stocks that rarely appear in deals).
 
 ---
 
-## ML Feature (Optional — Future Enhancement)
+## Backfill & Daily Automation
 
-Phase 4 data is primarily used for alerts and dashboard display, not ML features. However, once 6+ months of data is accumulated, consider:
+### Python backfill script
+
+`quant_engine/data/backfill_bulk_deals.py` downloads both CSVs and upserts records for portfolio symbols:
+
+```bash
+python3 -m quant_engine.data.backfill_bulk_deals
+```
+
+This script can be run at any time. Re-running it on the same day is safe due to the upsert logic and the unique constraint on the database table.
+
+### Daily automation (Node.js)
+
+`fetchBulkDealsToday()` in `src/services/stockData.js` fetches both CSV files and saves the results to the database. This function is called automatically as part of the force sync flow (`GET /api/sync/force`), so bulk/block deal data refreshes whenever the user triggers a full data sync.
+
+There is no separate cron job required — the data is always current after the next force sync.
+
+---
+
+## ML Feature (Future — After 6 Months of Data)
+
+Bulk and block deal data is used for dashboard visibility and future alerting in this phase, not as an active ML feature. The data volume from a 15-stock portfolio is too low for a reliable ML signal until meaningful history accumulates.
+
+Once approximately 6 months of deal history is available, the following feature becomes viable:
 
 ```python
-# bulk_deal_score: rolling count of net bulk deal direction over last 20 days
-# +1 = all bulk deals were BUY in past 20 days
-# -1 = all bulk deals were SELL in past 20 days
-# 0  = mixed or no deals
+# bulk_deal_score: net buy/sell direction over last 20 trading days
+# +1.0 = all bulk deals in the past 20 days were BUY
+# -1.0 = all bulk deals in the past 20 days were SELL
+#  0.0 = mixed or no deals
 net_deals = bulk_buys_20d - bulk_sells_20d
 bulk_deal_score = (net_deals / max(total_deals_20d, 1)).clip(-1, 1)
 ```
 
-This requires meaningful deal history before it becomes reliable as an ML feature.
+This score would be added as a new factor in `quant_engine/strategies/sicilian_strategy.py` alongside the existing `delivery_score` and `sector_rotation` features. Suggested initial weight: 5–10%, replacing or supplementing part of the volume factor.
+
+The ML model will need retraining once this feature is added. See `quant_engine/ml/trainer.py`.
 
 ---
 
-## Files to Change
+## Implementation Notes
 
-| File | Change |
-|------|--------|
-| `src/database/db.js` | Add `bulk_block_deals` and `short_selling` CREATE TABLE + indexes |
-| `quant_engine/data/backfill_bulk_deals.py` | New backfill script |
-| `quant_engine/data/backfill_short_selling.py` | New backfill script |
-| `src/routes/api.js` | Add `GET /api/bulk-deals/:symbol` and `GET /api/short-selling/:symbol` |
-| `src/database/db.js` | Add `getBulkDeals()` and `getShortSelling()` db functions |
-| `public/js/app.js` | Add bulk deals and short interest panels to stock analysis page |
+### Why a single combined table
 
----
+Bulk and block deals share an identical CSV schema and carry the same semantic meaning (large institutional trade). Splitting them into two tables would add query complexity without any practical benefit. The `deal_type` column provides full discrimination when needed.
 
-## Implementation Note on NSE Session
+### No session cookie required
 
-The bulk/block deals live API requires an NSE session cookie. The existing `nse_fetcher.py` already handles NSE session management. Extend it with:
+The NSE archives endpoint (`nsearchives.nseindia.com`) serves CSV files without requiring an NSE session. This is simpler and more reliable than the session-based approach used in some other NSE integrations. A plain HTTP GET with a browser-like `User-Agent` header is sufficient.
 
-```python
-def fetch_bulk_deals(self) -> list[dict]:
-    """Fetch today's bulk deals from NSE API."""
-    return self._get("/api/bulk-deal")
+### No historical backfill possible
 
-def fetch_block_deals(self) -> list[dict]:
-    """Fetch today's block deals from NSE API."""
-    return self._get("/api/block-deal")
-```
+Unlike price data or delivery data (which NSE archives by date), there are no historical archive files for bulk or block deals at these endpoints. The dataset starts accumulating from the day the feature is first deployed. This is the primary reason the ML feature is deferred — a useful signal requires months of history.
 
-The session is refreshed automatically by the existing mechanism — no additional auth work needed.
+### Data volume expectations
+
+A 15-stock NSE portfolio will not appear in bulk deals every day. For large-cap stocks like INFY or TCS, deals may appear a few times per quarter. For mid-caps like TANLA or REPCOHOME, deals may be rarer but more informative when they do occur. The database table and the empty state in the frontend are both designed to handle sparse data gracefully.

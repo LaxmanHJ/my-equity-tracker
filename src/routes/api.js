@@ -7,7 +7,8 @@ import {
   getQuote,
   getBenchmarkData,
   fetchIndexData,
-  fetchFiiDiiToday
+  fetchFiiDiiToday,
+  fetchBulkDealsToday
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -31,7 +32,8 @@ import {
   getNews,
   getAnalystRatings,
   getShareholding,
-  getSectorMomentum
+  getSectorMomentum,
+  getBulkDeals
 } from '../database/db.js';
 
 const router = express.Router();
@@ -431,6 +433,9 @@ router.post('/portfolio/sync', async (req, res) => {
     // Fetch today's FII/DII cash flows — builds fii_flow_score history over time
     await fetchFiiDiiToday();
 
+    // Fetch today's bulk/block deals — accumulates institutional activity data over time
+    await fetchBulkDealsToday();
+
     res.json({
       success: true,
       synced: quotes.length,
@@ -744,6 +749,27 @@ router.get('/sectors/momentum', async (req, res) => {
   } catch (error) {
     console.error('Sector momentum error:', error);
     res.status(500).json({ error: 'Failed to get sector momentum' });
+  }
+});
+
+// ============================================
+// Bulk / Block Deals
+// ============================================
+
+/**
+ * GET /api/bulk-deals/:symbol
+ * Returns the most recent bulk and block deals for a stock.
+ * Query param: limit (default 20)
+ */
+router.get('/bulk-deals/:symbol', async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const limit = parseInt(req.query.limit) || 20;
+    const deals = await getBulkDeals(symbol, limit);
+    res.json({ symbol, deals });
+  } catch (error) {
+    console.error('Bulk deals error:', error);
+    res.status(500).json({ error: 'Failed to fetch bulk deals' });
   }
 });
 

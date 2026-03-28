@@ -206,6 +206,22 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_delivery_date ON delivery_data(date)`);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS bulk_block_deals (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      date        TEXT NOT NULL,
+      symbol      TEXT NOT NULL,
+      client_name TEXT,
+      trade_type  TEXT,
+      quantity    INTEGER,
+      price       REAL,
+      deal_type   TEXT,
+      UNIQUE(date, symbol, client_name, deal_type)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_bulk_symbol ON bulk_block_deals(symbol)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_bulk_date ON bulk_block_deals(date)`);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS sector_indices (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       date        TEXT NOT NULL,
@@ -613,6 +629,34 @@ export async function getSectorMomentum() {
           GROUP BY f.industry
           ORDER BY momentum_score DESC`,
     args: []
+  });
+  return result.rows;
+}
+
+/**
+ * Save bulk/block deals (upsert — safe to call multiple times per day)
+ */
+export async function saveBulkDeals(deals) {
+  for (const d of deals) {
+    await db.execute({
+      sql: `INSERT OR IGNORE INTO bulk_block_deals (date, symbol, client_name, trade_type, quantity, price, deal_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: nn(d.date, d.symbol, d.clientName, d.tradeType, d.quantity, d.price, d.dealType)
+    });
+  }
+}
+
+/**
+ * Get recent bulk/block deals for a symbol
+ */
+export async function getBulkDeals(symbol, limit = 20) {
+  const result = await db.execute({
+    sql: `SELECT date, symbol, client_name, trade_type, quantity, price, deal_type
+          FROM bulk_block_deals
+          WHERE symbol = ?
+          ORDER BY date DESC
+          LIMIT ?`,
+    args: [symbol, limit]
   });
   return result.rows;
 }
