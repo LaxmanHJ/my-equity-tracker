@@ -8,10 +8,13 @@ Fundamental sub-scores (valuation, financial_health, growth) are excluded becaus
 they are quarterly and don't change day-to-day — including them as a static bias
 would distort the backtest.
 """
+import logging
 import numpy as np
 import pandas as pd
 from quant_engine.strategies.base import BaseStrategy
 from quant_engine.data.loader import load_benchmark
+
+logger = logging.getLogger(__name__)
 
 # ── Sicilian technical weights (re-normalized from original 80% to sum to 1.0) ──
 TECH_WEIGHTS = {
@@ -57,7 +60,8 @@ class SicilianStrategy(BaseStrategy):
         if benchmark_df is None:
             try:
                 benchmark_df = load_benchmark(limit=n + 200)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Could not load benchmark data, relative strength scores will be 0: %s", exc)
                 benchmark_df = pd.DataFrame()
 
         # ── Pre-compute rolling indicators ────────────────────────────

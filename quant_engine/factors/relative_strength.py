@@ -16,10 +16,16 @@ def calculate(df: pd.DataFrame, benchmark_df: pd.DataFrame, period: int = 63) ->
     if len(close) < period or benchmark_df.empty or len(benchmark_df) < period:
         return {"stock_return": None, "benchmark_return": None, "excess_return": None, "score": 0.0}
 
-    stock_ret = float(close.iloc[-1] / close.iloc[-period] - 1)
+    stock_denom = close.iloc[-period]
+    if not np.isfinite(stock_denom) or stock_denom == 0:
+        return {"stock_return": None, "benchmark_return": None, "excess_return": None, "score": 0.0}
+    stock_ret = float(close.iloc[-1] / stock_denom - 1)
 
     bench_close = benchmark_df["close"]
-    bench_ret = float(bench_close.iloc[-1] / bench_close.iloc[-period] - 1)
+    bench_denom = bench_close.iloc[-period]
+    if not np.isfinite(bench_denom) or bench_denom == 0:
+        return {"stock_return": round(stock_ret * 100, 2), "benchmark_return": None, "excess_return": None, "score": 0.0}
+    bench_ret = float(bench_close.iloc[-1] / bench_denom - 1)
 
     excess_return = stock_ret - bench_ret
 

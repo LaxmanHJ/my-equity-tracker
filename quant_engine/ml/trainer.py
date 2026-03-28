@@ -257,13 +257,20 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     # across peers without re-loading inside the per-stock loop.
     logger.info("Loading price histories for %d symbols …", len(symbols))
     all_prices: dict[str, pd.DataFrame] = {}
+    skipped: list[str] = []
     for sym in symbols:
         try:
             df = load_price_history(sym, limit=2000)
             if len(df) >= MIN_BARS:
                 all_prices[sym] = df
-        except Exception:
-            pass
+            else:
+                skipped.append(sym)
+                logger.debug("Skipping %s: only %d bars (need %d)", sym, len(df), MIN_BARS)
+        except Exception as exc:
+            skipped.append(sym)
+            logger.warning("Failed to load price history for %s: %s", sym, exc)
+    if skipped:
+        logger.info("Skipped %d/%d symbols during price load: %s", len(skipped), len(symbols), skipped)
 
     # Pre-compute sector rotation series once for each industry (uses real NSE sector indices).
     sector_series = _build_sector_series(all_prices, industry_map, benchmark_df)
@@ -308,6 +315,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
+    skipped_train: list[str] = []
 
     for symbol, df in all_prices.items():
         try:
@@ -354,7 +362,12 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
             all_y.append(label)
 
         except Exception as exc:
-            logger.warning("Skipping %s: %s", symbol, exc)
+            skipped_train.append(symbol)
+            logger.warning("Skipping %s during feature build: %s", symbol, exc, exc_info=True)
+
+    if skipped_train:
+        logger.info("Skipped %d/%d symbols during training: %s",
+                     len(skipped_train), len(symbols), skipped_train)
 
     if not all_X:
         raise RuntimeError("No training data could be generated — is the DB populated?")

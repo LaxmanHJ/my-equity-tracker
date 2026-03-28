@@ -4,9 +4,12 @@ The Sicilian — Unified Buy/Sell Decision Engine.
 Aggregates 11 sub-scores (8 technical + 3 fundamental) from across the system
 into a single BUY / SELL / HOLD verdict with next-day target prices and confidence.
 """
+import logging
 import numpy as np
 import pandas as pd
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from quant_engine.data.loader import (
     load_price_history, load_benchmark,
@@ -196,10 +199,14 @@ def _score_relative_strength(df: pd.DataFrame, benchmark_df: pd.DataFrame, perio
     close = df["close"]
     if len(close) < period or benchmark_df.empty or len(benchmark_df) < period:
         return 0.0
-    stock_ret = float(close.iloc[-1] / close.iloc[-period] - 1)
-    bench_ret = float(benchmark_df["close"].iloc[-1] / benchmark_df["close"].iloc[-period] - 1)
+    stock_denom = close.iloc[-period]
+    bench_denom = benchmark_df["close"].iloc[-period]
+    if not np.isfinite(stock_denom) or stock_denom == 0 or not np.isfinite(bench_denom) or bench_denom == 0:
+        return 0.0
+    stock_ret = float(close.iloc[-1] / stock_denom - 1)
+    bench_ret = float(benchmark_df["close"].iloc[-1] / bench_denom - 1)
     excess = stock_ret - bench_ret
-    return float(np.clip(excess / 0.20, -1.0, 1.0))
+    return float(np.clip(excess / 0.20, -1.0, 1.0)) if np.isfinite(excess) else 0.0
 
 
 # ── Fundamental sub-score calculators ────────────────────────────
@@ -316,18 +323,21 @@ def _score_sector_rotation(symbol: str, industry: str, benchmark_df: pd.DataFram
 
     bench_ret: Optional[float] = None
     if not benchmark_df.empty and len(benchmark_df) >= period:
-        bench_ret = float(benchmark_df["close"].iloc[-1] / benchmark_df["close"].iloc[-period] - 1)
+        bench_denom = benchmark_df["close"].iloc[-period]
+        if np.isfinite(bench_denom) and bench_denom != 0:
+            val = benchmark_df["close"].iloc[-1] / bench_denom - 1
+            bench_ret = float(val) if np.isfinite(val) else None
 
     peer_returns: list[float] = []
     for peer in peers[:20]:
         try:
             peer_df = load_price_history(peer, limit=period + 5)
             if len(peer_df) >= period:
-                peer_returns.append(
-                    float(peer_df["close"].iloc[-1] / peer_df["close"].iloc[-period] - 1)
-                )
-        except Exception:
-            pass
+                ret = peer_df["close"].iloc[-1] / peer_df["close"].iloc[-period] - 1
+                if np.isfinite(ret):
+                    peer_returns.append(float(ret))
+        except Exception as exc:
+            logger.debug("Sector rotation: skipping peer %s: %s", peer, exc)
 
     if not peer_returns:
         return 0.0

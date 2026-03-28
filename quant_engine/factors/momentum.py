@@ -19,10 +19,19 @@ def calculate(df: pd.DataFrame) -> dict:
     """
     close = df["close"]
 
-    # Calculate returns over different lookback windows
-    ret_1m = (close.iloc[-1] / close.iloc[-21] - 1) if len(close) >= 21 else 0.0
-    ret_3m = (close.iloc[-1] / close.iloc[-63] - 1) if len(close) >= 63 else 0.0
-    ret_6m = (close.iloc[-1] / close.iloc[-126] - 1) if len(close) >= 126 else 0.0
+    # Calculate returns over different lookback windows, guarding against NaN/zero denominators
+    def _safe_return(series, lookback):
+        if len(series) < lookback:
+            return 0.0
+        denom = series.iloc[-lookback]
+        if not np.isfinite(denom) or denom == 0:
+            return 0.0
+        val = series.iloc[-1] / denom - 1
+        return float(val) if np.isfinite(val) else 0.0
+
+    ret_1m = _safe_return(close, 21)
+    ret_3m = _safe_return(close, 63)
+    ret_6m = _safe_return(close, 126)
 
     # Weighted average of the three windows (recent momentum weighted more)
     raw_momentum = 0.2 * ret_1m + 0.4 * ret_3m + 0.4 * ret_6m
