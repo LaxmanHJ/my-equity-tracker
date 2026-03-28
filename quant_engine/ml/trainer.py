@@ -118,38 +118,61 @@ def _build_sector_series(
     all_prices: dict, industry_map: dict, benchmark_df: pd.DataFrame
 ) -> dict:
     """
-    Pre-compute a per-industry sector-rotation score series.
+    Pre-compute a per-industry sector-rotation score series using real NSE sector indices.
 
-    For each industry:
-      1. Average the 20-day return across all member stocks on each date.
-      2. Subtract the benchmark's 20-day return on that date.
-      3. Normalise to [-1, +1] (±20% excess = ±1).
+    For each industry mapped in INDUSTRY_TO_NSE_INDEX:
+      1. Load the official NSE sector index closing prices from the DB.
+      2. Compute the index's 20-day return.
+      3. Subtract NIFTY 50's 20-day return.
+      4. Normalise to [-1, +1] (±20% excess = ±1).
 
-    Doing this once up-front is O(stocks) total; doing it inside the per-stock
-    loop would be O(stocks²).
+    Falls back to portfolio-peer averaging for any industry not in the DB yet
+    (i.e., when sector_indices table is not yet populated).
 
     Returns: {industry: pd.Series indexed by date, values in [-1, +1]}
     """
-    # Group available symbols by industry
-    industry_groups: dict[str, list[str]] = {}
-    for sym, ind in industry_map.items():
-        if sym in all_prices and ind:
-            industry_groups.setdefault(ind, []).append(sym)
+    # Pre-load NIFTY 50 from sector_indices table (preferred over benchmark_df
+    # because it's date-aligned with all other sector index series).
+    nifty_close = load_sector_series("Nifty 50", limit=2000)
+    if nifty_close.empty and not benchmark_df.empty:
+        # fall back to benchmark loaded from price_history
+        nifty_close = benchmark_df["close"].copy()
+        nifty_close.index = pd.to_datetime(nifty_close.index)
+    nifty_20d = nifty_close.pct_change(20) if not nifty_close.empty else None
 
-    bench_20d = benchmark_df["close"].pct_change(20) if not benchmark_df.empty else None
+    # Collect all unique industries from the portfolio
+    unique_industries: set[str] = {ind for ind in industry_map.values() if ind}
 
     sector_series: dict[str, pd.Series] = {}
-    for industry, syms in industry_groups.items():
-        member_rets = [all_prices[s]["close"].pct_change(20) for s in syms]
-        if not member_rets:
-            continue
-        sector_avg = pd.concat(member_rets, axis=1).mean(axis=1)
-        if bench_20d is not None:
-            bench_aligned = bench_20d.reindex(sector_avg.index, method="ffill")
-            excess = sector_avg - bench_aligned
+    for industry in unique_industries:
+        nse_index = INDUSTRY_TO_NSE_INDEX.get(industry, "Nifty 500")
+        idx_close = load_sector_series(nse_index, limit=2000)
+
+        if not idx_close.empty:
+            # ── Primary path: real NSE sector index ──────────────────
+            sector_20d = idx_close.pct_change(20)
+            if nifty_20d is not None:
+                bench_aligned = nifty_20d.reindex(sector_20d.index, method="ffill")
+                excess = sector_20d - bench_aligned
+            else:
+                excess = sector_20d
+            sector_series[industry] = (excess / 0.20).clip(-1.0, 1.0).fillna(0.0)
         else:
-            excess = sector_avg
-        sector_series[industry] = (excess / 0.20).clip(-1.0, 1.0).fillna(0.0)
+            # ── Fallback: average portfolio peers (old behaviour) ─────
+            # Used when sector_indices table hasn't been backfilled yet.
+            syms = [s for s, ind in industry_map.items() if ind == industry and s in all_prices]
+            if not syms:
+                continue
+            member_rets = [all_prices[s]["close"].pct_change(20) for s in syms]
+            sector_avg = pd.concat(member_rets, axis=1).mean(axis=1)
+            if nifty_20d is not None and not benchmark_df.empty:
+                bench_20d_legacy = benchmark_df["close"].pct_change(20)
+                bench_aligned = bench_20d_legacy.reindex(sector_avg.index, method="ffill")
+                excess = sector_avg - bench_aligned
+            else:
+                excess = sector_avg
+            sector_series[industry] = (excess / 0.20).clip(-1.0, 1.0).fillna(0.0)
+            logger.debug("sector_rotation fallback (no DB data) for industry: %s", industry)
 
     return sector_series
 
@@ -230,9 +253,9 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
         except Exception:
             pass
 
-    # Pre-compute sector rotation series once for each industry.
+    # Pre-compute sector rotation series once for each industry (uses real NSE sector indices).
     sector_series = _build_sector_series(all_prices, industry_map, benchmark_df)
-    logger.info("Sector rotation computed for %d industries", len(sector_series))
+    logger.info("Sector rotation computed for %d industries (NSE index-based)", len(sector_series))
 
     # Market regime series (same value for every stock on the same calendar date).
     # VIX: rolling percentile of India VIX → [-1 fear, +1 calm].

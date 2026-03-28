@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS sector_indices (
 """
 
 
-def _safe_float(val) -> float | None:
+def _safe_float(val):
     """Convert to float, returning None for blanks/dashes/non-numeric."""
     try:
         return float(str(val).strip())
