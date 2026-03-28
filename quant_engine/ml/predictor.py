@@ -34,6 +34,7 @@ FEATURE_COLS = [
     "vix_regime",
     "nifty_trend",
     "markov_regime",
+    "delivery_score",
 ]
 
 _model_cache = None   # module-level cache so we only load from disk once
