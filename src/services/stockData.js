@@ -8,7 +8,7 @@
 import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
 import { getAlphaVantageChartData } from './alphaVantageService.js';
-import { getPriceHistory, getLatestPriceDate, savePriceHistory } from '../database/db.js';
+import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii } from '../database/db.js';
 import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
 
@@ -273,6 +273,41 @@ export async function getPortfolioSummary(forceRefresh = false) {
       lastUpdated: new Date().toISOString()
     }
   };
+}
+
+/**
+ * Fetch today's FII/DII cash market net flows from NSE and persist to market_regime.
+ * Called once per force-sync so fii_flow_score builds up over time.
+ * Silently no-ops on failure — non-critical data.
+ */
+export async function fetchFiiDiiToday() {
+  try {
+    const resp = await fetch('https://www.nseindia.com/api/fiidiiTradeReact', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://www.nseindia.com/',
+      }
+    });
+    if (!resp.ok) return;
+    const rows = await resp.json();
+
+    let fiiNet = null, diiNet = null, tradeDate = null;
+    for (const row of rows) {
+      const cat = (row.category || '').toUpperCase();
+      const d = new Date(row.date);
+      if (!isNaN(d)) tradeDate = d.toISOString().slice(0, 10);
+      const net = parseFloat(String(row.netValue).replace(/,/g, ''));
+      if (cat.includes('FII') || cat.includes('FPI')) fiiNet = net;
+      else if (cat.includes('DII')) diiNet = net;
+    }
+
+    if (tradeDate && fiiNet !== null && diiNet !== null) {
+      await upsertFiiDii(tradeDate, fiiNet, diiNet);
+      console.log(`[FII/DII] ${tradeDate} — FII: ${fiiNet} cr, DII: ${diiNet} cr`);
+    }
+  } catch (err) {
+    console.warn('[FII/DII] Daily fetch failed (non-critical):', err.message);
+  }
 }
 
 // Export for testing

@@ -12,7 +12,9 @@ from quant_engine.data.loader import (
     load_price_history, load_benchmark,
     load_industry_map, load_analyst_consensus,
 )
-from quant_engine.data.market_regime_loader import load_vix_score_today
+from quant_engine.data.market_regime_loader import (
+    load_vix_score_today, load_fii_flow_score_today, load_fii_fo_score_today,
+)
 from quant_engine.strategies import markov_regime as markov_regime_strategy
 from quant_engine.data.fundamentals_loader import load_fundamentals
 from quant_engine.scoring.composite import score_single_stock
@@ -493,6 +495,8 @@ def run_sicilian(symbol: str) -> dict:
         "vix_regime":       round(_score_vix_regime(), 4),
         "nifty_trend":      round(_score_nifty_trend(benchmark_df), 4),
         "markov_regime":    round(_score_markov_regime(benchmark_df), 4),
+        "fii_flow_score":   round(load_fii_flow_score_today(), 4),
+        "fii_fo_score":     round(load_fii_fo_score_today(), 4),
         # Fundamental (3)
         "valuation":        round(_score_valuation(fund), 4),
         "financial_health": round(_score_financial_health(fund), 4),

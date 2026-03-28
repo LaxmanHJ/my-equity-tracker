@@ -1,180 +1,153 @@
 # Phase 3 — FII/DII Flows & F&O Participant OI
 
-**Status:** Planned
+**Status:** Implemented (backfill pending)
 **Priority:** Medium — adds two new regime features orthogonal to VIX
 
 ---
 
 ## Why This Matters
 
-The ML model currently has three market regime features:
-- `vix_regime` — how fearful/calm the market is (volatility)
-- `nifty_trend` — whether NIFTY is above/below its moving averages (price trend)
-- `markov_regime` — probability of bull vs bear from recent transitions (momentum)
+The ML model has three existing market regime features:
+- `vix_regime` — fear/calm gauge (volatility)
+- `nifty_trend` — price trend above/below moving averages
+- `markov_regime` — transition probability (momentum)
 
-All three look at the **same thing from different angles** — market price and volatility. None of them capture **who is buying and selling**.
+All three look at the **same thing from different angles** — market price and volatility. None capture **who is buying and selling**.
 
-FII (Foreign Institutional Investors) flows are the single most important driver of Indian equity markets. When FIIs are consistent net sellers over 10+ days, even technically strong setups tend to fail. This is a genuine new signal the model currently has zero visibility into.
+FII (Foreign Institutional Investors) flows are the single biggest driver of Indian equity markets. When FIIs are consistent net sellers for 10+ days, even technically strong setups tend to fail.
 
-**Two complementary flow signals:**
+**Two complementary new signals:**
 
-| Feature | What it measures | Why it's different from VIX |
-|---------|-----------------|----------------------------|
-| `fii_flow_score` | FIIs net buying/selling in cash equities (INR crore/day) | Flow of actual capital, not just fear |
-| `fii_fo_score` | FIIs net long/short in NIFTY futures (contracts) | Forward-looking positioning, not just current action |
+| Feature | What it measures | Edge over VIX |
+|---------|-----------------|---------------|
+| `fii_flow_score` | FIIs net buying/selling in cash equities (INR crore/day) | Captures capital flows, not fear |
+| `fii_fo_score` | FIIs net long/short in NIFTY index futures (contracts) | Forward-looking positioning |
 
-**Example scenario this captures (that VIX misses):**
-- VIX = 12 (calm market, low fear) ← current model sees BULLISH
-- FII cash outflow = -₹8,000 crore/day for 10 days ← massive institutional selling
-- FII net short in futures = -50,000 contracts ← hedging/betting on decline
-- **Reality:** Market likely to correct despite low VIX
-
----
-
-## Data Source 1 — FII/DII Cash Market Flows
-
-**Live API:**
-```
-https://www.nseindia.com/api/fiidiiTradeReact
-```
-**Authentication:** Browser `User-Agent` header
-**Response format:**
-```json
-[
-  {"category": "FII/FPI", "date": "27-Mar-2026", "buyValue": "20486.39", "sellValue": "24853.69", "netValue": "-4367.30"},
-  {"category": "DII",     "date": "27-Mar-2026", "buyValue": "37579.14", "sellValue": "34012.99", "netValue":  "3566.15"}
-]
-```
-`netValue` = `buyValue - sellValue` in INR crore. Positive = net buying, negative = net selling.
-
-**Historical backfill:**
-Download the CSV directly from NSE:
-1. Go to `nseindia.com/products/content/equities/equities/eq_fiidii_archives.htm`
-2. Select date range → download CSV
-3. Run: `python3 -m quant_engine.data.backfill_fii_dii --from-csv ~/Downloads/FII_DII_Data.csv`
-
-This is the same pattern used for the VIX backfill — manual one-time CSV import for history, then live API for daily updates.
+**Example (VIX misses, FII data catches):**
+- VIX = 12 → model sees BULLISH (calm)
+- FII cash outflow = -₹8,000 crore/day for 10 days → massive selling
+- FII net short futures = -50,000 contracts → hedged/bearish positioning
+- **Reality:** Correction likely despite low VIX
 
 ---
 
-## Data Source 2 — F&O Participant OI
+## Data Sources
+
+### Source 1 — FII/DII Cash Flows (historical CSV + live API)
+
+**Historical (one-time manual download):**
+1. Go to: `https://www.nseindia.com/reports-and-statistics/securities-statistics/foreign-institutional-investors`
+2. Scroll to **"FII/FPI and DII Trading Activity"**
+3. Set range: 01-Jan-2023 → today → **Download CSV**
+4. Run: `python3 -m quant_engine.data.backfill_fii_dii --from-csv ~/Downloads/fiidiiTradeReact.csv`
+
+**Daily live update (no manual step):**
+```bash
+python3 -m quant_engine.data.backfill_fii_dii --today
+```
+Uses: `https://www.nseindia.com/api/fiidiiTradeReact` (User-Agent header only, no auth)
+
+> **Why the historical CSV is manual:** `www.nseindia.com` is behind Cloudflare — headless requests are blocked for the date-range API. The archives subdomain (`nsearchives`) doesn't host FII/DII daily files. The one-time CSV download is the only way to get history; daily updates are fully automated after that.
+
+### Source 2 — F&O Participant OI (fully automated)
 
 **URL pattern:**
 ```
 https://archives.nseindia.com/content/nsccl/fao_participant_oi_{DDMMYYYY}.csv
 ```
-**Example:**
-```
-https://archives.nseindia.com/content/nsccl/fao_participant_oi_26032025.csv
-```
-**Authentication:** None (works without User-Agent — fully public)
+No auth, no session — plain HTTP GET with User-Agent header.
 
-**File format:**
-```csv
-Client Type,Future Index Long,Future Index Short,Future Stock Long,Future Stock Short,...
-FII,         85611,            169344,            3795529,          2023719,...
-DII,         104363,           40255,             273056,           4049334,...
-Client,      184778,           143235,             2380818,          553956,...
+**Backfill:**
+```bash
+python3 -m quant_engine.data.backfill_fo_oi --from 2023-01-01
 ```
 
 **Key metric:** `FII Future Index Long - FII Future Index Short`
-- Positive = FIIs net long NIFTY futures → bullish positioning
-- Negative = FIIs net short NIFTY futures → bearish/hedged positioning
-
-This works with direct URL downloads, no scraping needed.
+- Positive = FIIs net long NIFTY futures → bullish institutional positioning
+- Negative = FIIs net short NIFTY futures → hedged or expecting decline
 
 ---
 
 ## Database Schema
 
-Extend the existing `market_regime` table (keeps all regime signals aligned by date):
+Three new columns added to the existing `market_regime` table:
 
 ```sql
-ALTER TABLE market_regime ADD COLUMN fii_net_cash    REAL;  -- INR crore, daily net (FII cash)
-ALTER TABLE market_regime ADD COLUMN dii_net_cash    REAL;  -- INR crore, daily net (DII cash)
-ALTER TABLE market_regime ADD COLUMN fii_fo_net_long REAL;  -- contracts, FII index futures net long
+ALTER TABLE market_regime ADD COLUMN fii_net_cash    REAL;  -- INR crore/day (FII cash)
+ALTER TABLE market_regime ADD COLUMN dii_net_cash    REAL;  -- INR crore/day (DII cash)
+ALTER TABLE market_regime ADD COLUMN fii_fo_net_long REAL;  -- contracts (FII index futures)
 ```
 
-All three are date-indexed, same as `india_vix`. Storing them in `market_regime` keeps the existing loader pattern intact — `market_regime_loader.py` already reads this table and returns date-aligned series.
+Stored alongside `india_vix` — all regime signals are date-aligned in one table.
+The `initDatabase()` in `db.js` handles the `ALTER TABLE` idempotently (try/catch).
 
 ---
 
-## Backfill Scripts
+## ML Feature Construction
 
-### Script 1: `quant_engine/data/backfill_fii_dii.py`
-
-```bash
-# One-time historical import from NSE CSV
-python3 -m quant_engine.data.backfill_fii_dii --from-csv ~/Downloads/FII_DII_Data.csv
-
-# Daily live update (call from cron/startup)
-python3 -m quant_engine.data.backfill_fii_dii --today
-```
-
-**What it does:**
-- CSV mode: Parses the NSE archives CSV (columns: Date, FII Buy, FII Sell, FII Net, DII Buy, DII Sell, DII Net)
-- Live mode: Calls the JSON API, extracts FII and DII net values, upserts today's row
-- Updates `fii_net_cash` and `dii_net_cash` columns in `market_regime`
-
-### Script 2: `quant_engine/data/backfill_fo_oi.py`
-
-```bash
-# Backfill from 2023
-python3 -m quant_engine.data.backfill_fo_oi --from 2023-01-01
-
-# Single date
-python3 -m quant_engine.data.backfill_fo_oi --date 2025-03-26
-```
-
-**What it does:**
-- Downloads `fao_participant_oi_{DDMMYYYY}.csv` for each trading day
-- Extracts FII row → computes `Future Index Long - Future Index Short`
-- Upserts `fii_fo_net_long` column in `market_regime`
-
----
-
-## ML Features
-
-Both features follow the same normalisation pattern as `vix_regime` — rolling percentile rank → [-1, +1]:
+Both features use the same normalisation pattern as `vix_regime` — rolling percentile rank mapped to [-1, +1]:
 
 ### `fii_flow_score`
 ```python
-# 10-day rolling sum of FII net cash, normalised by 252-day percentile
-fii_10d = fii_net_cash.rolling(10).sum()
-percentile = fii_10d.rolling(252, min_periods=60).apply(lambda s: s.rank(pct=True).iloc[-1])
-fii_flow_score = (2 * percentile - 1).clip(-1, 1)  # maps 0-1 percentile to -1 to +1
+fii_10d = fii_net_cash.rolling(10).sum()   # 10-day cumulative flow
+percentile = fii_10d.rolling(252, min_periods=30).apply(lambda s: s.rank(pct=True).iloc[-1])
+fii_flow_score = (2 * percentile - 1).clip(-1, 1)
 ```
-- `+1.0` = FII buying is at multi-year high (strong inflow)
-- `0.0` = FII flow is at historical median
-- `-1.0` = FII selling is at multi-year high (strong outflow)
+- `+1.0` = FII inflow at multi-year high → strongly bullish backdrop
+- ` 0.0` = FII flow at historical median → neutral
+- `-1.0` = FII outflow at multi-year high → strongly bearish backdrop
 
 ### `fii_fo_score`
 ```python
-# FII net futures position, normalised by 252-day percentile
-percentile = fii_fo_net_long.rolling(252, min_periods=60).apply(lambda s: s.rank(pct=True).iloc[-1])
+percentile = fii_fo_net_long.rolling(252, min_periods=30).apply(lambda s: s.rank(pct=True).iloc[-1])
 fii_fo_score = (2 * percentile - 1).clip(-1, 1)
 ```
-- `+1.0` = FIIs are maximally net long futures (very bullish positioning)
-- `-1.0` = FIIs are maximally net short futures (very bearish/hedged)
+- `+1.0` = FIIs maximally net long futures → highest bullish positioning
+- `-1.0` = FIIs maximally net short futures → highest bearish/hedged positioning
 
-Both features are updated in `market_regime_loader.py` alongside the existing `load_vix_series()` function.
+The 10-day window for FII cash (vs single-day for F&O) smooths the noise in daily cash flows while preserving the trend signal.
 
 ---
 
-## Files to Change
+## Files Changed
 
 | File | Change |
 |------|--------|
-| `src/database/db.js` | Add 3 new columns to `market_regime` table schema |
-| `quant_engine/data/backfill_fii_dii.py` | New backfill script |
-| `quant_engine/data/backfill_fo_oi.py` | New backfill script |
-| `quant_engine/data/market_regime_loader.py` | Add `load_fii_flow_series()` and `load_fii_fo_series()` |
-| `quant_engine/ml/trainer.py` | Add `fii_flow_score` and `fii_fo_score` features |
+| `src/database/db.js` | Add 3 columns to `market_regime` via ALTER TABLE in `initDatabase()` |
+| `quant_engine/data/backfill_fo_oi.py` | **New** — downloads F&O OI CSVs, extracts FII net index futures |
+| `quant_engine/data/backfill_fii_dii.py` | **New** — CSV import mode + live API daily update mode |
+| `quant_engine/data/market_regime_loader.py` | Add `load_fii_flow_series()`, `load_fii_fo_series()`, `_flow_to_score()`, `load_fii_flow_score_today()`, `load_fii_fo_score_today()` |
+| `quant_engine/ml/trainer.py` | Add `fii_flow_score` and `fii_fo_score` to FEATURE_COLS (now 15 features); load and compute both series in `build_training_dataset()` |
+| `quant_engine/ml/predictor.py` | Add both features to FEATURE_COLS (must match trainer) |
+| `quant_engine/sicilian/engine.py` | Compute both scores in `run_sicilian()` sub_scores dict for live inference |
 
 ---
 
-## Historical Data Note
+## Backfill & Retrain Sequence
 
-For `fii_flow_score`, you need at least 252 trading days (~1 year) of FII data for the rolling percentile window to be meaningful. Download 3+ years from NSE archives for a robust signal.
+```bash
+# Step 1: F&O OI — fully automated (~800 days, ~7 min)
+python3 -m quant_engine.data.backfill_fo_oi --from 2023-01-01
 
-For `fii_fo_score`, the daily F&O OI files go back to 2010 on NSE archives — but 2 years is sufficient for training.
+# Step 2: FII/DII cash — after you download the CSV from NSE website
+python3 -m quant_engine.data.backfill_fii_dii --from-csv ~/Downloads/fiidiiTradeReact.csv
+
+# Step 3: Retrain
+python3 -m quant_engine.ml.trainer
+```
+
+**Daily automation (add to cron at 18:30 IST):**
+```bash
+python3 -m quant_engine.data.backfill_fii_dii --today
+python3 -m quant_engine.data.backfill_fo_oi --date $(date +%Y-%m-%d)
+```
+
+---
+
+## Expected Impact
+
+`fii_fo_score` is expected to be a meaningful feature immediately — 3 years of F&O OI history gives the percentile window enough data to be well-calibrated.
+
+`fii_flow_score` will also be meaningful after the historical CSV import. The 10-day rolling sum + 252-day percentile rank needs at least ~260 trading days to stabilise (~1 year of data).
+
+Both features capture institutional sentiment that is **uncorrelated with VIX, NIFTY trend, and Markov regime** — they should add genuine new information to the model.

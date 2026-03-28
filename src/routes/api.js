@@ -6,7 +6,8 @@ import {
   getPortfolioSummary,
   getQuote,
   getBenchmarkData,
-  fetchIndexData
+  fetchIndexData,
+  fetchFiiDiiToday
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -426,6 +427,10 @@ router.post('/portfolio/sync', async (req, res) => {
     console.log('[ForceSync] Starting full portfolio + index data refresh into SQLite...');
     const quotes = await getAllQuotes(true); // fetches from RapidAPI/AlphaVantage → writes to SQLite
     console.log(`[ForceSync] ✅ Synced ${quotes.length} holdings to SQLite`);
+
+    // Fetch today's FII/DII cash flows — builds fii_flow_score history over time
+    await fetchFiiDiiToday();
+
     res.json({
       success: true,
       synced: quotes.length,

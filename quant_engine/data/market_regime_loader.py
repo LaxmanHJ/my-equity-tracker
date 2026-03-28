@@ -120,3 +120,85 @@ def load_vix_score_today() -> Optional[float]:
         return None
     score_series = vix_to_score(vix)
     return float(score_series.iloc[-1])
+
+
+def _flow_to_score(series: pd.Series, window: int = 252) -> pd.Series:
+    """
+    Convert a raw flow series (INR crore or contracts) to [-1, +1] using
+    rolling percentile rank over `window` days.
+
+    score = 2 * percentile - 1
+      → +1.0 when flow is at multi-year high (maximum inflow / net long)
+      → -1.0 when flow is at multi-year low (maximum outflow / net short)
+      →  0.0 at historical median
+    """
+    def _pct(s):
+        return s.rank(pct=True).iloc[-1]
+
+    rolling_pct = series.rolling(window, min_periods=30).apply(_pct, raw=False)
+    return (2 * rolling_pct - 1).clip(-1.0, 1.0).fillna(0.0)
+
+
+def load_fii_flow_series(limit: int = 2000) -> pd.Series:
+    """
+    Returns a pd.Series of raw FII net cash flow (INR crore/day) indexed by date.
+    Positive = net buying, negative = net selling.
+    Empty series if no data available.
+    """
+    conn = _get_connection()
+    try:
+        df = pd.read_sql_query(
+            f"SELECT date, fii_net_cash FROM market_regime "
+            f"WHERE fii_net_cash IS NOT NULL ORDER BY date ASC LIMIT {limit}",
+            conn,
+        )
+        if df.empty:
+            return pd.Series(dtype=float)
+        df["date"] = pd.to_datetime(df["date"])
+        return df.set_index("date")["fii_net_cash"]
+    except Exception:
+        return pd.Series(dtype=float)
+    finally:
+        conn.close()
+
+
+def load_fii_fo_series(limit: int = 2000) -> pd.Series:
+    """
+    Returns a pd.Series of FII net index futures positioning (contracts) indexed by date.
+    Positive = net long (bullish positioning), negative = net short (bearish/hedged).
+    Empty series if no data available.
+    """
+    conn = _get_connection()
+    try:
+        df = pd.read_sql_query(
+            f"SELECT date, fii_fo_net_long FROM market_regime "
+            f"WHERE fii_fo_net_long IS NOT NULL ORDER BY date ASC LIMIT {limit}",
+            conn,
+        )
+        if df.empty:
+            return pd.Series(dtype=float)
+        df["date"] = pd.to_datetime(df["date"])
+        return df.set_index("date")["fii_fo_net_long"]
+    except Exception:
+        return pd.Series(dtype=float)
+    finally:
+        conn.close()
+
+
+def load_fii_flow_score_today() -> float:
+    """Returns today's fii_flow_score for live inference. 0.0 if no data."""
+    series = load_fii_flow_series(limit=300)
+    if series.empty:
+        return 0.0
+    rolling_10d = series.rolling(10).sum()
+    score = _flow_to_score(rolling_10d)
+    return float(score.iloc[-1])
+
+
+def load_fii_fo_score_today() -> float:
+    """Returns today's fii_fo_score for live inference. 0.0 if no data."""
+    series = load_fii_fo_series(limit=300)
+    if series.empty:
+        return 0.0
+    score = _flow_to_score(series)
+    return float(score.iloc[-1])

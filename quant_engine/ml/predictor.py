@@ -35,6 +35,8 @@ FEATURE_COLS = [
     "nifty_trend",
     "markov_regime",
     "delivery_score",
+    "fii_flow_score",
+    "fii_fo_score",
 ]
 
 _model_cache = None   # module-level cache so we only load from disk once

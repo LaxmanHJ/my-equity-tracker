@@ -224,6 +224,15 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_date ON sector_indices(date)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_index_name ON sector_indices(index_name)`);
 
+  // market_regime FII/DII columns (ALTER TABLE is idempotent via try/catch)
+  for (const col of [
+    'ALTER TABLE market_regime ADD COLUMN fii_net_cash    REAL',
+    'ALTER TABLE market_regime ADD COLUMN dii_net_cash    REAL',
+    'ALTER TABLE market_regime ADD COLUMN fii_fo_net_long REAL',
+  ]) {
+    try { await db.execute(col); } catch (_) { /* column already exists */ }
+  }
+
   // Create indexes — each statement separately
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_symbol ON price_history(symbol)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(date)`);
@@ -606,6 +615,21 @@ export async function getSectorMomentum() {
     args: []
   });
   return result.rows;
+}
+
+/**
+ * Upsert today's FII/DII net cash flows into market_regime.
+ * fiiNet and diiNet are in INR crore (positive = net buying).
+ */
+export async function upsertFiiDii(date, fiiNet, diiNet) {
+  await db.execute({
+    sql: `INSERT INTO market_regime (date, fii_net_cash, dii_net_cash)
+          VALUES (?, ?, ?)
+          ON CONFLICT(date) DO UPDATE SET
+            fii_net_cash = excluded.fii_net_cash,
+            dii_net_cash = excluded.dii_net_cash`,
+    args: nn(date, fiiNet, diiNet)
+  });
 }
 
 // Initialize on import
