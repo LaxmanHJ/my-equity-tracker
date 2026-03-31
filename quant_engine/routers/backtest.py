@@ -82,7 +82,13 @@ async def run_backtest(req: BacktestRequest):
     
     # 3. Calculate metrics
     metrics = calculate_metrics(equity_curve, initial_capital=req.initial_capital)
-    
+    if not metrics:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not enough trading data in the selected range ({len(df)} bars). "
+                   "Try a wider date range — at least 3 months is recommended."
+        )
+
     # Format timeseries for frontend Chart.js (needs list of {x: date, y: value})
     chart_data = [{"x": date.strftime('%Y-%m-%d'), "y": round(val, 2)} for date, val in equity_curve.items()]
     baseline_data = [{"x": date.strftime('%Y-%m-%d'), "y": round(val, 2)} for date, val in baseline_curve.items()]

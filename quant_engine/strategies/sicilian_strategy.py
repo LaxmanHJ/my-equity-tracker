@@ -1,8 +1,11 @@
 """
 The Sicilian Strategy — Backtestable version of The Sicilian decision engine.
 
-Replays the 8 technical sub-scores of The Sicilian engine over historical data
-in a vectorized manner to generate daily BUY (1) / SELL (-1) / HOLD (0) signals.
+Replays the same 7 factor scores used by the live scoring engine over historical
+data in a vectorized manner to generate daily BUY (1) / SELL (-1) / HOLD (0) signals.
+
+Uses identical factor implementations and weights as quant_engine/scoring/composite.py
+so that backtest results are directly comparable to live engine signals.
 
 Fundamental sub-scores (valuation, financial_health, growth) are excluded because
 they are quarterly and don't change day-to-day — including them as a static bias
@@ -12,27 +15,15 @@ import logging
 import numpy as np
 import pandas as pd
 from quant_engine.strategies.base import BaseStrategy
+from quant_engine.config import FACTOR_WEIGHTS
 from quant_engine.data.loader import load_benchmark
 
 logger = logging.getLogger(__name__)
 
-# ── Sicilian technical weights (re-normalized from original 80% to sum to 1.0) ──
-TECH_WEIGHTS = {
-    "composite_factor":  0.275,   # 0.22 / 0.80
-    "rsi":               0.125,   # 0.10 / 0.80
-    "macd":              0.125,   # 0.10 / 0.80
-    "trend_ma":          0.125,   # 0.10 / 0.80
-    "bollinger":         0.100,   # 0.08 / 0.80
-    "volume":            0.088,   # 0.07 / 0.80
-    "volatility":        0.075,   # 0.06 / 0.80
-    "relative_strength": 0.088,   # 0.07 / 0.80
-}
-
-# Verdict thresholds — lower than the real-time Sicilian (±0.35) because the
-# rolling weighted average of 8 technical sub-scores is compressed vs the full
-# 11-score Sicilian. ±0.15 generates meaningful trade activity.
-BUY_THRESHOLD = 0.15
-SELL_THRESHOLD = -0.15
+# Thresholds aligned with the live engine:
+# Live engine uses ±40 on a -100 to +100 scale → ±0.40 on the -1 to +1 backtest scale.
+BUY_THRESHOLD = 0.40
+SELL_THRESHOLD = -0.40
 
 
 class SicilianStrategy(BaseStrategy):
@@ -44,7 +35,8 @@ class SicilianStrategy(BaseStrategy):
 
     def generate_signals(self, data: pd.DataFrame, **kwargs) -> pd.Series:
         """
-        Generate daily signals from Sicilian technical sub-scores.
+        Generate daily signals using the same 7 factors and weights as the live
+        scoring engine (quant_engine/scoring/composite.py).
 
         Args:
             data: OHLCV DataFrame with DateTimeIndex.
@@ -64,44 +56,24 @@ class SicilianStrategy(BaseStrategy):
                 logger.warning("Could not load benchmark data, relative strength scores will be 0: %s", exc)
                 benchmark_df = pd.DataFrame()
 
-        # ── Pre-compute rolling indicators ────────────────────────────
         close = df["close"]
         volume = df["volume"]
 
-        # RSI (14-period)
-        rsi_scores = self._rolling_rsi_score(close, period=14)
+        # ── Same 7 factors as the live engine, vectorized over all bars ──
+        factor_scores = {
+            "momentum":          self._rolling_momentum_score(close),
+            "mean_reversion":    self._rolling_mean_reversion_score(close),
+            "rsi":               self._rolling_rsi_score(close),
+            "macd":              self._rolling_macd_score(close),
+            "volatility":        self._rolling_volatility_score(close),
+            "volume":            self._rolling_volume_score(close, volume),
+            "relative_strength": self._rolling_relative_strength_score(close, benchmark_df),
+        }
 
-        # MACD (12, 26, 9)
-        macd_scores = self._rolling_macd_score(close)
-
-        # Trend: SMA20 vs SMA50
-        trend_scores = self._rolling_trend_score(close)
-
-        # Bollinger %B (20, 2σ)
-        bollinger_scores = self._rolling_bollinger_score(close)
-
-        # Volume ratio
-        volume_scores = self._rolling_volume_score(close, volume)
-
-        # Volatility ratio (20d vs 60d)
-        volatility_scores = self._rolling_volatility_score(close)
-
-        # Relative strength vs benchmark
-        rs_scores = self._rolling_relative_strength_score(close, benchmark_df)
-
-        # Composite factor: simplified momentum + mean-reversion blend
-        composite_scores = self._rolling_composite_score(close)
-
-        # ── Weighted aggregation per bar ──────────────────────────────
-        sicilian_score = (
-            TECH_WEIGHTS["composite_factor"]  * composite_scores +
-            TECH_WEIGHTS["rsi"]               * rsi_scores +
-            TECH_WEIGHTS["macd"]              * macd_scores +
-            TECH_WEIGHTS["trend_ma"]          * trend_scores +
-            TECH_WEIGHTS["bollinger"]         * bollinger_scores +
-            TECH_WEIGHTS["volume"]            * volume_scores +
-            TECH_WEIGHTS["volatility"]        * volatility_scores +
-            TECH_WEIGHTS["relative_strength"] * rs_scores
+        # ── Weighted aggregation using live engine weights ────────────
+        sicilian_score = sum(
+            FACTOR_WEIGHTS[name] * scores
+            for name, scores in factor_scores.items()
         ).clip(-1.0, 1.0)
 
         # ── Generate signals ─────────────────────────────────────────
@@ -112,6 +84,27 @@ class SicilianStrategy(BaseStrategy):
         return signals
 
     # ── Rolling sub-score calculators (vectorized) ────────────────────
+    # NOTE: all _rolling_* methods below are also used directly by ml/trainer.py
+    # to build the ML feature matrix. Do not rename or remove them.
+
+    @staticmethod
+    def _rolling_momentum_score(close: pd.Series) -> pd.Series:
+        """Vectorized momentum: weighted blend of 21d/63d/126d returns, normalized to [-1, +1].
+        Mirrors quant_engine/factors/momentum.py calculate() exactly."""
+        ret_1m = close.pct_change(21)
+        ret_3m = close.pct_change(63)
+        ret_6m = close.pct_change(126)
+        raw = 0.2 * ret_1m + 0.4 * ret_3m + 0.4 * ret_6m
+        return (raw / 0.50).clip(-1.0, 1.0).fillna(0.0)
+
+    @staticmethod
+    def _rolling_mean_reversion_score(close: pd.Series, period: int = 50) -> pd.Series:
+        """Vectorized mean reversion: 50d Z-score inverted, normalized to [-1, +1].
+        Mirrors quant_engine/factors/mean_reversion.py calculate() exactly."""
+        sma = close.rolling(period).mean()
+        std = close.rolling(period).std()
+        z_score = (close - sma) / std.replace(0, np.nan)
+        return (-z_score / 2.0).clip(-1.0, 1.0).fillna(0.0)
 
     @staticmethod
     def _rolling_rsi_score(close: pd.Series, period: int = 14) -> pd.Series:

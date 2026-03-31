@@ -68,8 +68,11 @@ async function runSimulation() {
 }
 
 function updateMetrics(metrics) {
-    const formatPct = val => `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
-    const formatNum = val => val.toFixed(2);
+    if (!metrics || Object.keys(metrics).length === 0) {
+        throw new Error('Not enough trading data in the selected date range. Try a wider range (at least 3 months).');
+    }
+    const formatPct = val => val == null ? 'N/A' : `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+    const formatNum = val => val == null ? 'N/A' : val.toFixed(2);
 
     document.getElementById('resTotalReturn').textContent = formatPct(metrics.total_return_pct);
     document.getElementById('resTotalReturn').className = `card-value ${metrics.total_return_pct >= 0 ? 'positive' : 'negative'}`;

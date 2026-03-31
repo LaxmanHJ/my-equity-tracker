@@ -33,7 +33,9 @@ import {
   getAnalystRatings,
   getShareholding,
   getSectorMomentum,
-  getBulkDeals
+  getBulkDeals,
+  saveSignalsLog,
+  getSignalsHistory
 } from '../database/db.js';
 
 const router = express.Router();
@@ -505,9 +507,36 @@ router.get('/quant/scores', async (req, res) => {
     const response = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
     const data = await response.json();
     res.json(data);
+
+    // Persist today's signals for later verification (fire-and-forget, non-blocking)
+    if (data.stocks?.length) {
+      saveSignalsLog(data.stocks.map(s => ({
+        symbol: s.symbol,
+        signal: s.signal,
+        composite_score: s.composite_score
+      }))).catch(err => console.error('signals_log write failed:', err));
+    }
   } catch (error) {
     console.error('Quant engine error:', error);
     res.status(502).json({ error: 'Quant engine unavailable. Is the Python server running on port 5001?' });
+  }
+});
+
+/**
+ * GET /api/quant/signals/history?symbol=RELIANCE&limit=90
+ * Returns historical Sicilian signals with 20-day forward returns for verification.
+ */
+router.get('/quant/signals/history', async (req, res) => {
+  try {
+    const { symbol, limit } = req.query;
+    const rows = await getSignalsHistory(
+      symbol ? symbol.toUpperCase() : null,
+      limit ? parseInt(limit, 10) : 90
+    );
+    res.json({ count: rows.length, signals: rows });
+  } catch (error) {
+    console.error('signals history error:', error);
+    res.status(500).json({ error: 'Failed to retrieve signal history' });
   }
 });
 

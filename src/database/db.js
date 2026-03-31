@@ -240,6 +240,20 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_date ON sector_indices(date)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sector_index_name ON sector_indices(index_name)`);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS signals_log (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      signal_date     TEXT NOT NULL,
+      symbol          TEXT NOT NULL,
+      signal          TEXT NOT NULL,
+      composite_score REAL,
+      recorded_at     TEXT NOT NULL,
+      UNIQUE(signal_date, symbol)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_signals_log_date ON signals_log(signal_date)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_signals_log_symbol ON signals_log(symbol)`);
+
   // market_regime FII/DII columns (ALTER TABLE is idempotent via try/catch)
   for (const col of [
     'ALTER TABLE market_regime ADD COLUMN fii_net_cash    REAL',
@@ -674,6 +688,67 @@ export async function upsertFiiDii(date, fiiNet, diiNet) {
             dii_net_cash = excluded.dii_net_cash`,
     args: nn(date, fiiNet, diiNet)
   });
+}
+
+/**
+ * Upsert a batch of Sicilian signals into signals_log.
+ * stocks: array of { symbol, signal, composite_score }
+ */
+export async function saveSignalsLog(stocks) {
+  const today = new Date().toISOString().slice(0, 10);
+  const recordedAt = new Date().toISOString();
+  for (const s of stocks) {
+    await db.execute({
+      sql: `INSERT INTO signals_log (signal_date, symbol, signal, composite_score, recorded_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(signal_date, symbol) DO UPDATE SET
+              signal          = excluded.signal,
+              composite_score = excluded.composite_score,
+              recorded_at     = excluded.recorded_at`,
+      args: nn(today, s.symbol, s.signal, s.composite_score ?? null, recordedAt)
+    });
+  }
+}
+
+/**
+ * Return signal history for a symbol (or all symbols) with actual forward returns.
+ * forward_days: how many trading days ahead to measure return (default 20).
+ */
+export async function getSignalsHistory(symbol = null, limit = 90) {
+  const whereClause = symbol ? `WHERE sl.symbol = ?` : ``;
+  const args = symbol ? [symbol, limit] : [limit];
+
+  const result = await db.execute({
+    sql: `SELECT
+            sl.signal_date,
+            sl.symbol,
+            sl.signal,
+            sl.composite_score,
+            sl.recorded_at,
+            entry.close  AS entry_price,
+            exit20.close AS exit_price_20d,
+            CASE
+              WHEN entry.close IS NOT NULL AND exit20.close IS NOT NULL
+              THEN ROUND((exit20.close - entry.close) / entry.close * 100, 2)
+              ELSE NULL
+            END AS forward_return_20d
+          FROM signals_log sl
+          LEFT JOIN price_history entry
+            ON entry.symbol = sl.symbol AND entry.date = sl.signal_date
+          LEFT JOIN price_history exit20
+            ON exit20.symbol = sl.symbol
+            AND exit20.date = (
+              SELECT date FROM price_history
+              WHERE symbol = sl.symbol AND date > sl.signal_date
+              ORDER BY date ASC
+              LIMIT 1 OFFSET 19
+            )
+          ${whereClause}
+          ORDER BY sl.signal_date DESC
+          LIMIT ?`,
+    args
+  });
+  return result.rows;
 }
 
 // Initialize on import
