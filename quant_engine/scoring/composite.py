@@ -10,7 +10,7 @@ from quant_engine.data.loader import load_price_history, load_all_symbols, load_
 from quant_engine.data.delivery_loader import load_circuit_status
 from quant_engine.factors import (
     momentum,
-    mean_reversion,
+    bollinger,
     rsi,
     macd,
     volatility,
@@ -31,12 +31,12 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
 
     # Calculate each factor
     factors = {
-        "momentum": momentum.calculate(df),
-        "mean_reversion": mean_reversion.calculate(df),
-        "rsi": rsi.calculate(df),
-        "macd": macd.calculate(df),
-        "volatility": volatility.calculate(df),
-        "volume": volume.calculate(df),
+        "momentum":          momentum.calculate(df),
+        "bollinger":         bollinger.calculate(df),
+        "rsi":               rsi.calculate(df),
+        "macd":              macd.calculate(df),
+        "volatility":        volatility.calculate(df),
+        "volume":            volume.calculate(df),
         "relative_strength": relative_strength.calculate(df, benchmark_df),
     }
 

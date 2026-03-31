@@ -17,14 +17,18 @@ HOST = "0.0.0.0"
 PORT = 5001
 
 # Factor weights (must sum to 1.0)
+# Calibrated against ML feature importances (metadata.json):
+#   volatility=12.6%, rsi=11.7%, bollinger=9.3%, macd=6.8%, rs=7.0%
+# mean_reversion replaced by bollinger (same contrarian intent, volatility-adaptive).
+# RSI direction flipped to trend-confirmation (high RSI = bullish, not overbought).
 FACTOR_WEIGHTS = {
-    "momentum":          0.25,
-    "mean_reversion":    0.15,
-    "rsi":               0.15,
-    "macd":              0.15,
-    "volatility":        0.10,
-    "volume":            0.10,
-    "relative_strength": 0.10,
+    "momentum":          0.20,
+    "bollinger":         0.15,
+    "rsi":               0.20,
+    "macd":              0.12,
+    "volatility":        0.20,
+    "volume":            0.05,
+    "relative_strength": 0.08,
 }
 
 # Signal thresholds on the -100 to +100 composite score

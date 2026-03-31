@@ -11,11 +11,10 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import numpy as np
 import pandas as pd
-import libsql_experimental as libsql
-
 from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 from quant_engine.data.loader import load_all_symbols, load_price_history, load_benchmark
+from quant_engine.data.turso_client import connect
 
 SKIP_SYMBOLS = {'^BSESN', '^NSEI'}  # benchmark indices, not tradeable stocks
 
@@ -48,15 +47,16 @@ def signal_label(score: float) -> str:
     return "HOLD"
 
 
+SQL = """INSERT INTO signals_log (signal_date, symbol, signal, composite_score, recorded_at)
+         VALUES (?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(signal_date, symbol) DO UPDATE SET
+           signal          = excluded.signal,
+           composite_score = excluded.composite_score,
+           recorded_at     = excluded.recorded_at"""
+
+
 def main():
-    url = os.getenv("TURSO_DATABASE_URL")
-    token = os.getenv("TURSO_AUTH_TOKEN")
-    if not url or not token:
-        print("ERROR: TURSO_DATABASE_URL / TURSO_AUTH_TOKEN not set in .env")
-        sys.exit(1)
-
-    conn = libsql.connect(url, auth_token=token)
-
+    conn = connect()
     symbols = [s for s in load_all_symbols() if s not in SKIP_SYMBOLS]
     benchmark_df = load_benchmark(limit=3000)
 
@@ -71,28 +71,20 @@ def main():
 
         scores = compute_score_series(df, benchmark_df)
 
-        rows_written = 0
+        params = []
         for date, score in scores.items():
             if pd.isna(score):
                 continue
             date_str = date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date)[:10]
             label = signal_label(float(score))
             composite = round(float(score) * 100, 2)  # scale to -100..+100 like live engine
+            params.append((date_str, symbol, label, composite))
 
-            conn.execute(
-                """INSERT INTO signals_log (signal_date, symbol, signal, composite_score, recorded_at)
-                   VALUES (?, ?, ?, ?, datetime('now'))
-                   ON CONFLICT(signal_date, symbol) DO UPDATE SET
-                     signal          = excluded.signal,
-                     composite_score = excluded.composite_score,
-                     recorded_at     = excluded.recorded_at""",
-                (date_str, symbol, label, composite)
-            )
-            rows_written += 1
+        if params:
+            conn.executemany(SQL, params)
 
-        conn.commit()
-        print(f"  {symbol}: {rows_written} bars written")
-        total_rows += rows_written
+        print(f"  {symbol}: {len(params)} bars written")
+        total_rows += len(params)
 
     print(f"\nDone. {total_rows} total rows written to signals_log.")
 

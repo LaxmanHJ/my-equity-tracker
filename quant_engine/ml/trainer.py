@@ -36,7 +36,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from quant_engine.config import ML_MODEL_DIR, INDUSTRY_TO_NSE_INDEX
 from quant_engine.data.loader import (
     load_all_symbols, load_benchmark, load_price_history,
-    load_industry_map, load_analyst_consensus,
+    load_industry_map,
 )
 from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.market_regime_loader import (
@@ -60,7 +60,7 @@ FEATURE_COLS = [
     "relative_strength",
     # Cross-stock / external
     "sector_rotation",    # avg 20d return of industry peers vs benchmark
-    "analyst_consensus",  # (strong_buy+buy - sell-strong_sell) / total_analysts
+    # analyst_consensus removed: static 2026 ratings applied to 2023 bars = look-ahead bias
     # Market regime (same value for every stock on the same date)
     "vix_regime",         # India VIX rolling percentile → [-1 fear, +1 calm]
     "nifty_trend",        # NIFTY position vs SMA50 + SMA200 → [-1 downtrend, +1 uptrend]
@@ -84,8 +84,8 @@ MIN_BARS = 120
 # Random Forest hyper-parameters (deliberately conservative to avoid overfitting)
 RF_PARAMS = {
     "n_estimators": 300,
-    "max_depth": 6,
-    "min_samples_leaf": 60,   # ~60 trading days of context per leaf
+    "max_depth": 8,           # cap prevents memorisation (tuner found null=unlimited was overfitting)
+    "min_samples_leaf": 30,   # was 60; loosen slightly so trees can fit signal, not just noise
     "max_features": "sqrt",
     "class_weight": "balanced",
     "random_state": 42,
@@ -187,7 +187,6 @@ def _build_feature_frame(
     df: pd.DataFrame,
     benchmark_df: pd.DataFrame,
     sector_score: pd.Series,
-    analyst_score: float,
     vix_score: pd.Series,
     nifty_trend: pd.Series,
     markov_score: pd.Series,
@@ -199,7 +198,6 @@ def _build_feature_frame(
     Compute all sub-scores for every bar in df.
 
     sector_score    – pre-computed industry series aligned by date; reindexed to df.
-    analyst_score   – static scalar for this stock (same value across all bars).
     vix_score       – market-wide VIX percentile score series; reindexed to df.
     nifty_trend     – market-wide NIFTY trend score series; reindexed to df.
     markov_score    – rolling Markov P(Bull)-P(Bear) series; reindexed to df.
@@ -228,7 +226,6 @@ def _build_feature_frame(
             "volatility":        strat._rolling_volatility_score(close),
             "relative_strength": strat._rolling_relative_strength_score(close, benchmark_df),
             "sector_rotation":   _align(sector_score),
-            "analyst_consensus": pd.Series(analyst_score, index=df.index),
             "vix_regime":        _align(vix_score),
             "nifty_trend":       _align(nifty_trend),
             "markov_regime":     _align(markov_score),
@@ -251,7 +248,6 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     symbols      = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
     industry_map = load_industry_map()          # {symbol: industry}
-    analyst_map  = load_analyst_consensus()     # {symbol: score in [-1,+1]}
 
     # Load all price histories up front so _build_sector_series can average
     # across peers without re-loading inside the per-stock loop.
@@ -321,7 +317,6 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
         try:
             industry       = industry_map.get(symbol)
             sector_score   = sector_series.get(industry, pd.Series(dtype=float))
-            analyst_score  = analyst_map.get(symbol, 0.0)   # 0 = neutral if no coverage
 
             # delivery_score: rolling z-score of delivery_pct vs 60-day mean, clipped to [-1, +1]
             delivery_df = load_delivery_series(symbol, limit=2000)
@@ -335,7 +330,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
             features = _build_feature_frame(
                 df, benchmark_df,
-                sector_score, analyst_score,
+                sector_score,
                 vix_score_series, nifty_trend_series,
                 markov_score_series,
                 delivery_score_series,
@@ -398,8 +393,8 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
     with tiny leaves (low min_samples_leaf) will overfit; the grid lets us find
     the right balance empirically rather than guessing.
     """
-    leaf_candidates  = [5, 10, 20, 40, 60]
-    depth_candidates = [6, 8, 10, None]   # None = unlimited depth
+    leaf_candidates  = [20, 30, 50, 80]
+    depth_candidates = [6, 8, 10, 12]
 
     tscv = TimeSeriesSplit(n_splits=5)
     best_score = -1.0

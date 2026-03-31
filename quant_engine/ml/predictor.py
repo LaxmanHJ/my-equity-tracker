@@ -30,7 +30,6 @@ FEATURE_COLS = [
     "volatility",
     "relative_strength",
     "sector_rotation",
-    "analyst_consensus",
     "vix_regime",
     "nifty_trend",
     "markov_regime",

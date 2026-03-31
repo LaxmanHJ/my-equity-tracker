@@ -53,7 +53,36 @@ def load_all_symbols() -> List[str]:
 
 
 def load_benchmark(limit: int = 365) -> pd.DataFrame:
-    """Load NIFTY 50 benchmark data. Symbol stored as '^NSEI' or 'NSEI'."""
+    """Load NIFTY 50 benchmark data.
+
+    Prefers sector_indices table (797 bars back to 2023-01-02) over
+    price_history (^NSEI has only ~257 bars from 2025-03-17 onwards).
+    Falls back to price_history if sector_indices has no Nifty 50 data.
+    """
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query(
+            """
+            SELECT date, open, high, low, close,
+                   COALESCE(0, 0) AS volume
+            FROM sector_indices
+            WHERE index_name = 'Nifty 50'
+            ORDER BY date ASC
+            """,
+            conn,
+        )
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date").sort_index()
+            if limit:
+                df = df.tail(limit)
+            return df
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    # Fallback: price_history (shorter history but always present)
     for sym in ["^NSEI", "NSEI", "NIFTY", "NIFTY 50"]:
         df = load_price_history(sym, limit)
         if not df.empty:

@@ -54,6 +54,7 @@ def fetch_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
 
 @router.post("/")
 async def run_backtest(req: BacktestRequest):
+    db_symbol = req.symbol.replace('.NS', '').replace('.BO', '')
     df = fetch_data(req.symbol, req.start_date, req.end_date)
     if df.empty:
         raise HTTPException(status_code=404, detail=f"No data found for {req.symbol} in given date range.")
@@ -71,8 +72,8 @@ async def run_backtest(req: BacktestRequest):
     # Load benchmark for strategies that need it (e.g. Sicilian relative strength)
     benchmark_df = load_benchmark(limit=len(df) + 200)
         
-    # 1. Generate signals
-    signals = strategy.generate_signals(df, benchmark_df=benchmark_df)
+    # 1. Generate signals — pass symbol so ML path can load delivery/sector data
+    signals = strategy.generate_signals(df, benchmark_df=benchmark_df, symbol=db_symbol)
     
     # 2. Run simulation
     engine = VectorizedBacktester(df, initial_capital=req.initial_capital)

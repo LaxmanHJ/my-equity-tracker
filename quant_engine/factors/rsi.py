@@ -30,9 +30,10 @@ def calculate(df: pd.DataFrame, period: int = 14) -> dict:
     if np.isnan(current_rsi):
         return {"rsi": None, "score": 0.0}
 
-    # Map RSI to score:
-    # RSI 20 → +1.0 (strong long), RSI 50 → 0.0 (neutral), RSI 80 → -1.0 (strong short)
-    score = np.clip((50 - current_rsi) / 30.0, -1.0, 1.0)
+    # Map RSI to score (trend-momentum confirmation):
+    # RSI > 50 means avg gains > avg losses → trend is positive → bullish.
+    # RSI 80 → +1.0 (strong uptrend), RSI 50 → 0.0 (neutral), RSI 20 → -1.0 (downtrend).
+    score = np.clip((current_rsi - 50) / 30.0, -1.0, 1.0)
 
     return {
         "rsi": round(current_rsi, 2),
