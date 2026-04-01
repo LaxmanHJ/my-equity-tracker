@@ -21,6 +21,7 @@ import argparse
 import logging
 import os
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -128,42 +129,51 @@ def import_from_csv(conn: TursoConnection, csv_path: str) -> int:
     return len(rows)
 
 
-# ── RapidAPI fallback ─────────────────────────────────────────────
+# ── NSE direct fetch ──────────────────────────────────────────────
 
-def _try_fetch_vix_api(period: str = "5yr") -> list[dict]:
-    """Try RapidAPI — currently unsupported, kept for future use."""
-    api_key = os.getenv("RAPIDAPI_KEY", "")
-    if not api_key:
-        return []
+def _last_date_in_db(conn) -> "date | None":
+    """Return the most recent VIX date already stored, or None if table is empty."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(date) FROM market_regime WHERE india_vix IS NOT NULL"
+        ).fetchone()
+        if row and row[0]:
+            return date.fromisoformat(row[0])
+    except Exception:
+        pass
+    return None
 
-    headers = {"X-RapidAPI-Key": api_key, "X-RapidAPI-Host": RAPIDAPI_HOST}
-    for sym in VIX_SYMBOL_CANDIDATES:
-        try:
-            resp = requests.get(
-                RAPIDAPI_URL,
-                params={"stock_name": sym, "period": period, "filter": "price"},
-                headers=headers,
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                time.sleep(1)
-                continue
-            raw = resp.json()
-            price_ds = next(
-                (d for d in raw.get("datasets", []) if d.get("metric") == "Price"), None
-            )
-            if price_ds and price_ds.get("values"):
-                bars = [
-                    {"date": e[0], "vix": round(float(e[1]), 4)}
-                    for e in price_ds["values"] if e[1]
-                ]
-                if bars:
-                    logger.info("VIX fetched via RapidAPI symbol '%s' — %d bars", sym, len(bars))
-                    return bars
-            time.sleep(1)
-        except Exception:
-            time.sleep(1)
-    return []
+
+def fetch_and_upsert_from_nse(conn, from_date: date, to_date: date) -> int:
+    """
+    Fetch India VIX history from NSE's API and upsert into market_regime.
+
+    Args:
+        conn:      DB connection.
+        from_date: First date to fetch.
+        to_date:   Last date to fetch (usually today).
+
+    Returns:
+        Number of rows upserted.
+    """
+    from quant_engine.data.nse_fetcher import NSEFetcher
+
+    logger.info("Initialising NSE session …")
+    fetcher = NSEFetcher()
+    time.sleep(1)  # let cookies settle
+
+    bars = fetcher.fetch_vix_history(from_date, to_date)
+    if not bars:
+        logger.warning("NSE returned no VIX data for %s → %s", from_date, to_date)
+        return 0
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO market_regime (date, india_vix) VALUES (:date, :vix)",
+        bars,
+    )
+    conn.commit()
+    logger.info("Upserted %d VIX rows (%s → %s)", len(bars), bars[0]["date"], bars[-1]["date"])
+    return len(bars)
 
 
 # ── Entry point ───────────────────────────────────────────────────
@@ -172,7 +182,15 @@ def main():
     parser = argparse.ArgumentParser(description="Backfill India VIX into market_regime table")
     parser.add_argument(
         "--from-csv", metavar="FILE",
-        help="Path to NSE India historical VIX CSV file",
+        help="Import from a downloaded NSE India historical VIX CSV file.",
+    )
+    parser.add_argument(
+        "--incremental", action="store_true",
+        help="Fetch only missing dates (from last DB entry to today) via NSE API.",
+    )
+    parser.add_argument(
+        "--from", metavar="DATE", dest="from_date",
+        help="Full backfill start date YYYY-MM-DD (used with NSE API, default 2019-01-01).",
     )
     args = parser.parse_args()
 
@@ -180,32 +198,39 @@ def main():
     conn.execute(CREATE_TABLE_SQL)
     conn.commit()
 
+    # ── Mode 1: CSV import (manual download from NSE website) ─────
     if args.from_csv:
         logger.info("Importing VIX from CSV: %s", args.from_csv)
         count = import_from_csv(conn, args.from_csv)
         if count:
-            logger.info("Done — %d rows imported. Re-run training to activate vix_regime feature.", count)
+            logger.info("Done — %d rows imported.", count)
         conn.close()
         return
 
-    # No CSV — try RapidAPI
-    logger.info("No --from-csv provided. Trying RapidAPI …")
-    bars = _try_fetch_vix_api()
-    if not bars:
-        logger.warning(
-            "RapidAPI does not expose India VIX data.\n"
-            "Download the CSV from NSE India and run:\n"
-            "  python3 -m quant_engine.data.backfill_regime --from-csv <file>"
-        )
+    # ── Mode 2: Incremental — only fetch dates we don't have yet ──
+    if args.incremental:
+        last = _last_date_in_db(conn)
+        if last is None:
+            logger.warning("DB is empty. Run a full backfill first:\n"
+                           "  python3 -m quant_engine.data.backfill_regime --from 2019-01-01")
+            conn.close()
+            return
+        from_date = last + timedelta(days=1)
+        to_date   = date.today()
+        if from_date > to_date:
+            logger.info("VIX already up to date (last row: %s).", last)
+            conn.close()
+            return
+        logger.info("Incremental fetch: %s → %s", from_date, to_date)
+        fetch_and_upsert_from_nse(conn, from_date, to_date)
         conn.close()
         return
 
-    conn.executemany(
-        "INSERT OR REPLACE INTO market_regime (date, india_vix) VALUES (:date, :vix)",
-        bars,
-    )
-    conn.commit()
-    logger.info("Upserted %d VIX rows (%s → %s)", len(bars), bars[0]["date"], bars[-1]["date"])
+    # ── Mode 3: Full backfill via NSE API ─────────────────────────
+    from_date = date.fromisoformat(args.from_date) if args.from_date else date(2019, 1, 1)
+    to_date   = date.today()
+    logger.info("Full NSE backfill: %s → %s", from_date, to_date)
+    fetch_and_upsert_from_nse(conn, from_date, to_date)
     conn.close()
 
 

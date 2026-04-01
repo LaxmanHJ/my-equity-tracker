@@ -8,6 +8,7 @@ from quant_engine.backtest.engine import VectorizedBacktester
 from quant_engine.backtest.metrics import calculate_metrics, calculate_trade_stats
 from quant_engine.strategies.base import BaseStrategy
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+from quant_engine.strategies.regime_adaptive_strategy import RegimeAdaptiveStrategy
 from quant_engine.data.loader import load_benchmark
 
 router = APIRouter(
@@ -61,8 +62,9 @@ async def run_backtest(req: BacktestRequest):
         
     # Standardize strategy names
     strategies = {
-        "buy_and_hold": BuyAndHoldStrategy("Buy & Hold"),
-        "sicilian": SicilianStrategy("The Sicilian")
+        "buy_and_hold":      BuyAndHoldStrategy("Buy & Hold"),
+        "sicilian":          SicilianStrategy("The Sicilian"),
+        "regime_adaptive":   RegimeAdaptiveStrategy("Regime Adaptive"),
     }
     
     strategy = strategies.get(req.strategy.lower())

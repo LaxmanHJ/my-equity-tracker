@@ -438,6 +438,19 @@ router.post('/portfolio/sync', async (req, res) => {
     // Fetch today's bulk/block deals — accumulates institutional activity data over time
     await fetchBulkDealsToday();
 
+    // Fetch today's India VIX from NSE and upsert into market_regime
+    try {
+      const vixRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/vix`, { method: 'POST' });
+      const vixData = await vixRes.json();
+      if (vixData.success) {
+        console.log(`[ForceSync] ✅ VIX synced: ${vixData.date} = ${vixData.india_vix}`);
+      } else {
+        console.warn(`[ForceSync] ⚠️ VIX sync failed: ${vixData.error}`);
+      }
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ VIX sync skipped (quant engine unavailable):', e.message);
+    }
+
     res.json({
       success: true,
       synced: quotes.length,
