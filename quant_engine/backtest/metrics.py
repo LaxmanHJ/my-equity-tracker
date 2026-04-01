@@ -55,6 +55,46 @@ def calculate_max_drawdown(equity_curve: pd.Series) -> float:
     drawdown = (equity_curve - rolling_max) / rolling_max
     return drawdown.min() # Max drawdown is the most negative value
 
+def calculate_trade_stats(trades: list) -> dict:
+    """
+    Compute trade-level statistics from the trade log produced by the engine.
+
+    Args:
+        trades: list of trade dicts with 'pnl_pct' key (as returned by engine._extract_trades).
+
+    Returns:
+        dict with trade_count, win_rate_pct, profit_factor, avg_winner_pct, avg_loser_pct.
+    """
+    if not trades:
+        return {
+            "trade_count":    0,
+            "win_rate_pct":   0.0,
+            "profit_factor":  0.0,
+            "avg_winner_pct": 0.0,
+            "avg_loser_pct":  0.0,
+        }
+
+    pnls    = [t["pnl_pct"] for t in trades]
+    winners = [p for p in pnls if p > 0]
+    losers  = [p for p in pnls if p < 0]
+
+    win_rate      = len(winners) / len(pnls) * 100
+    total_gains   = sum(winners) if winners else 0.0
+    total_losses  = abs(sum(losers)) if losers else 0.0
+    profit_factor = (
+        round(min(total_gains / total_losses, 99.9), 2) if total_losses > 0
+        else (99.9 if total_gains > 0 else 0.0)
+    )
+
+    return {
+        "trade_count":    len(trades),
+        "win_rate_pct":   round(win_rate, 1),
+        "profit_factor":  profit_factor,
+        "avg_winner_pct": round(sum(winners) / len(winners), 2) if winners else 0.0,
+        "avg_loser_pct":  round(sum(losers)  / len(losers),  2) if losers  else 0.0,
+    }
+
+
 def calculate_metrics(equity_curve: pd.Series, initial_capital: float = 10000) -> dict:
     """
     Given an equity curve (Series of portfolio values indexed by datetime),
@@ -79,13 +119,17 @@ def calculate_metrics(equity_curve: pd.Series, initial_capital: float = 10000) -
     
     total_return = (final_capital - initial_capital) / initial_capital
 
+    # Calmar = CAGR / |Max Drawdown| (both as decimals)
+    calmar = round(cagr / abs(max_dd), 2) if max_dd != 0 else 0.0
+
     return {
-        "start_capital": round(initial_capital, 2),
-        "end_capital": round(final_capital, 2),
+        "start_capital":    round(initial_capital, 2),
+        "end_capital":      round(final_capital, 2),
         "total_return_pct": round(total_return * 100, 2),
-        "cagr_pct": round(cagr * 100, 2),
-        "sharpe_ratio": round(sharpe, 2),
-        "sortino_ratio": round(sortino, 2),
+        "cagr_pct":         round(cagr * 100, 2),
+        "sharpe_ratio":     round(sharpe, 2),
+        "sortino_ratio":    round(sortino, 2),
         "max_drawdown_pct": round(max_dd * 100, 2),
-        "years_tested": round(years, 2)
+        "calmar_ratio":     calmar,
+        "years_tested":     round(years, 2),
     }

@@ -112,7 +112,7 @@
 
             <!-- Results Area -->
             <div id="resultsArea" style="display: none;">
-                <!-- Metrics -->
+                <!-- Strategy metrics -->
                 <div class="metrics-grid">
                     <div class="summary-card glass">
                         <div class="card-content">
@@ -138,12 +138,76 @@
                             <span class="card-value" id="resSharpe">0</span>
                         </div>
                     </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Calmar Ratio</span>
+                            <span class="card-value" id="resCalmar">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Win Rate</span>
+                            <span class="card-value" id="resWinRate">0%</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Profit Factor</span>
+                            <span class="card-value" id="resProfitFactor">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card glass">
+                        <div class="card-content">
+                            <span class="card-label">Trades</span>
+                            <span class="card-value" id="resTradeCount">0</span>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Chart -->
-                <div class="chart-container glass" style="height: 500px;">
+                <!-- Benchmark comparison -->
+                <div class="glass" style="padding: 1rem 1.5rem; margin-bottom: 1.5rem;" id="benchmarkRow">
+                    <p style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Buy &amp; Hold Benchmark</p>
+                    <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Return: <strong id="bncReturn" style="color: var(--text-primary);">—</strong></span>
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">CAGR: <strong id="bncCagr" style="color: var(--text-primary);">—</strong></span>
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Max DD: <strong id="bncMaxDd" style="color: var(--text-primary);">—</strong></span>
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Sharpe: <strong id="bncSharpe" style="color: var(--text-primary);">—</strong></span>
+                        <span style="color: var(--text-secondary); font-size: 0.9rem;">Calmar: <strong id="bncCalmar" style="color: var(--text-primary);">—</strong></span>
+                    </div>
+                </div>
+
+                <!-- Equity Curve Chart -->
+                <div class="chart-container glass" style="height: 400px; margin-bottom: 1.5rem;">
                     <h3>Equity Curve</h3>
                     <canvas id="equityChart"></canvas>
+                </div>
+
+                <!-- Drawdown Chart -->
+                <div class="chart-container glass" style="height: 220px; margin-bottom: 1.5rem;">
+                    <h3>Drawdown</h3>
+                    <canvas id="drawdownChart"></canvas>
+                </div>
+
+                <!-- Trade Log -->
+                <div class="glass" style="padding: 1.5rem;" id="tradeLogSection">
+                    <h3 style="margin-bottom: 1rem;">Trade Log</h3>
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;" id="tradeTable">
+                            <thead>
+                                <tr style="color: var(--text-secondary); border-bottom: 1px solid var(--border-color);">
+                                    <th style="padding: 0.5rem 0.75rem; text-align: left;">#</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: left;">Entry</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: left;">Exit</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: right;">Entry ₹</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: right;">Exit ₹</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: right;">P&amp;L %</th>
+                                    <th style="padding: 0.5rem 0.75rem; text-align: right;">Days</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tradeTableBody"></tbody>
+                        </table>
+                        <p id="noTradesMsg" style="color: var(--text-secondary); text-align: center; padding: 1rem; display: none;">No trades generated in this period.</p>
+                    </div>
                 </div>
             </div>
 
@@ -160,60 +224,113 @@
             </div>
         </div>
 
-        <!-- Backtesting Explanation Footer -->
+        <!-- How to Read the Results -->
         <div class="glass" style="margin-top: 2rem; padding: 2rem;">
-            <h3 style="margin-bottom: 1rem; color: var(--text-primary);">How Backtesting Works</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6;">
-                Backtesting is a way to prove whether a trading idea actually makes money before you risk any real cash
-                on it.
+            <h3 style="margin-bottom: 0.5rem; color: var(--text-primary);">How to Read the Results</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.6; font-size: 0.9rem;">
+                Everything on this page assumes you started with your chosen initial capital (e.g. ₹1,00,000). Here is what each number means in plain language.
             </p>
 
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
-                <!-- Step 1 -->
-                <div
-                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+            <!-- Metric cards explained -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Total Return &amp; CAGR</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        <strong style="color: var(--text-primary);">Total Return</strong> is the simplest number — if it says <em>-36%</em>, you turned ₹1,00,000 into ₹64,000.<br><br>
+                        <strong style="color: var(--text-primary);">CAGR</strong> (Compound Annual Growth Rate) tells you the average yearly growth rate. <em>-18% CAGR</em> means your money shrank by 18% every year on average. A bank FD gives ~7% CAGR, so anything below that isn't beating a savings account.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Max Drawdown</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        Your portfolio grows and shrinks over time. Drawdown measures how far you have fallen <em>from your previous best point</em> — not from the start.<br><br>
+                        Example: your ₹1,00,000 grows to ₹1,10,000, then falls to ₹60,000. That is a <strong style="color: var(--text-primary);">-45% drawdown</strong> from the ₹1,10,000 peak — even though you only started at ₹1,00,000.<br><br>
+                        <strong style="color: var(--text-primary);">Max Drawdown</strong> is the worst this ever got. It tells you the most stomach-dropping moment you would have lived through holding this strategy.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Sharpe &amp; Calmar Ratios</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        Both ratios answer: <em>"was the return worth the risk?"</em><br><br>
+                        <strong style="color: var(--text-primary);">Sharpe</strong> compares return vs daily ups-and-downs (volatility). Above 1.0 = good. Below 0 = losing money for the risk taken.<br><br>
+                        <strong style="color: var(--text-primary);">Calmar</strong> compares CAGR vs Max Drawdown. Above 1.0 = the yearly gain is bigger than the worst loss you'd face. Below 0 = the strategy is losing while also drawing down badly.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Win Rate &amp; Profit Factor</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        <strong style="color: var(--text-primary);">Win Rate</strong> is simply how often you won. <em>25% win rate</em> means 1 in 4 trades made money. A low win rate is not necessarily fatal — some strategies win rarely but win big.<br><br>
+                        <strong style="color: var(--text-primary);">Profit Factor</strong> is the real test: for every ₹1 you lost, how much did you make back? <em>0.60</em> means you earned ₹0.60 back for every ₹1 lost — a losing strategy. You want this above <strong>1.5</strong>. Above 2.0 is excellent.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Charts explained -->
+            <h4 style="color: var(--text-primary); margin-bottom: 1rem;">Reading the Charts</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Equity Curve (green vs dashed)</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        The <strong style="color: #10b981;">green line</strong> is your strategy's portfolio value over time, starting at your initial capital.<br><br>
+                        The <strong style="color: rgba(255,255,255,0.6);">dashed white line</strong> is what would have happened if you just bought and held the stock from day one — the benchmark.<br><br>
+                        When the green line is <em>above</em> the dashed line, the strategy beat the market. When it's below, Buy &amp; Hold would have served you better.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Drawdown Chart (red)</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        The red chart starts at 0% (you are at a new all-time high) and dips down whenever the portfolio falls from its peak.<br><br>
+                        <em>Example: the line drops to -30%</em> — at that moment, your portfolio is 30% below whatever its best-ever value was at that point in time.<br><br>
+                        When the line recovers back toward 0%, the strategy has clawed back to a new peak. A strategy that spends a long time deep in negative territory is painful and risky to hold in real life.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Trade Log</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        Each row is one complete trade — the strategy bought on the Entry date and sold on the Exit date.<br><br>
+                        <strong style="color: var(--text-primary);">P&amp;L %</strong> is the percentage gain or loss on that specific trade. The <strong style="color: var(--text-primary);">Days</strong> column shows how long you were in that position.<br><br>
+                        Look for patterns: are losses held too long? Are winners cut too early? A 1-day trade that lost money means the signal triggered and reversed almost immediately — a sign of noise in the strategy.
+                    </p>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Buy &amp; Hold Benchmark Row</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.6;">
+                        This row shows the same metrics for a simple Buy &amp; Hold of the stock — no strategy, just hold forever.<br><br>
+                        It is the bar you need to clear. If your strategy's CAGR, Sharpe, and Drawdown are all worse than Buy &amp; Hold, the strategy added no value — you'd have been better off doing nothing.<br><br>
+                        A strategy that loses money but loses <em>less</em> than Buy &amp; Hold (with a smaller drawdown) is still providing downside protection — which has real value in volatile markets.
+                    </p>
+                </div>
+            </div>
+
+            <!-- How backtesting works -->
+            <h4 style="color: var(--text-primary); margin-bottom: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">How the Simulation Works</h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🤔</div>
                     <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">1. The "What If"</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
-                        Imagine it is January 1st, 2023. Our script looks at the data available only up to that day and
-                        checks our technical conditions (e.g., Markov Regime is Bullish, RSI &lt; 30). It signals:
-                        <strong>
-                            Buy INFY</strong>.
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5;">
+                        The engine replays history day by day. On each day it only looks at data available <em>up to that point</em> — no peeking at the future. It runs The Sicilian's signals and decides: Buy, Sell, or Hold.
                     </p>
                 </div>
-
-                <!-- Step 2 -->
-                <div
-                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">🖱️</div>
-                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">2. The Simulation</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
-                        The backtesting engine simulates you actually clicking "Buy" on your broker. It records the
-                        exact price and subtracts a realistic amount for broker fees (commissions) and bad fill prices
-                        (slippage).
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">2. Realistic Costs</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5;">
+                        Every buy and sell deducts 0.1% commission + 0.05% slippage (the difference between the price you see and the price you actually get filled at). This prevents the simulation from being unrealistically perfect.
                     </p>
                 </div>
-
-                <!-- Step 3 -->
-                <div
-                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">⏩</div>
-                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">3. The Test</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
-                        It then fast-forwards time, watching the price of INFY go up and down over the following days
-                        and months. Later (e.g., June 15th, 2023), your script evaluates new data and says:
-                        <strong>"Market is Bearish. Sell."</strong>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">3. Long-Only</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5;">
+                        The engine is long-only — it either owns the stock (position = 1) or sits in cash (position = 0). A SELL signal means "exit to cash", not "short sell". This matches how a retail investor in India actually operates.
                     </p>
                 </div>
-
-                <!-- Step 4 -->
-                <div
-                    style="background: rgba(255,255,255,0.03); padding: 1.5rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">📊</div>
-                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">4. The Result</h4>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5;">
-                        The engine simulates selling your shares, calculates your exact profit or loss on that specific
-                        trade, and updates your total bankroll. It repeats this for every day in the sequence.
+                <div style="background: rgba(255,255,255,0.03); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">⚠️</div>
+                    <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">4. Limitations</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5;">
+                        Past performance does not guarantee future results. Backtests can look good by accident (overfitting). Always check: does the strategy beat Buy &amp; Hold? Is the drawdown acceptable? Are there enough trades to be statistically meaningful?
                     </p>
                 </div>
             </div>

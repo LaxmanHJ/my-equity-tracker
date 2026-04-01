@@ -59,7 +59,49 @@ class VectorizedBacktester:
         # What if you just bought and held from day 1, no trades after entry
         df['baseline'] = self.initial_capital * (1 + df['asset_returns']).cumprod()
         
+        # Drawdown series: % decline from running peak at each bar
+        running_max = df['equity_curve'].cummax()
+        df['drawdown'] = (df['equity_curve'] / running_max - 1) * 100
+
+        trades = self._extract_trades(df)
+
         return {
             'strategy': df['equity_curve'],
-            'baseline': df['baseline']
+            'baseline': df['baseline'],
+            'drawdown': df['drawdown'],
+            'trades':   trades,
         }
+
+    def _extract_trades(self, df: pd.DataFrame) -> list:
+        """
+        Extract individual round-trip trades from the position series.
+
+        Entry = bar where position transitions 0 → 1 (buy at that bar's close).
+        Exit  = bar where position transitions 1 → 0 (sell at that bar's close).
+        If still in position at the last bar, close it there (open trade).
+        """
+        trades = []
+        pos_diff  = df['position'].diff()
+        entry_idx = df.index[pos_diff == 1].tolist()
+        exit_idx  = df.index[pos_diff == -1].tolist()
+
+        # Handle open position at end of period
+        if len(entry_idx) > len(exit_idx):
+            exit_idx.append(df.index[-1])
+
+        for entry_date, exit_date in zip(entry_idx, exit_idx):
+            entry_price  = float(df.loc[entry_date, 'close'])
+            exit_price   = float(df.loc[exit_date,  'close'])
+            pnl_pct      = (exit_price / entry_price - 1) * 100
+            holding_days = (exit_date - entry_date).days
+
+            trades.append({
+                'entry_date':   entry_date.strftime('%Y-%m-%d'),
+                'exit_date':    exit_date.strftime('%Y-%m-%d'),
+                'entry_price':  round(entry_price, 2),
+                'exit_price':   round(exit_price, 2),
+                'pnl_pct':      round(pnl_pct, 2),
+                'holding_days': holding_days,
+            })
+
+        return trades

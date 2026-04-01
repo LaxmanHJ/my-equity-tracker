@@ -5,7 +5,7 @@ from typing import List
 
 from quant_engine.data.turso_client import connect
 from quant_engine.backtest.engine import VectorizedBacktester
-from quant_engine.backtest.metrics import calculate_metrics
+from quant_engine.backtest.metrics import calculate_metrics, calculate_trade_stats
 from quant_engine.strategies.base import BaseStrategy
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 from quant_engine.data.loader import load_benchmark
@@ -90,14 +90,22 @@ async def run_backtest(req: BacktestRequest):
                    "Try a wider date range — at least 3 months is recommended."
         )
 
+    baseline_metrics = calculate_metrics(baseline_curve, initial_capital=req.initial_capital)
+    trade_stats      = calculate_trade_stats(result['trades'])
+
     # Format timeseries for frontend Chart.js (needs list of {x: date, y: value})
-    chart_data = [{"x": date.strftime('%Y-%m-%d'), "y": round(val, 2)} for date, val in equity_curve.items()]
-    baseline_data = [{"x": date.strftime('%Y-%m-%d'), "y": round(val, 2)} for date, val in baseline_curve.items()]
-    
+    chart_data     = [{"x": d.strftime('%Y-%m-%d'), "y": round(v, 2)} for d, v in equity_curve.items()]
+    baseline_data  = [{"x": d.strftime('%Y-%m-%d'), "y": round(v, 2)} for d, v in baseline_curve.items()]
+    drawdown_data  = [{"x": d.strftime('%Y-%m-%d'), "y": round(v, 2)} for d, v in result['drawdown'].items()]
+
     return {
-        "symbol": req.symbol,
-        "strategy": strategy.name,
-        "metrics": metrics,
-        "chart_data": chart_data,
-        "baseline_data": baseline_data
+        "symbol":           req.symbol,
+        "strategy":         strategy.name,
+        "metrics":          metrics,
+        "baseline_metrics": baseline_metrics,
+        "trade_stats":      trade_stats,
+        "trade_log":        result['trades'],
+        "chart_data":       chart_data,
+        "baseline_data":    baseline_data,
+        "drawdown_data":    drawdown_data,
     }
