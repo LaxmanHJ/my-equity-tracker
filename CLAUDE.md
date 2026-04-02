@@ -22,6 +22,10 @@ cp .env.example .env   # then fill in RAPIDAPI_KEY
 ### Data management
 ```bash
 npm run fetch          # Backfill historical price data into SQLite
+
+# Backfill India VIX into market_regime table (required for regime features):
+python3 -m quant_engine.data.backfill_regime --from-csv ~/Downloads/india_vix.csv
+# Download CSV from: nseindia.com → Market Data → Volatility → Historical VIX
 ```
 
 ### Testing
@@ -58,14 +62,16 @@ Node proxies quant/ML/backtest requests to Python over HTTP. The Python engine n
 - `main.py` — FastAPI app
 - `routers/` — `scores.py`, `backtest.py`, `sicilian.py`, `ml.py`, `index_analysis.py`
 - `factors/` — Individual scoring modules (momentum, mean_reversion, rsi, macd, volatility, volume, relative_strength) — each returns a score in [-1.0, +1.0]
-- `strategies/` — `sicilian_strategy.py` (main strategy with market regime features), `markov_regime.py`
+- `strategies/` — `sicilian_strategy.py` (linear composite, trend-following), `regime_adaptive_strategy.py` (extends Sicilian — switches between trend-following in BULL and mean-reversion in BEAR based on macro regime score), `markov_regime.py`, `mean_reversion_index.py`, `base.py`
 - `ml/trainer.py` + `ml/predictor.py` — Buy/Hold/Sell classifier
 - `data/loader.py` — Reads price history from SQLite; `data/market_regime_loader.py` — VIX/Nifty trend features
+- `data/nse_fetcher.py` — Direct NSE India VIX fetcher (session-based, auto-chunks >1yr ranges); `data/backfill_regime.py` — CLI to populate `market_regime` table from NSE CSV or RapidAPI
 
 ### Multi-factor scoring
-7 factors scored independently, weighted into a composite score (range −100 to +100):
-- Momentum 25%, Mean Reversion 15%, RSI 15%, MACD 15%, Volatility 10%, Volume 10%, Relative Strength 10%
+8 factors scored independently, weighted into a composite score (range −100 to +100):
+- Momentum 25%, Mean Reversion 15%, RSI 15%, MACD 15%, Volatility 10%, Volume 10%, Relative Strength 10%, Bollinger 0% (computed but currently unweighted)
 - Signal thresholds: ≥40 = LONG, −40 to 40 = HOLD, ≤−40 = SHORT
+- `scores.py` exposes both `sicilian` and `regime_adaptive` strategies; regime_adaptive uses a macro regime score (VIX 35%, Nifty trend 25%, Markov 25%, FII flow 15%) to switch modes
 
 ### Frontend (`public/`)
 - Vanilla JS SPA — no framework
@@ -78,8 +84,9 @@ Historical OHLCV data is cached in SQLite to minimize paid RapidAPI calls. Curre
 ## ML Model Notes
 
 - **TimeSeriesSplit CV must sort by date first** — sorting by stock before splitting causes data leakage (see `feedback_ml_cv_split.md`)
-- Market regime features (VIX, Nifty trend) were added in the most recent commit; model may need retraining when these features change
+- Market regime features (VIX, Nifty trend) are now live; retrain whenever regime features change
 - Model lives in `quant_engine/ml/`; training script is `trainer.py`
+- `RegimeAdaptiveStrategy` inherits all factor calculators from `SicilianStrategy` and only overrides `generate_signals()` — do not duplicate factor logic
 
 ## Key environment variables
 

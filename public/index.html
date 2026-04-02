@@ -26,6 +26,7 @@
       <a href="#quant" class="nav-link" data-section="quant">Quant Signals</a>
       <a href="#analysis" class="nav-link" data-section="analysis">Analysis</a>
       <a href="#index-analysis" class="nav-link" data-section="index-analysis">Index Analysis</a>
+      <a href="#signal-quality" class="nav-link" data-section="signal-quality">Signal Quality</a>
       <a href="backtest.html" class="nav-link">Backtesting</a>
     </div>
     <div class="nav-status">
@@ -193,6 +194,17 @@
         </div>
       </div>
 
+      <!-- Factor Weights Panel -->
+      <div class="holdings-container glass" style="margin-bottom:1.5rem;padding:1.2rem 1.5rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem;">
+          <h3 style="margin:0;font-size:1rem;">Active Factor Weights</h3>
+          <span id="sqWeightMethod" style="font-size:0.75rem;padding:3px 10px;border-radius:12px;background:var(--bg-tertiary);color:var(--text-muted);">loading...</span>
+        </div>
+        <div id="sqWeightBars" style="display:grid;gap:6px;">
+          <p style="color:var(--text-muted);font-size:0.82rem;">Loading weights...</p>
+        </div>
+      </div>
+
       <div class="holdings-container glass">
         <div class="section-header">
           <h2>Factor-Based Stock Ranking</h2>
@@ -204,6 +216,78 @@
       </div>
     </section>
   </main>
+
+    <!-- Signal Quality Section -->
+    <section id="signal-quality" class="section">
+
+      <!-- Engine Toggle -->
+      <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;align-items:center;">
+        <span style="font-size:0.8rem;color:var(--text-muted);margin-right:0.5rem;">Engine:</span>
+        <button id="sqEngineML"     onclick="setSQEngine('ml')"     style="padding:6px 18px;border-radius:20px;border:1px solid var(--accent-primary);background:var(--accent-primary);color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;">ML Model</button>
+        <button id="sqEngineLinear" onclick="setSQEngine('linear')" style="padding:6px 18px;border-radius:20px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);font-size:0.82rem;font-weight:600;cursor:pointer;">Linear (Sicilian)</button>
+      </div>
+
+      <!-- Scorecard -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem;">
+        <div class="summary-card glass">
+          <div class="card-icon">🎯</div>
+          <div class="card-content">
+            <span class="card-label">Hit Rate (20d)</span>
+            <span class="card-value" id="sqHitRate">—</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">📐</div>
+          <div class="card-content">
+            <span class="card-label">Mean IC (20d)</span>
+            <span class="card-value" id="sqIC">—</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">📏</div>
+          <div class="card-content">
+            <span class="card-label">ICIR (20d)</span>
+            <span class="card-value" id="sqICIR">—</span>
+          </div>
+        </div>
+        <div class="summary-card glass">
+          <div class="card-icon">📋</div>
+          <div class="card-content">
+            <span class="card-label">Signals Logged</span>
+            <span class="card-value" id="sqTotal">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- IC Decay Chart -->
+      <div class="holdings-container glass" style="margin-bottom:2rem;padding:1.5rem;">
+        <div class="section-header" style="margin-bottom:1rem;">
+          <h2>IC Decay Curve</h2>
+          <span style="font-size:0.8rem;color:var(--text-muted);">
+            How fast the signal's predictive edge fades. Peak = optimal holding period.
+          </span>
+        </div>
+        <div style="height:220px;position:relative;">
+          <canvas id="sqDecayChart"></canvas>
+        </div>
+        <!-- Horizon stats table -->
+        <div id="sqHorizonTable" style="margin-top:1.2rem;overflow-x:auto;"></div>
+      </div>
+
+      <!-- Signal Journal -->
+      <div class="holdings-container glass" style="padding:1.5rem;">
+        <div class="section-header" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+          <h2>Signal Journal</h2>
+          <span style="font-size:0.8rem;color:var(--text-muted);">
+            WIN = signal direction matched return &nbsp;|&nbsp; LOSS = wrong &nbsp;|&nbsp; PENDING = return not yet settled
+          </span>
+        </div>
+        <div id="sqJournalTable" style="overflow-x:auto;">
+          <p style="color:var(--text-muted);padding:2rem;text-align:center;">Loading signal journal...</p>
+        </div>
+      </div>
+
+    </section>
 
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer"></div>

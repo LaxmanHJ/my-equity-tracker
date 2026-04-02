@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter
 from quant_engine.scoring.composite import score_all_stocks, score_single_stock
 from quant_engine.data.loader import load_benchmark
+from quant_engine.scoring.ic_weights import get_weight_metadata
 
 router = APIRouter(prefix="/api", tags=["scores"])
 logger = logging.getLogger(__name__)
@@ -28,6 +29,15 @@ def get_all_scores():
     }
 
     return {"summary": summary, "stocks": results}
+
+
+@router.get("/ic-weights")
+def get_ic_weights():
+    """
+    Return the current IC-weighted factor weights alongside the static fallback.
+    Shows which factors the market has been rewarding over the last 252 days.
+    """
+    return get_weight_metadata()
 
 
 @router.get("/scores/{symbol}")
@@ -83,4 +93,30 @@ def sync_vix_today():
 
     except Exception as exc:
         logger.error("VIX sync failed: %s", exc)
+        return {"success": False, "error": str(exc)}
+
+
+@router.post("/sync/fii")
+def sync_fii_today():
+    """
+    Fetch today's FII/DII cash flows from NSE and upsert into market_regime.
+
+    Uses the Python session-based fetcher which handles NSE cookie requirements
+    reliably. Called by the Node.js Force Sync handler.
+    """
+    from quant_engine.data.backfill_fii_dii import fetch_today
+    from quant_engine.data.turso_client import connect
+
+    try:
+        conn = connect()
+        count = fetch_today(conn)
+        conn.commit()
+        conn.close()
+
+        if count:
+            return {"success": True, "rows": count}
+        return {"success": False, "error": "NSE returned no FII/DII data (market may be closed)"}
+
+    except Exception as exc:
+        logger.error("FII sync failed: %s", exc)
         return {"success": False, "error": str(exc)}

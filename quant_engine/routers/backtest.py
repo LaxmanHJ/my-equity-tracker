@@ -25,8 +25,21 @@ class BacktestRequest(BaseModel):
 
 class BuyAndHoldStrategy(BaseStrategy):
     def generate_signals(self, data: pd.DataFrame, **kwargs) -> pd.Series:
-        # Always hold 1 unit
         return pd.Series(1, index=data.index)
+
+
+class SicilianLinearStrategy(SicilianStrategy):
+    """Pure linear Sicilian — skips the ML path entirely. Used for engine comparison."""
+    def generate_signals(self, data: pd.DataFrame, **kwargs) -> pd.Series:
+        benchmark_df = kwargs.get("benchmark_df", pd.DataFrame())
+        if benchmark_df is None:
+            benchmark_df = pd.DataFrame()
+        logger.info("Using linear-only Sicilian signals (%d bars)", len(data))
+        return self._linear_signals(data, benchmark_df)
+
+
+import logging
+logger = logging.getLogger(__name__)
 
 def fetch_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     """Fetch OHLCV data from the SQLite DB and format it for the backtester."""
@@ -63,7 +76,8 @@ async def run_backtest(req: BacktestRequest):
     # Standardize strategy names
     strategies = {
         "buy_and_hold":      BuyAndHoldStrategy("Buy & Hold"),
-        "sicilian":          SicilianStrategy("The Sicilian"),
+        "sicilian":          SicilianStrategy("The Sicilian (ML)"),
+        "sicilian_linear":   SicilianLinearStrategy("The Sicilian (Linear)"),
         "regime_adaptive":   RegimeAdaptiveStrategy("Regime Adaptive"),
     }
     

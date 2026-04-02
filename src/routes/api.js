@@ -432,8 +432,18 @@ router.post('/portfolio/sync', async (req, res) => {
     const quotes = await getAllQuotes(true); // fetches from RapidAPI/AlphaVantage → writes to SQLite
     console.log(`[ForceSync] ✅ Synced ${quotes.length} holdings to SQLite`);
 
-    // Fetch today's FII/DII cash flows — builds fii_flow_score history over time
-    await fetchFiiDiiToday();
+    // Fetch today's FII/DII cash flows via Python engine (session-based, more reliable)
+    try {
+      const fiiRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/fii`, { method: 'POST' });
+      const fiiData = await fiiRes.json();
+      if (fiiData.success) {
+        console.log(`[ForceSync] ✅ FII/DII synced`);
+      } else {
+        console.warn(`[ForceSync] ⚠️ FII/DII sync: ${fiiData.error}`);
+      }
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ FII/DII sync skipped (quant engine unavailable):', e.message);
+    }
 
     // Fetch today's bulk/block deals — accumulates institutional activity data over time
     await fetchBulkDealsToday();
@@ -515,6 +525,20 @@ router.get('/sicilian', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/ic-weights
+ * Current IC-adaptive factor weights vs static fallback.
+ */
+router.get('/ic-weights', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/ic-weights`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
 router.get('/quant/scores', async (req, res) => {
   try {
     const response = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
@@ -524,9 +548,11 @@ router.get('/quant/scores', async (req, res) => {
     // Persist today's signals for later verification (fire-and-forget, non-blocking)
     if (data.stocks?.length) {
       saveSignalsLog(data.stocks.map(s => ({
-        symbol: s.symbol,
-        signal: s.signal,
-        composite_score: s.composite_score
+        symbol:          s.symbol,
+        signal:          s.signal,
+        linear_signal:   s.linear_signal ?? null,
+        composite_score: s.composite_score,
+        ml_confidence:   s.ml_confidence ?? null,
       }))).catch(err => console.error('signals_log write failed:', err));
     }
   } catch (error) {
@@ -550,6 +576,22 @@ router.get('/quant/signals/history', async (req, res) => {
   } catch (error) {
     console.error('signals history error:', error);
     res.status(500).json({ error: 'Failed to retrieve signal history' });
+  }
+});
+
+/**
+ * GET /api/signal-quality?limit=500
+ * Proxies to Python quant engine: IC, ICIR, hit rate, signal journal.
+ */
+router.get('/signal-quality', async (req, res) => {
+  try {
+    const limit = req.query.limit || 500;
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/quant/signal-quality?limit=${limit}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('signal-quality error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
   }
 });
 

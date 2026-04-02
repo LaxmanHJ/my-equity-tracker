@@ -25,6 +25,7 @@ import pandas as pd
 from quant_engine.strategies.base import BaseStrategy
 from quant_engine.config import FACTOR_WEIGHTS
 from quant_engine.data.loader import load_benchmark
+from quant_engine.scoring.ic_weights import get_active_weights
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,9 @@ class SicilianStrategy(BaseStrategy):
             "relative_strength": self._rolling_relative_strength_score(close, benchmark_df),
         }
 
+        active_weights = get_active_weights()
         sicilian_score = sum(
-            FACTOR_WEIGHTS[name] * scores
+            active_weights.get(name, FACTOR_WEIGHTS.get(name, 0.0)) * scores
             for name, scores in factor_scores.items()
         ).clip(-1.0, 1.0)
 

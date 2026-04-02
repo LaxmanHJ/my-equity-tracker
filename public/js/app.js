@@ -52,8 +52,9 @@ function initNavigation() {
       }
 
       // Load section data
-      if (sectionId === 'quant') loadQuantScores();
+      if (sectionId === 'quant') { loadQuantScores(); loadICWeights(); }
       if (sectionId === 'index-analysis') loadIndexAnalysis();
+      if (sectionId === 'signal-quality') loadSignalQuality();
     });
   });
 
@@ -1463,6 +1464,322 @@ function renderIndexCard(index) {
         </div>
       </div>
     </div>`;
+}
+
+// =============================================
+// Signal Quality
+// =============================================
+
+let _sqData   = null;
+let _sqEngine = 'ml';  // 'ml' | 'linear'
+
+function setSQEngine(engine) {
+  _sqEngine = engine;
+  const mlBtn  = document.getElementById('sqEngineML');
+  const linBtn = document.getElementById('sqEngineLinear');
+  if (engine === 'ml') {
+    mlBtn.style.background  = 'var(--accent-primary)';
+    mlBtn.style.color       = '#fff';
+    mlBtn.style.border      = '1px solid var(--accent-primary)';
+    linBtn.style.background = 'transparent';
+    linBtn.style.color      = 'var(--text-secondary)';
+    linBtn.style.border     = '1px solid var(--border-color)';
+  } else {
+    linBtn.style.background = 'var(--accent-primary)';
+    linBtn.style.color      = '#fff';
+    linBtn.style.border     = '1px solid var(--accent-primary)';
+    mlBtn.style.background  = 'transparent';
+    mlBtn.style.color       = 'var(--text-secondary)';
+    mlBtn.style.border      = '1px solid var(--border-color)';
+  }
+  if (_sqData) {
+    const engineData = _sqData[_sqEngine];
+    const horizonEl  = document.getElementById('sqHorizonTable');
+    renderSignalScorecard(engineData.summary);
+    renderSignalDecayChart(engineData.horizons);
+    renderSignalHorizonTable(horizonEl, engineData.horizons);
+  }
+}
+
+async function loadSignalQuality() {
+  const journalEl = document.getElementById('sqJournalTable');
+  const horizonEl = document.getElementById('sqHorizonTable');
+  journalEl.innerHTML = '<p style="color:var(--text-muted);padding:2rem;text-align:center;">Loading...</p>';
+
+  try {
+    const res  = await fetch(`${API_BASE}/signal-quality`);
+    if (!res.ok) throw new Error('Signal quality endpoint unavailable');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    _sqData = data;
+
+    const engineData = data[_sqEngine];
+    renderSignalScorecard(engineData.summary);
+    renderSignalDecayChart(engineData.horizons);
+    renderSignalHorizonTable(horizonEl, engineData.horizons);
+    renderSignalJournal(journalEl, data.recent_signals);
+  } catch (err) {
+    console.error('Signal quality load error:', err);
+    journalEl.innerHTML = `<p style="color:var(--danger);padding:2rem;text-align:center;">
+      Failed to load signal quality — is the Python quant engine running?</p>`;
+  }
+}
+
+function renderSignalScorecard(s) {
+  if (!s) return;
+
+  const hitRate = s.hit_rate_20d != null ? `${s.hit_rate_20d}%` : '—';
+  const ic      = s.mean_ic_20d  != null ? s.mean_ic_20d.toFixed(4) : '—';
+  const icir    = s.icir_20d     != null ? s.icir_20d.toFixed(2) : '—';
+
+  const hitColor = s.hit_rate_20d >= 55 ? 'var(--success)'
+                 : s.hit_rate_20d >= 50 ? 'var(--warning)'
+                 : s.hit_rate_20d != null ? 'var(--danger)' : 'var(--text-primary)';
+  const icColor  = s.mean_ic_20d >= 0.05 ? 'var(--success)'
+                 : s.mean_ic_20d >= 0.02 ? 'var(--warning)'
+                 : s.mean_ic_20d != null ? 'var(--danger)' : 'var(--text-primary)';
+
+  document.getElementById('sqHitRate').textContent = hitRate;
+  document.getElementById('sqHitRate').style.color = hitColor;
+  document.getElementById('sqIC').textContent       = ic;
+  document.getElementById('sqIC').style.color       = icColor;
+  document.getElementById('sqICIR').textContent     = icir;
+  document.getElementById('sqTotal').textContent    = `${s.settled_20d} / ${s.total_signals}`;
+}
+
+function renderSignalDecayChart(horizons) {
+  const ctx = document.getElementById('sqDecayChart');
+  if (!ctx) return;
+
+  if (charts.sqDecay) charts.sqDecay.destroy();
+
+  const labels = horizons.map(h => `${h.days}d`);
+  const icData  = horizons.map(h => h.mean_ic  ?? null);
+  const hitData = horizons.map(h => h.hit_rate != null ? (h.hit_rate - 50) / 50 : null);
+
+  charts.sqDecay = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Mean IC (rank)',
+          data: icData,
+          borderColor: '#e79119',
+          backgroundColor: 'rgba(231,145,25,0.1)',
+          tension: 0.3,
+          pointRadius: 5,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Hit Rate edge (% above 50)',
+          data: hitData,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16,185,129,0.1)',
+          tension: 0.3,
+          pointRadius: 5,
+          borderDash: [4, 3],
+          yAxisID: 'y',
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              if (v == null) return `${ctx.dataset.label}: N/A`;
+              return ctx.datasetIndex === 1
+                ? `Hit Rate edge: ${(v * 50 + 50).toFixed(1)}%`
+                : `IC: ${v.toFixed(4)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: {
+          ticks: { color: '#94a3b8' },
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          title: { display: true, text: 'IC / Hit Rate edge', color: '#64748b', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+function renderSignalHorizonTable(el, horizons) {
+  if (!horizons || !horizons.length) { el.innerHTML = ''; return; }
+
+  const icBadge = ic => {
+    if (ic == null) return '<span style="color:var(--text-muted)">—</span>';
+    const color = ic >= 0.05 ? '#10b981' : ic >= 0.02 ? '#f59e0b' : '#ef4444';
+    return `<span style="color:${color};font-weight:600;">${ic.toFixed(4)}</span>`;
+  };
+  const hitBadge = hr => {
+    if (hr == null) return '<span style="color:var(--text-muted)">—</span>';
+    const color = hr >= 55 ? '#10b981' : hr >= 50 ? '#f59e0b' : '#ef4444';
+    return `<span style="color:${color};font-weight:600;">${hr}%</span>`;
+  };
+
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-top:0.5rem;">
+      <thead>
+        <tr style="color:var(--text-muted);text-transform:uppercase;font-size:0.7rem;border-bottom:1px solid var(--border-color);">
+          <th style="padding:6px 10px;text-align:left;">Horizon</th>
+          <th style="padding:6px 10px;text-align:right;">Mean IC</th>
+          <th style="padding:6px 10px;text-align:right;">ICIR</th>
+          <th style="padding:6px 10px;text-align:right;">Hit Rate</th>
+          <th style="padding:6px 10px;text-align:right;">Settled Obs</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${horizons.map(h => `
+          <tr style="border-bottom:1px solid var(--border-color);">
+            <td style="padding:7px 10px;font-weight:600;">${h.days}d</td>
+            <td style="padding:7px 10px;text-align:right;">${icBadge(h.mean_ic)}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--text-secondary);">${h.icir != null ? h.icir.toFixed(2) : '—'}</td>
+            <td style="padding:7px 10px;text-align:right;">${hitBadge(h.hit_rate)}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--text-muted);">${h.n_obs}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderSignalJournal(el, signals) {
+  if (!signals || !signals.length) {
+    el.innerHTML = '<p style="color:var(--text-muted);padding:2rem;text-align:center;">No signals logged yet — run Quant Scores to start building the journal.</p>';
+    return;
+  }
+
+  const fmtRet = (v, signal, dir) => {
+    if (v == null) return '<span style="color:var(--text-muted);font-size:0.75rem;">pending</span>';
+    const color = v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#94a3b8';
+    const pct   = `<span style="color:${color};">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+    if (dir === '20d' && signal !== 'HOLD') {
+      const win = (signal === 'LONG' && v > 0) || (signal === 'SHORT' && v < 0);
+      const badge = win
+        ? `<span style="margin-left:4px;font-size:0.65rem;padding:2px 6px;background:rgba(16,185,129,0.15);color:#10b981;border-radius:10px;">WIN</span>`
+        : `<span style="margin-left:4px;font-size:0.65rem;padding:2px 6px;background:rgba(239,68,68,0.15);color:#ef4444;border-radius:10px;">LOSS</span>`;
+      return pct + badge;
+    }
+    return pct;
+  };
+
+  const signalColor = s => s === 'LONG' ? '#10b981' : s === 'SHORT' ? '#ef4444' : '#94a3b8';
+
+  const signalBadge = (sig) => {
+    if (!sig) return '<span style="color:var(--text-muted)">—</span>';
+    const bg    = sig === 'LONG' ? 'rgba(16,185,129,0.15)' : sig === 'SHORT' ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.1)';
+    const color = signalColor(sig);
+    return `<span style="padding:2px 8px;border-radius:10px;font-size:0.72rem;font-weight:600;background:${bg};color:${color};">${sig}</span>`;
+  };
+
+  const disagreeBadge = (ml, lin) => {
+    if (!ml || !lin || ml === lin) return '';
+    return `<span style="margin-left:4px;font-size:0.65rem;padding:1px 5px;background:rgba(245,158,11,0.15);color:#f59e0b;border-radius:8px;" title="ML and Linear disagree">!</span>`;
+  };
+
+  el.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+      <thead>
+        <tr style="color:var(--text-muted);text-transform:uppercase;font-size:0.7rem;border-bottom:1px solid var(--border-color);">
+          <th style="padding:6px 10px;text-align:left;">Date</th>
+          <th style="padding:6px 10px;text-align:left;">Symbol</th>
+          <th style="padding:6px 10px;text-align:center;">ML Signal</th>
+          <th style="padding:6px 10px;text-align:center;">Linear</th>
+          <th style="padding:6px 10px;text-align:right;">Confidence</th>
+          <th style="padding:6px 10px;text-align:right;">1d</th>
+          <th style="padding:6px 10px;text-align:right;">5d</th>
+          <th style="padding:6px 10px;text-align:right;">10d</th>
+          <th style="padding:6px 10px;text-align:right;">20d</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${signals.map(s => {
+          const conf      = s.ml_confidence != null ? `${s.ml_confidence.toFixed(1)}%` : '—';
+          const confColor = s.ml_confidence >= 75 ? '#10b981' : s.ml_confidence >= 55 ? '#f59e0b' : '#94a3b8';
+          // WIN/LOSS uses ML signal (primary engine)
+          return `
+          <tr style="border-bottom:1px solid var(--border-color);">
+            <td style="padding:7px 10px;color:var(--text-muted);white-space:nowrap;">${s.signal_date}</td>
+            <td style="padding:7px 10px;font-weight:600;">${s.symbol}</td>
+            <td style="padding:7px 10px;text-align:center;">${signalBadge(s.signal)}${disagreeBadge(s.signal, s.linear_signal)}</td>
+            <td style="padding:7px 10px;text-align:center;">${signalBadge(s.linear_signal)}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:600;color:${confColor};">${conf}</td>
+            <td style="padding:7px 10px;text-align:right;">${fmtRet(s.fwd_ret_1d,  s.signal, '1d')}</td>
+            <td style="padding:7px 10px;text-align:right;">${fmtRet(s.fwd_ret_5d,  s.signal, '5d')}</td>
+            <td style="padding:7px 10px;text-align:right;">${fmtRet(s.fwd_ret_10d, s.signal, '10d')}</td>
+            <td style="padding:7px 10px;text-align:right;">${fmtRet(s.fwd_ret_20d, s.signal, '20d')}</td>
+          </tr>`; }).join('')}
+      </tbody>
+    </table>`;
+}
+
+// =============================================
+// IC Factor Weights
+// =============================================
+
+async function loadICWeights() {
+  const barsEl   = document.getElementById('sqWeightBars');
+  const methodEl = document.getElementById('sqWeightMethod');
+  if (!barsEl) return;
+
+  try {
+    const res  = await fetch(`${API_BASE}/ic-weights`);
+    const data = await res.json();
+
+    const isIC = data.method === 'ic_weighted';
+    methodEl.textContent    = isIC ? 'IC-Weighted (adaptive)' : 'Static Fallback';
+    methodEl.style.color    = isIC ? 'var(--success)' : 'var(--warning)';
+    methodEl.style.background = isIC ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)';
+
+    const weights = data.weights || {};
+    const statics = data.static_weights || {};
+    const rawIC   = data.raw_ic || {};
+
+    const labels = {
+      momentum: 'Momentum', bollinger: 'Bollinger', rsi: 'RSI',
+      macd: 'MACD', volatility: 'Volatility', volume: 'Volume',
+      relative_strength: 'Rel. Strength'
+    };
+
+    barsEl.innerHTML = Object.keys(weights).map(factor => {
+      const w      = weights[factor] ?? 0;
+      const sw     = statics[factor] ?? 0;
+      const ic     = rawIC[factor];
+      const icTxt  = ic != null ? (ic >= 0 ? `IC +${ic.toFixed(4)}` : `IC ${ic.toFixed(4)}`) : '';
+      const icColor = ic > 0.05 ? '#10b981' : ic > 0.02 ? '#f59e0b' : ic != null ? '#ef4444' : '#64748b';
+      const wPct   = (w * 100).toFixed(1);
+      const swPct  = (sw * 100).toFixed(1);
+      const changed = Math.abs(w - sw) > 0.005;
+
+      return `
+        <div style="display:grid;grid-template-columns:110px 1fr 50px 60px;align-items:center;gap:0.5rem;">
+          <span style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;">${labels[factor] || factor}</span>
+          <div style="position:relative;height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:visible;">
+            <!-- static weight ghost bar -->
+            <div style="position:absolute;top:0;left:0;height:100%;width:${swPct}%;background:rgba(148,163,184,0.2);border-radius:4px;"></div>
+            <!-- IC weight bar -->
+            <div style="position:absolute;top:0;left:0;height:100%;width:${wPct}%;background:${changed ? 'var(--accent-primary)' : '#475569'};border-radius:4px;transition:width 0.6s ease;"></div>
+          </div>
+          <span style="font-size:0.72rem;font-weight:600;color:${changed ? 'var(--accent-primary)' : 'var(--text-secondary)'};">${wPct}%</span>
+          <span style="font-size:0.68rem;color:${icColor};text-align:right;">${icTxt}</span>
+        </div>`;
+    }).join('');
+
+  } catch (err) {
+    console.error('IC weights load error:', err);
+    const barsEl = document.getElementById('sqWeightBars');
+    if (barsEl) barsEl.innerHTML = '<p style="color:var(--text-muted);font-size:0.82rem;">Weights unavailable</p>';
+  }
 }
 
 // =============================================

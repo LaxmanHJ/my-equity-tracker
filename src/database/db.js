@@ -254,6 +254,10 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_signals_log_date ON signals_log(signal_date)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_signals_log_symbol ON signals_log(symbol)`);
 
+  // signals_log additional columns (idempotent)
+  try { await db.execute(`ALTER TABLE signals_log ADD COLUMN ml_confidence REAL`); } catch (_) {}
+  try { await db.execute(`ALTER TABLE signals_log ADD COLUMN linear_signal TEXT`); } catch (_) {}
+
   // market_regime FII/DII columns (ALTER TABLE is idempotent via try/catch)
   for (const col of [
     'ALTER TABLE market_regime ADD COLUMN fii_net_cash    REAL',
@@ -692,27 +696,29 @@ export async function upsertFiiDii(date, fiiNet, diiNet) {
 
 /**
  * Upsert a batch of Sicilian signals into signals_log.
- * stocks: array of { symbol, signal, composite_score }
+ * stocks: array of { symbol, signal, linear_signal, composite_score, ml_confidence }
  */
 export async function saveSignalsLog(stocks) {
   const today = new Date().toISOString().slice(0, 10);
   const recordedAt = new Date().toISOString();
   for (const s of stocks) {
     await db.execute({
-      sql: `INSERT INTO signals_log (signal_date, symbol, signal, composite_score, recorded_at)
-            VALUES (?, ?, ?, ?, ?)
+      sql: `INSERT INTO signals_log (signal_date, symbol, signal, linear_signal, composite_score, ml_confidence, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(signal_date, symbol) DO UPDATE SET
               signal          = excluded.signal,
+              linear_signal   = excluded.linear_signal,
               composite_score = excluded.composite_score,
+              ml_confidence   = excluded.ml_confidence,
               recorded_at     = excluded.recorded_at`,
-      args: nn(today, s.symbol, s.signal, s.composite_score ?? null, recordedAt)
+      args: nn(today, s.symbol, s.signal, s.linear_signal ?? null, s.composite_score ?? null, s.ml_confidence ?? null, recordedAt)
     });
   }
 }
 
 /**
- * Return signal history for a symbol (or all symbols) with actual forward returns.
- * forward_days: how many trading days ahead to measure return (default 20).
+ * Return signal history for a symbol (or all symbols) with forward returns
+ * at 1d, 5d, 10d, and 20d horizons.
  */
 export async function getSignalsHistory(symbol = null, limit = 90) {
   const whereClause = symbol ? `WHERE sl.symbol = ?` : ``;
@@ -723,26 +729,34 @@ export async function getSignalsHistory(symbol = null, limit = 90) {
             sl.signal_date,
             sl.symbol,
             sl.signal,
+            sl.linear_signal,
             sl.composite_score,
+            sl.ml_confidence,
             sl.recorded_at,
             entry.close  AS entry_price,
-            exit20.close AS exit_price_20d,
-            CASE
-              WHEN entry.close IS NOT NULL AND exit20.close IS NOT NULL
-              THEN ROUND((exit20.close - entry.close) / entry.close * 100, 2)
-              ELSE NULL
-            END AS forward_return_20d
+            CASE WHEN entry.close IS NOT NULL AND exit1.close  IS NOT NULL
+              THEN ROUND((exit1.close  - entry.close) / entry.close * 100, 2) END AS forward_return_1d,
+            CASE WHEN entry.close IS NOT NULL AND exit5.close  IS NOT NULL
+              THEN ROUND((exit5.close  - entry.close) / entry.close * 100, 2) END AS forward_return_5d,
+            CASE WHEN entry.close IS NOT NULL AND exit10.close IS NOT NULL
+              THEN ROUND((exit10.close - entry.close) / entry.close * 100, 2) END AS forward_return_10d,
+            CASE WHEN entry.close IS NOT NULL AND exit20.close IS NOT NULL
+              THEN ROUND((exit20.close - entry.close) / entry.close * 100, 2) END AS forward_return_20d
           FROM signals_log sl
           LEFT JOIN price_history entry
             ON entry.symbol = sl.symbol AND entry.date = sl.signal_date
+          LEFT JOIN price_history exit1
+            ON exit1.symbol = sl.symbol
+            AND exit1.date = (SELECT date FROM price_history WHERE symbol = sl.symbol AND date > sl.signal_date ORDER BY date ASC LIMIT 1 OFFSET 0)
+          LEFT JOIN price_history exit5
+            ON exit5.symbol = sl.symbol
+            AND exit5.date = (SELECT date FROM price_history WHERE symbol = sl.symbol AND date > sl.signal_date ORDER BY date ASC LIMIT 1 OFFSET 4)
+          LEFT JOIN price_history exit10
+            ON exit10.symbol = sl.symbol
+            AND exit10.date = (SELECT date FROM price_history WHERE symbol = sl.symbol AND date > sl.signal_date ORDER BY date ASC LIMIT 1 OFFSET 9)
           LEFT JOIN price_history exit20
             ON exit20.symbol = sl.symbol
-            AND exit20.date = (
-              SELECT date FROM price_history
-              WHERE symbol = sl.symbol AND date > sl.signal_date
-              ORDER BY date ASC
-              LIMIT 1 OFFSET 19
-            )
+            AND exit20.date = (SELECT date FROM price_history WHERE symbol = sl.symbol AND date > sl.signal_date ORDER BY date ASC LIMIT 1 OFFSET 19)
           ${whereClause}
           ORDER BY sl.signal_date DESC
           LIMIT ?`,

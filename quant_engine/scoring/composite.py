@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD, INDUSTRY_TO_NSE_INDEX
+from quant_engine.scoring.ic_weights import get_active_weights
 from quant_engine.data.loader import load_price_history, load_all_symbols, load_benchmark, load_industry_map
 from quant_engine.data.delivery_loader import load_circuit_status, load_delivery_series
 from quant_engine.data.sector_indices_loader import load_sector_series
@@ -163,18 +164,27 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
         "relative_strength": relative_strength.calculate(df, benchmark_df),
     }
 
-    # Compute weighted composite score (always computed — used for display)
+    # Compute weighted composite score using IC-adaptive weights
+    active_weights = get_active_weights()
     composite = 0.0
-    for factor_name, weight in FACTOR_WEIGHTS.items():
+    for factor_name, weight in active_weights.items():
         factor_score = factors.get(factor_name, {}).get("score", 0.0)
         composite += factor_score * weight
 
     # Scale to -100 to +100
     composite_score = round(composite * 100, 2)
 
-    # ── Signal classification — ML path first, linear fallback ───────────────
-    ml_result = None
-    signal    = None
+    # ── Linear signal — always computed independently ─────────────────────────
+    if composite_score >= LONG_THRESHOLD:
+        linear_signal = "LONG"
+    elif composite_score <= SHORT_THRESHOLD:
+        linear_signal = "SHORT"
+    else:
+        linear_signal = "HOLD"
+
+    # ── ML signal — primary when model is available ───────────────────────────
+    ml_result  = None
+    ml_signal  = None
 
     try:
         from quant_engine.ml import predictor as _predictor
@@ -183,32 +193,29 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
             ml_result  = _predictor.predict(sub_scores)
             if ml_result is not None:
                 verdict_map = {"BUY": "LONG", "SELL": "SHORT", "HOLD": "HOLD"}
-                signal = verdict_map.get(ml_result["verdict"], "HOLD")
+                ml_signal = verdict_map.get(ml_result["verdict"], "HOLD")
                 logger.debug(
                     "ML signal for %s: %s (confidence %.1f%%)",
                     symbol, ml_result["verdict"], ml_result["confidence"],
                 )
     except Exception as exc:
-        logger.warning("ML path failed for %s, falling back to linear: %s", symbol, exc)
+        logger.warning("ML path failed for %s, using linear signal: %s", symbol, exc)
 
-    if signal is None:
-        # Linear fallback
-        if composite_score >= LONG_THRESHOLD:
-            signal = "LONG"
-        elif composite_score <= SHORT_THRESHOLD:
-            signal = "SHORT"
-        else:
-            signal = "HOLD"
+    # Primary signal: ML when available, linear otherwise
+    signal = ml_signal if ml_signal is not None else linear_signal
 
-    # Circuit breaker override
+    # Circuit breaker override (applies to both)
     circuit = load_circuit_status(symbol)
     if circuit == -1 and signal == "LONG":
         signal = "HOLD"
+    if circuit == -1 and linear_signal == "LONG":
+        linear_signal = "HOLD"
 
     result = {
         "symbol":          symbol,
         "composite_score": composite_score,
         "signal":          signal,
+        "linear_signal":   linear_signal,
         "factors":         factors,
         "price":           round(float(df["close"].iloc[-1]), 2),
         "data_points":     len(df),
