@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Wiki Discipline
+
+The project maintains a research wiki at `wiki/`. **Every implementation must also update the wiki.**
+
+- **Before implementing**: Run `grep -r "topic" wiki/` to find relevant pages. Read them.
+- **After implementing**: Update `## Project Usage` section in the relevant paper/concept page.
+- **New algorithm from a paper**: Create or update `wiki/papers/<paper>.md`.
+- **New concept/technique**: Create or update `wiki/concepts/<concept>.md`.
+- **Wiki index**: `wiki/README.md` — add any new pages here.
+- **Raw PDFs**: `~/Desktop/Proyectos/Scilian-Books/` — ingest by reading and writing a wiki page.
+
+Wiki operations:
+- **Ingest** a paper: Read source PDF → write/update `wiki/papers/<slug>.md` covering: problem, method, key numbers, and `## Project Usage` section.
+- **Query** the wiki before implementing anything new: search concept pages first.
+- **Update** after any code change: add what was implemented, where, and what gaps remain.
+
 ## Commands
 
 ### Running the project
