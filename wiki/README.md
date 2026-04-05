@@ -28,6 +28,12 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [backtesting.md](concepts/backtesting.md) | Backtesting methodology, pitfalls, CPCV |
 | [covariance_estimation.md](concepts/covariance_estimation.md) | Portfolio risk — shrinkage, HRP |
 
+## Live Trading
+
+| File | Topic |
+|------|-------|
+| [live_trading_checklist.md](live_trading_checklist.md) | Pre-live gap analysis — 13 items to fix before real capital |
+
 ## Wiki Operations
 
 - **Ingest**: Read source PDF → create/update paper page + relevant concept pages

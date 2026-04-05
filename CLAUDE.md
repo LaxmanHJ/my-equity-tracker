@@ -111,3 +111,31 @@ RAPIDAPI_KEY        # Required — Indian Stock Exchange API via RapidAPI
 ALPHAVANTAGE_KEYS   # Optional fallback, comma-separated for rotation
 PORT                # Node server port (default 3000)
 ```
+
+## Live Trading Readiness
+
+Full gap analysis and pre-live checklist: **`wiki/live_trading_checklist.md`**
+
+**Current status: NOT READY for real money** (assessed 2026-04-06)
+
+### Checklist discipline
+- Before implementing any feature from the checklist, read the relevant item in `wiki/live_trading_checklist.md`
+- After completing an item, mark it `[x]` in the checklist and update the **Progress Summary** count at the bottom
+- Update the relevant `wiki/concepts/` page's `## Project Usage` section
+
+### Critical items (must fix before any real capital)
+| # | Item | File(s) |
+|---|------|---------|
+| C1 | Unify backtest vs live factor set — remove analyst consensus from both | `sicilian_strategy.py`, `sicilian/engine.py` |
+| C2 | Fix RapidAPI OHLC issue — detect flat bars, re-fetch OHLC | `rapidApiService.js`, `stockData.js` |
+| C3 | Add position-level risk controls — stop-loss, circuit breaker, sector cap | new `src/risk/risk_manager.js` |
+| C4 | Broker integration — Zerodha Kite API, order execution, position sync | new `src/brokers/zerodha.js` |
+| C5 | Fix ML data leakage — remove analyst consensus, fix sector rotation feature, add holdout set | `ml/trainer.py` |
+
+### Data bottleneck items
+| # | Item | File(s) |
+|---|------|---------|
+| D1 | Fix FII/DII data reliability — replace NSE scraping or remove from regime | `stockData.js`, `regime_adaptive_strategy.py` |
+| D2 | Fix RapidAPI rate limit — upgrade tier or switch to Zerodha historical API | `rapidApiService.js` |
+| D3 | Add data gap detection in loader — warn <200 bars, error <50 bars | `data/loader.py` |
+| D4 | Automate VIX backfill on startup if missing | `data/backfill_regime.py` |
