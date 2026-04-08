@@ -24,7 +24,7 @@ async function getQuote(symbol, forceRefresh = false) {
   try {
     // This will hit the intelligent local SQLite cache, making it extremely fast
     // and avoiding 15x real-time API calls to rate-limited services.
-    const history = await getHistoricalData(symbol, '1y', forceRefresh);
+    const history = await getHistoricalData(symbol, '1m', forceRefresh);
 
     if (!history || history.length < 2) {
       console.warn(`[getQuote] Not enough historical data to generate quote for ${symbol}`);
@@ -316,7 +316,7 @@ export async function fetchFiiDiiToday() {
  */
 export async function fetchBulkDealsToday() {
   const URLS = {
-    BULK:  'https://nsearchives.nseindia.com/content/equities/bulk.csv',
+    BULK: 'https://nsearchives.nseindia.com/content/equities/bulk.csv',
     BLOCK: 'https://nsearchives.nseindia.com/content/equities/block.csv',
   };
   const HEADERS = {
@@ -345,12 +345,12 @@ export async function fetchBulkDealsToday() {
         if (cols.length < 7) continue;
         const [date, symbol, , clientName, tradeType, quantity, price] = cols.map(c => c.trim());
         deals.push({
-          date:       parseDate(date),
-          symbol:     symbol.trim(),
+          date: parseDate(date),
+          symbol: symbol.trim(),
           clientName: clientName.trim(),
-          tradeType:  tradeType.trim().toUpperCase(),
-          quantity:   parseInt(quantity.replace(/,/g, '')) || 0,
-          price:      parseFloat(price.replace(/,/g, '')) || 0,
+          tradeType: tradeType.trim().toUpperCase(),
+          quantity: parseInt(quantity.replace(/,/g, '')) || 0,
+          price: parseFloat(price.replace(/,/g, '')) || 0,
           dealType,
         });
       }

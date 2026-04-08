@@ -54,13 +54,19 @@ _FETCH_SQL = """
         sl.ml_confidence,
         sl.composite_score,
         entry.close   AS entry_price,
+        entry.date    AS entry_bar_date,
         exit1.close   AS exit_price_1d,
         exit5.close   AS exit_price_5d,
         exit10.close  AS exit_price_10d,
         exit20.close  AS exit_price_20d
     FROM signals_log sl
     LEFT JOIN price_history entry
-        ON entry.symbol = sl.symbol AND entry.date = sl.signal_date
+        ON entry.symbol = sl.symbol
+        AND entry.date = (
+            SELECT date FROM price_history
+            WHERE symbol = sl.symbol AND date <= sl.signal_date
+            ORDER BY date DESC LIMIT 1
+        )
     LEFT JOIN price_history exit1
         ON exit1.symbol = sl.symbol
         AND exit1.date = (
@@ -235,7 +241,7 @@ def get_signal_quality(limit: int = 500):
         "signal_date", "symbol",
         "signal", "ml_confidence",       # ML engine
         "linear_signal", "composite_score",  # Linear engine
-        "entry_price",
+        "entry_price", "entry_bar_date",
         "fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_20d",
     ]
     # only keep cols that actually exist in df
