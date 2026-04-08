@@ -28,14 +28,15 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
 
 ---
 
-### C2. RapidAPI Returns Only Close Price (Not OHLCV)
-- [ ] Detect flat OHLC bars in `src/database/db.js` ingestion path (open == high == low == close)
-- [ ] Flag/reject flat bars and trigger re-fetch from Alpha Vantage for affected dates
+### C2. RapidAPI Returns Only Close Price (Not OHLCV) + Cadence Drift
+- [x] **2026-04-09**: Backfilled 13/15 portfolio stocks with Alpha Vantage `TIME_SERIES_WEEKLY_ADJUSTED` (real OHLCV, dividend-adjusted, 20+ years). JIOFIN/TMCV kept (no AV coverage) but resampled daily→weekly for cadence consistency.
+- [ ] Detect flat OHLC bars in `src/database/db.js` ingestion path for ongoing ingests (open == high == low == close)
+- [ ] Prevent RapidAPI historical_data from being used as primary source going forward — it only returns `[date, close]`, and for `period≥3yr` silently downsamples to weekly
 - [ ] Add note in data fetch logs when synthetic OHLC is stored
-- [ ] Revalidate: Bollinger Bands and volatility factor scores on stocks refreshed via RapidAPI
+- [ ] Revalidate: Bollinger Bands and volatility factor scores on stocks still relying on the old ingest path
 
-**Why it matters**: All range-based factors (Bollinger, ATR, MACD signal quality, volatility) are computed on flat bars → artificially low signal variance.  
-**Files**: `src/services/rapidApiService.js` (fills open/high/low = close), `quant_engine/factors/bollinger.py`, `quant_engine/factors/volatility.py`
+**Why it matters**: (1) All range-based factors (Bollinger, ATR, MACD signal quality, volatility) are computed on flat bars → artificially low signal variance. (2) Worse, `src/services/rapidApiService.js:62-70` fills open/high/low = close, and the endpoint silently returned **weekly** data for `period=10yr` back to 2005 but **daily** data for `period=1yr` starting 2025-03-17. The historical `price_history` table thus contained a weekly→daily cadence break that silently invalidated every row-position feature and label in the ML trainer (see **ml_pipeline.md "2026-04-09 density fix"** for the diagnostic evidence).  
+**Files**: `src/services/rapidApiService.js` (fills open/high/low = close), `quant_engine/factors/bollinger.py`, `quant_engine/factors/volatility.py`, `quant_engine/data/av_weekly_backfill.py` (remediation tool)
 
 ---
 
@@ -215,7 +216,7 @@ If you want to test with real money before all items above are complete:
 
 ## Progress Summary
 
-**Critical items completed**: 0 / 5  
+**Critical items completed**: 0 / 5 (C2 partially done — backfill complete, ingest-path guard still open)  
 **Data bottleneck items completed**: 0 / 4  
 **Moderate items completed**: 0 / 4  
 **Validation items completed**: 0 / 3  

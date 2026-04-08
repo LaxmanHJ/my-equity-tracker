@@ -59,6 +59,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Load .env so CLI runs (`python -m quant_engine.ml.diagnostic`) pick up
+# TURSO_DATABASE_URL / TURSO_AUTH_TOKEN. Matches trainer.py's pattern.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr

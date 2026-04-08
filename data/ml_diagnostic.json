@@ -1,0 +1,362 @@
+{
+  "computed_at": "2026-04-08T19:37:01.475799+00:00",
+  "n_samples_total": 10776,
+  "n_folds_completed": 5,
+  "label_horizon_days": 20,
+  "label_thresholds": {
+    "buy": 0.03,
+    "sell": -0.03
+  },
+  "purge_days": 20,
+  "rf_params": {
+    "n_estimators": 300,
+    "max_depth": 8,
+    "min_samples_leaf": 30,
+    "max_features": "sqrt",
+    "class_weight": "balanced",
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "feature_cols": [
+    "rsi",
+    "macd",
+    "trend_ma",
+    "bollinger",
+    "volume",
+    "volatility",
+    "relative_strength",
+    "sector_rotation",
+    "vix_regime",
+    "nifty_trend",
+    "markov_regime",
+    "delivery_score",
+    "fii_flow_score",
+    "fii_fo_score"
+  ],
+  "folds": [
+    {
+      "fold": 1,
+      "train_size": 1634,
+      "test_size": 1796,
+      "train_start": "2005-01-14",
+      "train_end": "2009-09-18",
+      "test_start": "2010-02-11",
+      "test_end": "2013-12-27",
+      "horizons": {
+        "1d": {
+          "mean_cs_ic": -0.0399,
+          "std_cs_ic": 0.3729,
+          "icir": -0.107,
+          "pooled_pearson": 0.0247,
+          "pooled_spearman": -0.032,
+          "hit_rate": 48.8,
+          "n_obs": 1796,
+          "n_dates": 206
+        },
+        "5d": {
+          "mean_cs_ic": -0.0264,
+          "std_cs_ic": 0.3433,
+          "icir": -0.077,
+          "pooled_pearson": 0.0343,
+          "pooled_spearman": -0.0473,
+          "hit_rate": 49.6,
+          "n_obs": 1796,
+          "n_dates": 206
+        },
+        "10d": {
+          "mean_cs_ic": 0.027,
+          "std_cs_ic": 0.3731,
+          "icir": 0.072,
+          "pooled_pearson": 0.004,
+          "pooled_spearman": 0.0221,
+          "hit_rate": 52.0,
+          "n_obs": 1796,
+          "n_dates": 206
+        },
+        "20d": {
+          "mean_cs_ic": -0.0155,
+          "std_cs_ic": 0.3457,
+          "icir": -0.045,
+          "pooled_pearson": -0.0236,
+          "pooled_spearman": 0.0392,
+          "hit_rate": 51.7,
+          "n_obs": 1796,
+          "n_dates": 206
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "train_size": 3385,
+      "test_size": 1796,
+      "train_start": "2005-01-14",
+      "train_end": "2013-08-02",
+      "test_start": "2013-12-27",
+      "test_end": "2017-05-26",
+      "horizons": {
+        "1d": {
+          "mean_cs_ic": 0.0421,
+          "std_cs_ic": 0.3687,
+          "icir": 0.114,
+          "pooled_pearson": 0.0232,
+          "pooled_spearman": 0.0048,
+          "hit_rate": 49.7,
+          "n_obs": 1796,
+          "n_dates": 181
+        },
+        "5d": {
+          "mean_cs_ic": 0.0609,
+          "std_cs_ic": 0.4019,
+          "icir": 0.152,
+          "pooled_pearson": 0.0688,
+          "pooled_spearman": 0.0714,
+          "hit_rate": 52.1,
+          "n_obs": 1796,
+          "n_dates": 181
+        },
+        "10d": {
+          "mean_cs_ic": 0.035,
+          "std_cs_ic": 0.3911,
+          "icir": 0.089,
+          "pooled_pearson": 0.0443,
+          "pooled_spearman": 0.0673,
+          "hit_rate": 52.9,
+          "n_obs": 1796,
+          "n_dates": 181
+        },
+        "20d": {
+          "mean_cs_ic": -0.0087,
+          "std_cs_ic": 0.3277,
+          "icir": -0.027,
+          "pooled_pearson": -0.0111,
+          "pooled_spearman": 0.0383,
+          "hit_rate": 51.9,
+          "n_obs": 1796,
+          "n_dates": 181
+        }
+      }
+    },
+    {
+      "fold": 3,
+      "train_size": 5183,
+      "test_size": 1796,
+      "train_start": "2005-01-14",
+      "train_end": "2016-12-30",
+      "test_start": "2017-05-26",
+      "test_end": "2020-07-31",
+      "horizons": {
+        "1d": {
+          "mean_cs_ic": 0.0027,
+          "std_cs_ic": 0.3095,
+          "icir": 0.009,
+          "pooled_pearson": 0.0062,
+          "pooled_spearman": 0.0029,
+          "hit_rate": 50.6,
+          "n_obs": 1796,
+          "n_dates": 168
+        },
+        "5d": {
+          "mean_cs_ic": 0.0531,
+          "std_cs_ic": 0.3037,
+          "icir": 0.175,
+          "pooled_pearson": -0.0014,
+          "pooled_spearman": -0.0133,
+          "hit_rate": 49.4,
+          "n_obs": 1796,
+          "n_dates": 168
+        },
+        "10d": {
+          "mean_cs_ic": 0.0644,
+          "std_cs_ic": 0.3245,
+          "icir": 0.198,
+          "pooled_pearson": -0.0087,
+          "pooled_spearman": -0.0304,
+          "hit_rate": 48.7,
+          "n_obs": 1796,
+          "n_dates": 168
+        },
+        "20d": {
+          "mean_cs_ic": 0.0421,
+          "std_cs_ic": 0.323,
+          "icir": 0.13,
+          "pooled_pearson": -0.0032,
+          "pooled_spearman": -0.0317,
+          "hit_rate": 48.1,
+          "n_obs": 1796,
+          "n_dates": 168
+        }
+      }
+    },
+    {
+      "fold": 4,
+      "train_size": 6954,
+      "test_size": 1796,
+      "train_start": "2005-01-14",
+      "train_end": "2020-03-06",
+      "test_start": "2020-07-31",
+      "test_end": "2023-06-02",
+      "horizons": {
+        "1d": {
+          "mean_cs_ic": 0.0304,
+          "std_cs_ic": 0.3124,
+          "icir": 0.097,
+          "pooled_pearson": 0.0522,
+          "pooled_spearman": 0.0486,
+          "hit_rate": 50.3,
+          "n_obs": 1796,
+          "n_dates": 148
+        },
+        "5d": {
+          "mean_cs_ic": 0.0682,
+          "std_cs_ic": 0.279,
+          "icir": 0.244,
+          "pooled_pearson": 0.0806,
+          "pooled_spearman": 0.0719,
+          "hit_rate": 51.7,
+          "n_obs": 1796,
+          "n_dates": 148
+        },
+        "10d": {
+          "mean_cs_ic": 0.0946,
+          "std_cs_ic": 0.2593,
+          "icir": 0.365,
+          "pooled_pearson": 0.0517,
+          "pooled_spearman": 0.0802,
+          "hit_rate": 52.2,
+          "n_obs": 1796,
+          "n_dates": 148
+        },
+        "20d": {
+          "mean_cs_ic": 0.0287,
+          "std_cs_ic": 0.3164,
+          "icir": 0.091,
+          "pooled_pearson": -0.0076,
+          "pooled_spearman": 0.0341,
+          "hit_rate": 50.2,
+          "n_obs": 1796,
+          "n_dates": 148
+        }
+      }
+    },
+    {
+      "fold": 5,
+      "train_size": 8720,
+      "test_size": 1796,
+      "train_start": "2005-01-14",
+      "train_end": "2023-01-13",
+      "test_start": "2023-06-09",
+      "test_end": "2025-11-28",
+      "horizons": {
+        "1d": {
+          "mean_cs_ic": 0.0387,
+          "std_cs_ic": 0.296,
+          "icir": 0.131,
+          "pooled_pearson": 0.0763,
+          "pooled_spearman": 0.0883,
+          "hit_rate": 51.4,
+          "n_obs": 1796,
+          "n_dates": 132
+        },
+        "5d": {
+          "mean_cs_ic": 0.1085,
+          "std_cs_ic": 0.3024,
+          "icir": 0.359,
+          "pooled_pearson": 0.152,
+          "pooled_spearman": 0.186,
+          "hit_rate": 53.1,
+          "n_obs": 1796,
+          "n_dates": 132
+        },
+        "10d": {
+          "mean_cs_ic": 0.1445,
+          "std_cs_ic": 0.3293,
+          "icir": 0.439,
+          "pooled_pearson": 0.1523,
+          "pooled_spearman": 0.1626,
+          "hit_rate": 52.1,
+          "n_obs": 1796,
+          "n_dates": 132
+        },
+        "20d": {
+          "mean_cs_ic": 0.1871,
+          "std_cs_ic": 0.2793,
+          "icir": 0.67,
+          "pooled_pearson": 0.1855,
+          "pooled_spearman": 0.2164,
+          "hit_rate": 52.6,
+          "n_obs": 1796,
+          "n_dates": 132
+        }
+      }
+    }
+  ],
+  "aggregate_pooled": {
+    "1d": {
+      "mean_cs_ic": 0.012,
+      "std_cs_ic": 0.3374,
+      "icir": 0.036,
+      "pooled_pearson": 0.0188,
+      "pooled_spearman": 0.0189,
+      "hit_rate": 50.2,
+      "n_obs": 8980,
+      "n_dates": 833
+    },
+    "5d": {
+      "mean_cs_ic": 0.0465,
+      "std_cs_ic": 0.3353,
+      "icir": 0.139,
+      "pooled_pearson": 0.0339,
+      "pooled_spearman": 0.0456,
+      "hit_rate": 51.2,
+      "n_obs": 8980,
+      "n_dates": 833
+    },
+    "10d": {
+      "mean_cs_ic": 0.0677,
+      "std_cs_ic": 0.3447,
+      "icir": 0.196,
+      "pooled_pearson": 0.0162,
+      "pooled_spearman": 0.0627,
+      "hit_rate": 51.6,
+      "n_obs": 8980,
+      "n_dates": 833
+    },
+    "20d": {
+      "mean_cs_ic": 0.0379,
+      "std_cs_ic": 0.3294,
+      "icir": 0.115,
+      "pooled_pearson": 0.0003,
+      "pooled_spearman": 0.0645,
+      "hit_rate": 50.9,
+      "n_obs": 8980,
+      "n_dates": 833
+    }
+  },
+  "aggregate_fold_means": {
+    "1d": {
+      "mean_of_fold_ics": 0.0148,
+      "std_of_fold_ics": 0.0307,
+      "mean_of_fold_hits": 50.2,
+      "n_folds_with_data": 5
+    },
+    "5d": {
+      "mean_of_fold_ics": 0.0529,
+      "std_of_fold_ics": 0.044,
+      "mean_of_fold_hits": 51.2,
+      "n_folds_with_data": 5
+    },
+    "10d": {
+      "mean_of_fold_ics": 0.0731,
+      "std_of_fold_ics": 0.0429,
+      "mean_of_fold_hits": 51.6,
+      "n_folds_with_data": 5
+    },
+    "20d": {
+      "mean_of_fold_ics": 0.0467,
+      "std_of_fold_ics": 0.0735,
+      "mean_of_fold_hits": 50.9,
+      "n_folds_with_data": 5
+    }
+  },
+  "notes": "Walk-forward TimeSeriesSplit with label-horizon purging (Lopez de Prado AFML Ch.10). Hyperparameters are fixed at the production RF_PARAMS \u2014 no re-tuning, so this measures the actual production model. Cross-sectional IC is Spearman per date averaged across dates (Grinold-Kahn). Signed score = P(BUY) - P(SELL). Unlike trainer.py's CV, this version purges labels that leak into the test fold \u2014 so the IC here is a cleaner out-of-sample number than the reported CV accuracy."
+}
