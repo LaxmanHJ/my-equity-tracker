@@ -44,6 +44,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import datetime as dt
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -256,6 +257,167 @@ def replace_symbol(
     return report
 
 
+# ── Downsample uncovered symbols (JIOFIN, TMCV) to weekly ───────────────────
+
+# Symbols that AV doesn't cover and must be downsampled from daily ingest bars.
+# These are kept separate from PORTFOLIO_SYMBOLS so the AV fetch loop skips them.
+UNCOVERED_SYMBOLS = ["JIOFIN", "TMCV"]
+
+
+def _last_complete_friday() -> str:
+    """
+    Return the date string of the most recent Friday that has fully passed.
+
+    'Fully passed' means we are now past that calendar date, so the weekly bar
+    for that week is complete and will not gain new data.  The current week is
+    always excluded — even on Fridays — because we cannot know whether the
+    trading session has ended.
+
+    Examples
+    --------
+    today = Thu 2026-04-09  →  last complete Friday = 2026-04-03
+    today = Fri 2026-04-10  →  last complete Friday = 2026-04-03  (current week excluded)
+    today = Mon 2026-04-13  →  last complete Friday = 2026-04-10  (last week now complete)
+    """
+    today = dt.date.today()
+    # weekday(): Mon=0 … Fri=4 … Sun=6
+    # days_since_friday: Fri=0, Sat=1, Sun=2, Mon=3, Tue=4, Wed=5, Thu=6
+    days_since_friday = (today.weekday() - 4) % 7
+    if days_since_friday == 0:
+        # Today is Friday — exclude the current week, go back 7 more days
+        return (today - dt.timedelta(days=7)).isoformat()
+    return (today - dt.timedelta(days=days_since_friday)).isoformat()
+
+
+def downsample_uncovered_to_weekly(
+    conn: TursoConnection,
+    symbols: Optional[list] = None,
+    dry_run: bool = False,
+) -> list[dict]:
+    """
+    Resample daily price_history rows to weekly (W-FRI) for symbols that Alpha
+    Vantage does not cover (default: UNCOVERED_SYMBOLS).
+
+    Safety guards
+    -------------
+    - Only resamples through the last COMPLETE Friday (_last_complete_friday).
+      This prevents creating a partial-week bar labeled with a future date —
+      the root cause of the 2026-04-10 bogus bar for JIOFIN/TMCV.
+    - Deletes existing rows in [first_resampled_date, cutoff] before inserting,
+      so daily stubs from the incremental ingest are replaced cleanly.
+    - Rows before the first resampled date are preserved untouched.
+    - dry_run=True prints the plan without touching the DB.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise RuntimeError("pandas is required for downsample_uncovered_to_weekly")
+
+    if symbols is None:
+        symbols = UNCOVERED_SYMBOLS
+
+    cutoff = _last_complete_friday()
+    logger.info("downsample cutoff (last complete Friday): %s", cutoff)
+
+    reports = []
+    for sym in symbols:
+        rows = conn.execute(
+            "SELECT date, open, high, low, close, volume "
+            "FROM price_history "
+            "WHERE symbol = ? AND date <= ? "
+            "ORDER BY date",
+            (sym, cutoff),
+        ).fetchall()
+
+        if not rows:
+            logger.warning("downsample %s: no rows up to %s — skip", sym, cutoff)
+            reports.append({"symbol": sym, "action": "skip", "reason": "no rows"})
+            continue
+
+        df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date").sort_index()
+
+        weekly = df.resample("W-FRI").agg(
+            {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+        ).dropna(subset=["close"])
+
+        # Paranoia check: confirm no label is beyond our cutoff
+        beyond = weekly[weekly.index.date > dt.date.fromisoformat(cutoff)]
+        if not beyond.empty:
+            logger.error(
+                "downsample %s: resample produced bars beyond cutoff %s: %s — aborting",
+                sym, cutoff, beyond.index.tolist()
+            )
+            reports.append({"symbol": sym, "action": "error", "reason": "bars beyond cutoff"})
+            continue
+
+        first_weekly = weekly.index[0].date().isoformat()
+        last_weekly  = weekly.index[-1].date().isoformat()
+        n_weekly     = len(weekly)
+
+        report = {
+            "symbol":     sym,
+            "action":     "dry-run" if dry_run else "resample",
+            "cutoff":     cutoff,
+            "range":      [first_weekly, last_weekly],
+            "n_weekly":   n_weekly,
+            "n_daily_in": len(rows),
+        }
+
+        logger.info(
+            "%s %-8s  daily=%d → weekly=%d  range=%s..%s  cutoff=%s",
+            "[dry]" if dry_run else "[run]",
+            sym, len(rows), n_weekly, first_weekly, last_weekly, cutoff,
+        )
+
+        if not dry_run:
+            # Delete existing rows in the resampled window (removes daily stubs)
+            conn.execute(
+                "DELETE FROM price_history WHERE symbol = ? AND date BETWEEN ? AND ?",
+                (sym, first_weekly, last_weekly),
+            )
+
+            # Clean up any partial-week resample artifacts beyond the cutoff.
+            # These are bars dated > cutoff where open != close (OHLC spread),
+            # which is the fingerprint of a prior W-FRI resample bar.  Daily
+            # ingest bars (RapidAPI) are always flat (open=high=low=close), so
+            # this predicate never removes valid ingest data.
+            deleted_artifacts = conn.execute(
+                "DELETE FROM price_history "
+                "WHERE symbol = ? AND date > ? AND open != close",
+                (sym, cutoff),
+            ).rowcount
+            if deleted_artifacts:
+                logger.info(
+                    "downsample %s: removed %d stale resample artifact(s) beyond cutoff",
+                    sym, deleted_artifacts,
+                )
+
+            # Insert weekly rows
+            weekly_rows = [
+                (sym,
+                 row.Index.date().isoformat(),
+                 round(float(row.open),  4),
+                 round(float(row.high),  4),
+                 round(float(row.low),   4),
+                 round(float(row.close), 4),
+                 int(row.volume))
+                for row in weekly.itertuples()
+            ]
+            conn.executemany(
+                "INSERT OR REPLACE INTO price_history "
+                "(symbol, date, open, high, low, close, volume) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                weekly_rows,
+            )
+            logger.info("downsample %s: inserted %d weekly bars", sym, len(weekly_rows))
+
+        reports.append(report)
+
+    return reports
+
+
 # ── Driver ───────────────────────────────────────────────────────────────────
 
 def run(symbols: list[str], dry_run: bool = False) -> dict:
@@ -326,7 +488,22 @@ def main():
         "--symbol", default=None,
         help="Process only this one symbol (must be in PORTFOLIO_SYMBOLS)",
     )
+    ap.add_argument(
+        "--resample-uncovered", action="store_true",
+        help=(
+            "Downsample JIOFIN/TMCV daily bars to weekly (W-FRI) up to the "
+            "last complete Friday.  Mutually exclusive with --symbol AV fetch."
+        ),
+    )
     args = ap.parse_args()
+
+    if args.resample_uncovered:
+        conn = connect()
+        reports = downsample_uncovered_to_weekly(conn, dry_run=args.dry_run)
+        conn.close()
+        for r in reports:
+            print(r)
+        sys.exit(0)
 
     symbols = PORTFOLIO_SYMBOLS
     if args.symbol:
