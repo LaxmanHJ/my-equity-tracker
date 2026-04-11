@@ -16,11 +16,20 @@ Supports:
 
 import os
 import re
+import warnings
 from typing import Any, Optional, Sequence, Union
 
 import requests as _requests
 
 from quant_engine.config import TURSO_URL, TURSO_TOKEN
+
+# Suppress pandas warning about non-SQLAlchemy DBAPI2 connections.
+# Our TursoConnection is DB-API 2.0 compatible and works correctly with pd.read_sql_query().
+warnings.filterwarnings(
+    "ignore",
+    message="pandas only supports SQLAlchemy connectable",
+    category=UserWarning,
+)
 
 
 # ── Type helpers ──────────────────────────────────────────────────────────────

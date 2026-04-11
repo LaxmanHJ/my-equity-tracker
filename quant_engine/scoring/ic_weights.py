@@ -34,6 +34,13 @@ from quant_engine.config import FACTOR_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_spearmanr(a, b):
+    """Compute Spearman correlation, returning NaN if either array is constant."""
+    if len(a) < 2 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return float("nan")
+    return spearmanr(a, b)[0]
+
 # ── Tunable parameters ────────────────────────────────────────────────────────
 IC_LOOKBACK = 252   # trailing trading days used for IC estimation
 IC_HORIZON  = 20    # forward return horizon (must match ML training horizon)
@@ -117,7 +124,7 @@ def _ic_from_panel(panel: pd.DataFrame, factor: str) -> tuple[float, int]:
         valid = grp[[factor, "fwd_ret"]].dropna()
         if len(valid) < MIN_CROSS_N:
             continue
-        ic, _ = spearmanr(valid[factor], valid["fwd_ret"])
+        ic = _safe_spearmanr(valid[factor], valid["fwd_ret"])
         if not np.isnan(ic):
             ics.append(float(ic))
 

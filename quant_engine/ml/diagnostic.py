@@ -71,6 +71,20 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import TimeSeriesSplit
 
 from quant_engine.config import PROJECT_ROOT
+
+
+def _safe_pearsonr(a, b):
+    """Compute Pearson correlation, returning NaN if either array is constant."""
+    if len(a) < 2 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return float("nan")
+    return pearsonr(a, b)[0]
+
+
+def _safe_spearmanr(a, b):
+    """Compute Spearman correlation, returning NaN if either array is constant."""
+    if len(a) < 2 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return float("nan")
+    return spearmanr(a, b)[0]
 from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.loader import (
     load_all_symbols,
@@ -323,15 +337,9 @@ def _horizon_metrics(
     f = fwd_ret[mask]
     ds = dates[mask]
 
-    # Pooled correlations
-    try:
-        pearson_ic = float(pearsonr(s, f)[0])
-    except Exception:  # noqa: BLE001
-        pearson_ic = float("nan")
-    try:
-        spearman_ic = float(spearmanr(s, f)[0])
-    except Exception:  # noqa: BLE001
-        spearman_ic = float("nan")
+    # Pooled correlations (safe versions handle constant arrays without warning)
+    pearson_ic = _safe_pearsonr(s, f)
+    spearman_ic = _safe_spearmanr(s, f)
 
     # Cross-sectional Spearman IC per date, averaged
     ics: list[float] = []
@@ -339,11 +347,8 @@ def _horizon_metrics(
     for _, grp in df_grp.groupby("date"):
         if len(grp) < 3:
             continue
-        try:
-            ic = spearmanr(grp["score"], grp["fwd"])[0]
-        except Exception:  # noqa: BLE001
-            continue
-        if ic is not None and not np.isnan(ic):
+        ic = _safe_spearmanr(grp["score"], grp["fwd"])
+        if not np.isnan(ic):
             ics.append(float(ic))
 
     mean_cs_ic = float(np.mean(ics)) if ics else None

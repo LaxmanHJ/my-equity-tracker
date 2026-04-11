@@ -20,6 +20,13 @@ from scipy.stats import spearmanr
 from quant_engine.data.turso_client import connect
 
 
+def _safe_spearmanr(a, b):
+    """Compute Spearman correlation, returning NaN if either array is constant."""
+    if len(a) < 2 or np.std(a) < 1e-12 or np.std(b) < 1e-12:
+        return float("nan")
+    return spearmanr(a, b)[0]
+
+
 def _clean(v):
     """Replace NaN/Inf floats with None so FastAPI can JSON-serialise them."""
     if isinstance(v, float) and not math.isfinite(v):
@@ -133,7 +140,7 @@ def _horizon_stats(df: pd.DataFrame, fwd_col: str, days: int) -> dict:
     for _, grp in settled.groupby("signal_date"):
         if len(grp) < 3:
             continue
-        ic, _ = spearmanr(grp["signed_confidence"], grp[fwd_col])
+        ic = _safe_spearmanr(grp["signed_confidence"], grp[fwd_col])
         if not np.isnan(ic):
             ics.append(float(ic))
 
@@ -183,7 +190,7 @@ def _engine_horizons(df: pd.DataFrame, score_col: str, signal_col: str) -> list:
         for _, grp in settled.groupby("signal_date"):
             if len(grp) < 3:
                 continue
-            ic, _ = spearmanr(grp[score_col], grp[fwd_col])
+            ic = _safe_spearmanr(grp[score_col], grp[fwd_col])
             if not np.isnan(ic):
                 ics.append(float(ic))
         if not ics:

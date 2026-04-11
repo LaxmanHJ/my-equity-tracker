@@ -176,18 +176,33 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '10y') rapidApiPeriod = '10yr';
     }
 
-    // Fetch new data: try RapidAPI first, fall back to Alpha Vantage
+    // Fetch new data: try Alpha Vantage first (real OHLCV), fall back to RapidAPI
+    // Index symbols (^NSEI, ^BSESN) are not supported by Alpha Vantage — go directly to RapidAPI
     let newData = [];
-    try {
-      newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
-      console.log(`[RapidAPI] ✅ ${dbSymbol}: ${newData.length} records`);
-    } catch (rapidErr) {
-      console.warn(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
+    const isIndex = cleanSymbol.startsWith('^');
+
+    if (!isIndex) {
       try {
         newData = await getAlphaVantageChartData(cleanSymbol);
-        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records`);
+        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records (real OHLCV)`);
       } catch (avErr) {
-        console.error(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
+        console.warn(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
+      }
+    }
+
+    // Fall back to RapidAPI if Alpha Vantage failed or returned no data
+    if (newData.length === 0) {
+      try {
+        newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+        // RapidAPI returns close-only data; open/high/low are synthetic (flat bars)
+        const flatBars = newData.filter(d => d.open === d.high && d.high === d.low && d.low === d.close).length;
+        if (flatBars === newData.length && newData.length > 0) {
+          console.warn(`[RapidAPI] ⚠️  ${dbSymbol}: ${newData.length} records — ALL FLAT BARS (synthetic OHLC)`);
+        } else {
+          console.log(`[RapidAPI] ✅ ${dbSymbol}: ${newData.length} records${isIndex ? '' : ' (fallback)'}`);
+        }
+      } catch (rapidErr) {
+        console.error(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
         newData = [];
       }
     }
