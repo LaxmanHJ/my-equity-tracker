@@ -279,6 +279,51 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_analyst_symbol ON stock_analyst_ratings(symbol)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_shareholding_symbol ON stock_shareholding(symbol)`);
 
+  // Risk management — persisted alerts from riskManager.runRiskChecks()
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS risk_alerts (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      type        TEXT NOT NULL,   -- stop_loss | circuit_breaker | sector_concentration
+      severity    TEXT NOT NULL,   -- critical | warning | info
+      symbol      TEXT,
+      message     TEXT NOT NULL,
+      payload     TEXT,            -- full JSON of the alert object
+      acknowledged INTEGER DEFAULT 0,
+      acknowledged_at TEXT
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_risk_alerts_created ON risk_alerts(created_at)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_risk_alerts_ack ON risk_alerts(acknowledged)`);
+
+  // Signal queue — EOD-generated signals awaiting next-session execution.
+  // Signals are generated at EOD; the broker layer (Chunk 3) executes them
+  // after market-open + executionDelayMinutes, subject to gap protection.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS signal_queue (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      signal_date    TEXT NOT NULL,        -- EOD date the signal was produced
+      symbol         TEXT NOT NULL,
+      signal         TEXT NOT NULL,        -- BUY | SELL | HOLD
+      signal_price   REAL NOT NULL,        -- EOD close at signal time (for gap check)
+      target_shares  INTEGER,              -- from position sizing
+      composite_score REAL,
+      status         TEXT NOT NULL DEFAULT 'pending',
+      -- pending | executed | rejected_gap | rejected_risk | cancelled
+      executed_at    TEXT,
+      exec_price     REAL,
+      order_id       TEXT,
+      reject_reason  TEXT,
+      UNIQUE(signal_date, symbol, signal)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_signal_queue_status ON signal_queue(status)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_signal_queue_date ON signal_queue(signal_date)`);
+  try { await db.execute(`ALTER TABLE signal_queue ADD COLUMN execute_on TEXT`); } catch (_) {}
+  try { await db.execute(`ALTER TABLE signal_queue ADD COLUMN signal_source TEXT`); } catch (_) {}
+  try { await db.execute(`ALTER TABLE signal_queue ADD COLUMN ml_confidence REAL`); } catch (_) {}
+
   console.log('Database initialized');
 }
 
@@ -763,6 +808,107 @@ export async function getSignalsHistory(symbol = null, limit = 90) {
     args
   });
   return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════
+// Risk Alerts CRUD
+// ═══════════════════════════════════════════════════════
+
+export async function saveRiskAlerts(alerts) {
+  if (!Array.isArray(alerts) || alerts.length === 0) return 0;
+  let inserted = 0;
+  for (const a of alerts) {
+    await db.execute({
+      sql: `INSERT INTO risk_alerts (type, severity, symbol, message, payload)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: nn(a.type, a.severity, a.symbol || null, a.message, JSON.stringify(a)),
+    });
+    inserted++;
+  }
+  return inserted;
+}
+
+export async function getRecentRiskAlerts({ limit = 100, onlyUnacknowledged = false } = {}) {
+  const whereClause = onlyUnacknowledged ? 'WHERE acknowledged = 0' : '';
+  const result = await db.execute({
+    sql: `SELECT id, created_at, type, severity, symbol, message, payload, acknowledged, acknowledged_at
+          FROM risk_alerts
+          ${whereClause}
+          ORDER BY created_at DESC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map(r => ({
+    ...r,
+    payload: r.payload ? JSON.parse(r.payload) : null,
+  }));
+}
+
+export async function acknowledgeRiskAlert(id) {
+  const result = await db.execute({
+    sql: `UPDATE risk_alerts
+          SET acknowledged = 1, acknowledged_at = datetime('now')
+          WHERE id = ?`,
+    args: [id],
+  });
+  return result.rowsAffected;
+}
+
+// ═══════════════════════════════════════════════════════
+// Signal Queue CRUD (EOD → next-session execution)
+// ═══════════════════════════════════════════════════════
+
+export async function enqueueSignal({
+  signalDate, executeOn, symbol, signal, signalPrice, targetShares, compositeScore,
+  signalSource, mlConfidence,
+}) {
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO signal_queue
+          (signal_date, execute_on, symbol, signal, signal_price, target_shares,
+           composite_score, signal_source, ml_confidence, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    args: nn(signalDate, executeOn, symbol, signal, signalPrice, targetShares,
+             compositeScore, signalSource, mlConfidence),
+  });
+}
+
+export async function getPendingSignals() {
+  const result = await db.execute(
+    `SELECT * FROM signal_queue WHERE status = 'pending' ORDER BY signal_date DESC, symbol ASC`
+  );
+  return result.rows;
+}
+
+export async function getSignalById(id) {
+  const result = await db.execute({ sql: `SELECT * FROM signal_queue WHERE id = ?`, args: [id] });
+  return result.rows[0] ?? null;
+}
+
+export async function getAllSignals(limit = 100) {
+  const result = await db.execute({
+    sql: `SELECT * FROM signal_queue ORDER BY created_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows;
+}
+
+export async function markSignalExecuted(id, { execPrice, orderId }) {
+  await db.execute({
+    sql: `UPDATE signal_queue
+          SET status = 'executed', executed_at = datetime('now'),
+              exec_price = ?, order_id = ?
+          WHERE id = ?`,
+    args: nn(execPrice, orderId, id),
+  });
+}
+
+export async function markSignalRejected(id, reason, status = 'rejected_risk') {
+  await db.execute({
+    sql: `UPDATE signal_queue
+          SET status = ?, reject_reason = ?
+          WHERE id = ?`,
+    args: nn(status, reason, id),
+  });
 }
 
 // Initialize on import

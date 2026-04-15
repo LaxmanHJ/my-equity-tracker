@@ -190,20 +190,39 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       }
     }
 
-    // Fall back to RapidAPI if Alpha Vantage failed or returned no data
-    if (newData.length === 0) {
+    // Fall back to RapidAPI if Alpha Vantage failed, returned no data, or is stale
+    const avLatestDate = newData.length > 0 ? newData[newData.length - 1].date : null;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const avIsStale = avLatestDate && (() => {
+      const diffMs = new Date(todayStr) - new Date(avLatestDate);
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      return diffDays > 1;
+    })();
+
+    if (newData.length === 0 || avIsStale) {
       try {
-        newData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
+        const rapidData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
         // RapidAPI returns close-only data; open/high/low are synthetic (flat bars)
-        const flatBars = newData.filter(d => d.open === d.high && d.high === d.low && d.low === d.close).length;
-        if (flatBars === newData.length && newData.length > 0) {
-          console.warn(`[RapidAPI] ⚠️  ${dbSymbol}: ${newData.length} records — ALL FLAT BARS (synthetic OHLC)`);
+        const flatBars = rapidData.filter(d => d.open === d.high && d.high === d.low && d.low === d.close).length;
+        if (flatBars === rapidData.length && rapidData.length > 0) {
+          console.warn(`[RapidAPI] ⚠️  ${dbSymbol}: ${rapidData.length} records — ALL FLAT BARS (synthetic OHLC)`);
         } else {
-          console.log(`[RapidAPI] ✅ ${dbSymbol}: ${newData.length} records${isIndex ? '' : ' (fallback)'}`);
+          console.log(`[RapidAPI] ✅ ${dbSymbol}: ${rapidData.length} records${isIndex ? '' : ' (fallback)'}`);
+        }
+
+        if (avIsStale && newData.length > 0 && rapidData.length > 0) {
+          // Merge: keep AV's real OHLCV for dates it covers, add RapidAPI's newer bars
+          const avDates = new Set(newData.map(d => d.date));
+          const freshFromRapid = rapidData.filter(d => !avDates.has(d.date));
+          console.log(`[Merge] ${dbSymbol}: ${newData.length} AV bars + ${freshFromRapid.length} new RapidAPI bars`);
+          newData = [...newData, ...freshFromRapid];
+        } else {
+          newData = rapidData;
         }
       } catch (rapidErr) {
         console.error(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
-        newData = [];
+        if (!avIsStale) newData = [];
+        // If AV was stale but had data, keep it — better than nothing
       }
     }
 

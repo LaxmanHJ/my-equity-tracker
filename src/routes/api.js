@@ -35,8 +35,18 @@ import {
   getSectorMomentum,
   getBulkDeals,
   saveSignalsLog,
-  getSignalsHistory
+  getSignalsHistory,
+  saveRiskAlerts,
+  getRecentRiskAlerts,
+  acknowledgeRiskAlert,
+  getPendingSignals,
+  getAllSignals,
 } from '../database/db.js';
+import { runRiskChecks } from '../risk/riskManager.js';
+import { createEodPriceProvider } from '../risk/priceProvider.js';
+import { computePositionSizes } from '../risk/positionSizing.js';
+import { riskLimits } from '../config/riskLimits.js';
+import { generateQueue, executeSignal, rejectSignal } from '../services/signalQueueService.js';
 
 const router = express.Router();
 
@@ -854,6 +864,199 @@ router.get('/bulk-deals/:symbol', async (req, res) => {
   } catch (error) {
     console.error('Bulk deals error:', error);
     res.status(500).json({ error: 'Failed to fetch bulk deals' });
+  }
+});
+
+// ============================================
+// Risk Management (C3)
+// ============================================
+//
+// All risk checks are on-demand. There is no cron — the system runs
+// on localhost and is not guaranteed to be up during market hours.
+// Callers that matter: the dashboard (GET /api/risk/status), any
+// pre-trade safety gate (Chunk 3), and manual refreshes from the UI.
+
+/**
+ * POST /api/risk/check
+ * Run all risk checks against the current portfolio and persist the
+ * resulting alerts. Returns the full check result.
+ */
+router.post('/risk/check', async (req, res) => {
+  try {
+    const priceProvider = createEodPriceProvider(60);
+    const result = await runRiskChecks(portfolio, priceProvider);
+    if (result.alerts.length > 0) {
+      await saveRiskAlerts(result.alerts);
+    }
+    res.json({
+      ...result,
+      paperTrading: riskLimits.paperTrading,
+    });
+  } catch (err) {
+    console.error('Risk check error:', err);
+    res.status(500).json({ error: 'Failed to run risk checks', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/risk/status
+ * Lightweight view: runs the risk manager but does NOT persist alerts.
+ * Returns halt status, counts, and exposures for dashboard display.
+ */
+router.get('/risk/status', async (req, res) => {
+  try {
+    const priceProvider = createEodPriceProvider(60);
+    const result = await runRiskChecks(portfolio, priceProvider);
+    res.json({
+      checkedAt: result.checkedAt,
+      tradingHalted: result.tradingHalted,
+      paperTrading: riskLimits.paperTrading,
+      alertCount: result.alertCount,
+      alerts: result.alerts,
+      circuitBreaker: result.circuitBreaker,
+      sectorExposures: result.sector.exposures,
+      sectorBreaches: result.sector.breaches,
+      positionsChecked: result.positionsChecked,
+      errors: result.errors,
+      limits: {
+        dailyCircuitBreakerPct: riskLimits.portfolio.dailyCircuitBreakerPct,
+        maxSectorConcentrationPct: riskLimits.portfolio.maxSectorConcentrationPct,
+        maxPositionPct: riskLimits.position.maxPositionPct,
+      },
+    });
+  } catch (err) {
+    console.error('Risk status error:', err);
+    res.status(500).json({ error: 'Failed to fetch risk status', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/risk/alerts
+ * Return persisted alerts. Query: ?limit=100&unack=true
+ */
+router.get('/risk/alerts', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const onlyUnacknowledged = req.query.unack === 'true';
+    const alerts = await getRecentRiskAlerts({ limit, onlyUnacknowledged });
+    res.json({ count: alerts.length, alerts });
+  } catch (err) {
+    console.error('Risk alerts error:', err);
+    res.status(500).json({ error: 'Failed to fetch risk alerts', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/risk/alerts/:id/acknowledge
+ */
+router.post('/risk/alerts/:id/acknowledge', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const changed = await acknowledgeRiskAlert(id);
+    res.json({ acknowledged: changed > 0 });
+  } catch (err) {
+    console.error('Acknowledge alert error:', err);
+    res.status(500).json({ error: 'Failed to acknowledge alert', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/risk/position-sizes
+ * Preview inverse-vol position sizes for the current portfolio given an
+ * AUM value. Query: ?portfolioValue=1000000
+ */
+router.get('/risk/position-sizes', async (req, res) => {
+  try {
+    const portfolioValue = parseFloat(req.query.portfolioValue);
+    if (!portfolioValue || portfolioValue <= 0) {
+      return res.status(400).json({ error: 'portfolioValue query param required' });
+    }
+    const priceProvider = createEodPriceProvider(60);
+    const positions = [];
+    for (const p of portfolio) {
+      const { currentPrice, bars } = await priceProvider(p.symbol);
+      if (currentPrice) {
+        positions.push({ symbol: p.displaySymbol, currentPrice, bars });
+      }
+    }
+    const sizes = computePositionSizes(positions, portfolioValue);
+    res.json({ portfolioValue, sizes });
+  } catch (err) {
+    console.error('Position sizes error:', err);
+    res.status(500).json({ error: 'Failed to compute position sizes', detail: err.message });
+  }
+});
+
+// ============================================
+// Signal Queue (Trade Triggers)
+// ============================================
+//
+// User-driven trade flow:
+//   1. Generate queue from EOD scoring (POST /generate)
+//   2. User reviews pending signals on the UI
+//   3. User clicks Execute or Skip per row
+
+/**
+ * POST /api/signal-queue/generate
+ * Run the quant scoring engine and enqueue every LONG signal for review.
+ */
+router.post('/signal-queue/generate', async (req, res) => {
+  try {
+    const result = await generateQueue();
+    res.json(result);
+  } catch (err) {
+    console.error('Signal queue generation error:', err);
+    res.status(500).json({ error: 'Failed to generate signal queue', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/signal-queue
+ * Return queued signals. Query: ?status=pending|all&limit=100
+ */
+router.get('/signal-queue', async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const signals = status === 'pending'
+      ? await getPendingSignals()
+      : await getAllSignals(limit);
+    res.json({ count: signals.length, signals });
+  } catch (err) {
+    console.error('Signal queue fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch signal queue', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/signal-queue/:id/execute
+ * User approves a signal — gap check + paper/live order.
+ */
+router.post('/signal-queue/:id/execute', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const result = await executeSignal(id);
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('Signal execute error:', err);
+    res.status(500).json({ error: 'Failed to execute signal', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/signal-queue/:id/reject
+ * User skips a signal.
+ */
+router.post('/signal-queue/:id/reject', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const result = await rejectSignal(id);
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('Signal reject error:', err);
+    res.status(500).json({ error: 'Failed to reject signal', detail: err.message });
   }
 });
 

@@ -28,12 +28,20 @@ export async function getRapidApiChartData(symbol, period = '1m') {
             headers: {
                 'X-RapidAPI-Key': apiKey,
                 'X-RapidAPI-Host': 'indian-stock-exchange-api2.p.rapidapi.com'
-            }
+            },
+            timeout: 15000
         });
 
         const rawData = response.data;
+
+        // RapidAPI returns rate-limit/quota messages as HTTP 200 with a message body
+        if (rawData?.message) {
+            throw new Error(`RapidAPI rejected: ${rawData.message}`);
+        }
+
         if (!rawData || !rawData.datasets) {
-            throw new Error("Invalid response format from RapidAPI");
+            console.error('[RapidAPI] Unexpected response body:', JSON.stringify(rawData).substring(0, 300));
+            throw new Error("Invalid response format from RapidAPI (no datasets field)");
         }
 
         // Find the Price and Volume datasets

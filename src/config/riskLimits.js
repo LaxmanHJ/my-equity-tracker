@@ -50,12 +50,22 @@ export const riskLimits = {
     maxVolumeParticipationPct: 3.0,
   },
 
+  execution: {
+    // Signals are generated EOD; orders execute next session after this delay
+    // from market open (gives price discovery time to settle)
+    executionDelayMinutes: 30,
+
+    // Reject a queued signal if next-session LTP has moved more than this %
+    // from the EOD signal price (overnight gap protection)
+    maxGapFromSignalPct: 3.0,
+
+    // Default product type for broker orders; UI can override to 'INTRADAY'
+    defaultProductType: 'DELIVERY',
+  },
+
   // Paper trading mode — log orders but don't send to broker
   // Must be explicitly set to 'false' in .env to enable real orders
   paperTrading: process.env.PAPER_TRADING !== 'false',
-
-  // Risk check cadence (auto-run every N minutes during market hours)
-  checkIntervalMinutes: parseInt(process.env.RISK_CHECK_INTERVAL_MINUTES, 10) || 15,
 };
 
 export default riskLimits;

@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockAnalyzer | Risk &amp; Trade Triggers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .risk-card {
+      padding: 1.5rem;
+      border-radius: 12px;
+    }
+    .risk-card h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.1rem;
+    }
+    .risk-card p.desc {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin: 0 0 1rem 0;
+      min-height: 2.5rem;
+    }
+    .risk-card .endpoint {
+      display: inline-block;
+      font-family: monospace;
+      font-size: 0.75rem;
+      background: rgba(255,255,255,0.05);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+    }
+    .result-box {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      max-height: 300px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-secondary);
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .status-ok    { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .status-warn  { background: rgba(234,179,8,0.15);  color: #eab308; }
+    .status-crit  { background: rgba(239,68,68,0.15);  color: #ef4444; }
+    .status-idle  { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    .alert-row {
+      padding: 0.5rem 0.75rem;
+      border-left: 3px solid var(--border-color);
+      background: rgba(255,255,255,0.02);
+      margin-bottom: 0.5rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+    .alert-row.critical { border-left-color: #ef4444; }
+    .alert-row.warning  { border-left-color: #eab308; }
+    .global-status {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      padding: 1rem 1.5rem;
+      margin-bottom: 1.5rem;
+      border-radius: 12px;
+    }
+    .global-status .kv {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .global-status .kv strong {
+      color: var(--text-primary);
+      font-size: 1rem;
+    }
+    /* Tab navigation */
+    .tab-nav { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); }
+    .tab-nav button {
+      padding: 0.75rem 1.5rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-nav button.active { color: var(--text-primary); border-bottom-color: #3b82f6; }
+    .tab-nav button:hover { color: var(--text-secondary); }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    /* Queue table */
+    .queue-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .queue-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border-color); }
+    .queue-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .queue-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border-radius: 4px; cursor: pointer; border: none; font-weight: 600; }
+    .btn-buy { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .btn-buy:hover { background: rgba(34,197,94,0.25); }
+    .btn-skip { background: rgba(239,68,68,0.1); color: #ef4444; }
+    .btn-skip:hover { background: rgba(239,68,68,0.2); }
+    .btn-gen { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .btn-gen:hover { background: rgba(59,130,246,0.25); }
+    .queue-status { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    .qs-pending { background: rgba(234,179,8,0.15); color: #eab308; }
+    .qs-executed, .qs-executed_paper { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .qs-rejected_gap, .qs-rejected_risk, .qs-rejected_user { background: rgba(239,68,68,0.1); color: #ef4444; }
+  </style>
+</head>
+<body style="padding-top: 2rem;">
+  <main class="main-content" style="padding: 2rem; max-width: 1400px; margin: 0 auto;">
+    <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h2 style="margin:0;">Risk &amp; Trade Triggers</h2>
+        <p style="color: var(--text-muted); margin: 0.25rem 0 0 0; font-size: 0.9rem;">
+          On-demand checks — you control every trade
+        </p>
+      </div>
+      <a href="/" class="btn btn-secondary" style="text-decoration: none;">&larr; Back to Dashboard</a>
+    </div>
+
+    <div class="global-status glass" id="globalStatus">
+      <div class="kv">Paper trading: <strong id="gsPaper">—</strong></div>
+      <div class="kv">Trading halted: <strong id="gsHalt">—</strong></div>
+      <div class="kv">Open alerts: <strong id="gsAlerts">—</strong></div>
+      <div class="kv">Last check: <strong id="gsChecked">—</strong></div>
+    </div>
+
+    <!-- ═══════════ Tab Navigation ═══════════ -->
+    <div class="tab-nav">
+      <button class="active" data-tab="triggers">Buy Triggers</button>
+      <button data-tab="risk">Risk Checks</button>
+      <button data-tab="history">Queue History</button>
+    </div>
+
+    <!-- ═══════════ TAB 1: Buy Triggers ═══════════ -->
+    <div class="tab-pane active" id="tab-triggers">
+      <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <h3 style="margin: 0;">Next Session Queue</h3>
+            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0.25rem 0 0 0;">
+              EOD LONG signals queued for your review. Click Execute to place the order (paper mode), or Skip to ignore.
+            </p>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn-sm btn-gen" id="btnGenerate">Generate EOD Queue</button>
+            <button class="btn-sm" style="background: rgba(255,255,255,0.05); color: var(--text-secondary);" id="btnRefreshQueue">Refresh</button>
+          </div>
+        </div>
+        <div id="queueSummary" style="margin-bottom: 1rem; display: none;">
+          <div style="display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-muted);">
+            <span>Signal date: <strong id="qsDate">—</strong></span>
+            <span>Execute on: <strong id="qsExecOn">—</strong></span>
+            <span>Pending: <strong id="qsPending">0</strong></span>
+          </div>
+        </div>
+        <div id="queueTableWrap" style="overflow-x: auto;">
+          <p id="queueEmpty" style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem 0;">
+            No pending signals. Click "Generate EOD Queue" to run the scoring engine.
+          </p>
+          <table class="queue-table" id="queueTable" style="display: none;">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Source</th>
+                <th>Score</th>
+                <th>ML Conf.</th>
+                <th>Signal Price</th>
+                <th>Execute On</th>
+                <th>Status</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="queueBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="result-box" id="out-queue" style="display:none;"></div>
+    </div>
+
+    <!-- ═══════════ TAB 2: Risk Checks ═══════════ -->
+    <div class="tab-pane" id="tab-risk">
+      <div class="risk-grid">
+        <div class="risk-card glass">
+          <h3>Risk Status</h3>
+          <span class="endpoint">GET /api/risk/status</span>
+          <p class="desc">Full on-demand check — stop-loss, circuit breaker, sector concentration. Does not persist.</p>
+          <button class="btn btn-primary" data-action="status">Run Status Check</button>
+          <div class="result-box" id="out-status" style="display:none;"></div>
+        </div>
+
+        <div class="risk-card glass">
+          <h3>Persist Check</h3>
+          <span class="endpoint">POST /api/risk/check</span>
+          <p class="desc">Runs the full check AND writes every alert to the risk_alerts table for later review.</p>
+          <button class="btn btn-primary" data-action="check">Run &amp; Save</button>
+          <div class="result-box" id="out-check" style="display:none;"></div>
+        </div>
+
+        <div class="risk-card glass">
+          <h3>Alerts Feed</h3>
+          <span class="endpoint">GET /api/risk/alerts</span>
+          <p class="desc">Persisted alerts from past runs. Toggle between all and unacknowledged.</p>
+          <button class="btn btn-primary" data-action="alerts">Fetch All</button>
+          <button class="btn btn-secondary" data-action="alerts-unack">Unacknowledged</button>
+          <div class="result-box" id="out-alerts" style="display:none;"></div>
+        </div>
+
+        <div class="risk-card glass">
+          <h3>Position Sizes</h3>
+          <span class="endpoint">GET /api/risk/position-sizes</span>
+          <p class="desc">Inverse-volatility weighted target positions for a given AUM (capped at 5%).</p>
+          <div style="display:flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <input id="aumInput" type="number" value="1000000" min="10000"
+              style="flex:1; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" />
+            <button class="btn btn-primary" data-action="sizes">Compute</button>
+          </div>
+          <div class="result-box" id="out-sizes" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="glass" style="padding: 1.5rem; margin-bottom: 2rem;">
+        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="margin:0;">Latest Alerts (from last status check)</h3>
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Click "Run Status Check" to refresh</span>
+        </div>
+        <div id="alertsList">
+          <p style="color: var(--text-muted); font-size: 0.85rem;">No alerts loaded yet.</p>
+        </div>
+      </div>
+
+      <div class="glass" style="padding: 1.5rem;">
+        <h3 style="margin: 0 0 1rem 0;">Sector Exposures</h3>
+        <div id="sectorList">
+          <p style="color: var(--text-muted); font-size: 0.85rem;">Run a status check to populate.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ TAB 3: Queue History ═══════════ -->
+    <div class="tab-pane" id="tab-history">
+      <div class="glass" style="padding: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="margin: 0;">Signal Queue History</h3>
+          <button class="btn-sm" style="background: rgba(255,255,255,0.05); color: var(--text-secondary);" id="btnRefreshHistory">Refresh</button>
+        </div>
+        <div id="historyTableWrap" style="overflow-x: auto;">
+          <p id="historyEmpty" style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem 0;">
+            Loading history...
+          </p>
+          <table class="queue-table" id="historyTable" style="display: none;">
+            <thead>
+              <tr>
+                <th>Signal Date</th>
+                <th>Symbol</th>
+                <th>Source</th>
+                <th>Score</th>
+                <th>Signal Price</th>
+                <th>Exec Price</th>
+                <th>Status</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ── Helpers ──────────────────────────────────────────
+    const out = (id, data) => {
+      const el = document.getElementById(id);
+      el.style.display = 'block';
+      el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    };
+
+    const setGlobal = (r) => {
+      document.getElementById('gsPaper').textContent = r.paperTrading ? 'ON (safe)' : 'OFF (LIVE)';
+      const haltEl = document.getElementById('gsHalt');
+      haltEl.innerHTML = r.tradingHalted
+        ? '<span class="status-pill status-crit">HALTED</span>'
+        : '<span class="status-pill status-ok">OK</span>';
+      document.getElementById('gsAlerts').textContent = r.alertCount ?? 0;
+      document.getElementById('gsChecked').textContent = r.checkedAt
+        ? new Date(r.checkedAt).toLocaleString() : '—';
+    };
+
+    const statusClass = (s) => {
+      if (s === 'pending') return 'qs-pending';
+      if (s === 'executed' || s === 'executed_paper') return 'qs-executed';
+      return 'qs-rejected_gap';
+    };
+
+    // ── Tab switching ────────────────────────────────────
+    document.querySelectorAll('.tab-nav button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-nav button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        if (btn.dataset.tab === 'history') loadHistory();
+      });
+    });
+
+    // ── Queue rendering ──────────────────────────────────
+    async function loadQueue() {
+      try {
+        const r = await fetch('/api/signal-queue?status=pending').then(x => x.json());
+        const signals = r.signals || [];
+        const table = document.getElementById('queueTable');
+        const empty = document.getElementById('queueEmpty');
+        const summary = document.getElementById('queueSummary');
+
+        if (signals.length === 0) {
+          table.style.display = 'none';
+          empty.style.display = 'block';
+          summary.style.display = 'none';
+          return;
+        }
+
+        empty.style.display = 'none';
+        table.style.display = 'table';
+        summary.style.display = 'block';
+
+        document.getElementById('qsDate').textContent = signals[0].signal_date || '—';
+        document.getElementById('qsExecOn').textContent = signals[0].execute_on || '—';
+        document.getElementById('qsPending').textContent = signals.length;
+
+        const tbody = document.getElementById('queueBody');
+        tbody.innerHTML = signals.map(s => {
+          const src = s.signal_source || '—';
+          const srcColor = src === 'ML' ? '#22c55e' : '#eab308';
+          const conf = s.ml_confidence != null ? s.ml_confidence.toFixed(1) + '%' : '—';
+          return `
+          <tr id="qrow-${s.id}">
+            <td><strong>${s.symbol}</strong></td>
+            <td><span style="color: ${srcColor}; font-weight: 600; font-size: 0.75rem;">${src}</span></td>
+            <td>${s.composite_score != null ? s.composite_score.toFixed(1) : '—'}</td>
+            <td>${conf}</td>
+            <td>${s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—'}</td>
+            <td>${s.execute_on || '—'}</td>
+            <td><span class="queue-status ${statusClass(s.status)}">${s.status}</span></td>
+            <td style="text-align: right;">
+              ${s.status === 'pending' ? `
+                <button class="btn-sm btn-buy" onclick="doExecute(${s.id}, this)">Execute</button>
+                <button class="btn-sm btn-skip" onclick="doSkip(${s.id}, this)">Skip</button>
+              ` : '—'}
+            </td>
+          </tr>
+        `}).join('');
+      } catch (err) {
+        out('out-queue', 'ERROR: ' + err.message);
+      }
+    }
+
+    async function doExecute(id, btn) {
+      if (!confirm('Execute this trade? (Gap check + risk gate will run automatically)')) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/signal-queue/${id}/execute`, { method: 'POST' }).then(x => x.json());
+        if (r.error) {
+          alert('Error: ' + (r.error));
+        } else if (r.status === 'rejected_gap') {
+          alert(`Rejected: price gap ${r.gapPct}% exceeds limit.\nSignal: ₹${r.signalPrice} → Current: ₹${r.currentPrice}`);
+        } else if (r.status === 'rejected_risk') {
+          alert('Rejected: ' + r.reason);
+        } else {
+          alert(`${r.status === 'executed_paper' ? 'PAPER ' : ''}Order placed!\n${r.symbol} @ ₹${r.execPrice}\nOrder ID: ${r.orderId}`);
+        }
+        await loadQueue();
+      } catch (err) {
+        alert('Execute failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Execute';
+      }
+    }
+
+    async function doSkip(id, btn) {
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        await fetch(`/api/signal-queue/${id}/reject`, { method: 'POST' }).then(x => x.json());
+        await loadQueue();
+      } catch (err) {
+        alert('Skip failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Skip';
+      }
+    }
+
+    // ── Generate queue ───────────────────────────────────
+    document.getElementById('btnGenerate').addEventListener('click', async function () {
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Scoring...';
+      try {
+        const r = await fetch('/api/signal-queue/generate', { method: 'POST' }).then(x => x.json());
+        out('out-queue', r);
+        const msg = `Scored ${r.totalScored} stocks. ${r.longSignals} LONG signal(s) queued for ${r.executeOn}.`;
+        if (r.longSignals === 0) {
+          alert(msg + '\nNo actionable buy signals today.');
+        }
+        await loadQueue();
+      } catch (err) {
+        out('out-queue', 'ERROR: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate EOD Queue';
+      }
+    });
+    document.getElementById('btnRefreshQueue').addEventListener('click', loadQueue);
+
+    // ── History tab ──────────────────────────────────────
+    async function loadHistory() {
+      try {
+        const r = await fetch('/api/signal-queue?status=all&limit=100').then(x => x.json());
+        const signals = r.signals || [];
+        const table = document.getElementById('historyTable');
+        const empty = document.getElementById('historyEmpty');
+
+        if (signals.length === 0) {
+          table.style.display = 'none';
+          empty.textContent = 'No signals in history.';
+          empty.style.display = 'block';
+          return;
+        }
+
+        empty.style.display = 'none';
+        table.style.display = 'table';
+
+        document.getElementById('historyBody').innerHTML = signals.map(s => {
+          const src = s.signal_source || '—';
+          const srcColor = src === 'ML' ? '#22c55e' : '#eab308';
+          return `
+          <tr>
+            <td>${s.signal_date || '—'}</td>
+            <td><strong>${s.symbol}</strong></td>
+            <td><span style="color: ${srcColor}; font-weight: 600; font-size: 0.75rem;">${src}</span></td>
+            <td>${s.composite_score != null ? Number(s.composite_score).toFixed(1) : '—'}</td>
+            <td>${s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—'}</td>
+            <td>${s.exec_price != null ? '₹' + Number(s.exec_price).toFixed(2) : '—'}</td>
+            <td><span class="queue-status ${statusClass(s.status)}">${s.status}</span></td>
+            <td style="font-size: 0.75rem; color: var(--text-muted);">${s.reject_reason || s.order_id || '—'}</td>
+          </tr>
+        `}).join('');
+      } catch (err) {
+        document.getElementById('historyEmpty').textContent = 'ERROR: ' + err.message;
+      }
+    }
+    document.getElementById('btnRefreshHistory').addEventListener('click', loadHistory);
+
+    // ── Risk tab: alerts + sectors ───────────────────────
+    const renderAlerts = (alerts) => {
+      const el = document.getElementById('alertsList');
+      if (!alerts || alerts.length === 0) {
+        el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No alerts — all checks pass.</p>';
+        return;
+      }
+      el.innerHTML = alerts.map(a => `
+        <div class="alert-row ${a.severity}">
+          <span class="status-pill status-${a.severity === 'critical' ? 'crit' : 'warn'}">${a.severity}</span>
+          <strong style="margin-left: 0.5rem;">${a.type}</strong>
+          <div style="margin-top: 0.25rem;">${a.message}</div>
+        </div>
+      `).join('');
+    };
+
+    const renderSectors = (exposures, breaches) => {
+      const el = document.getElementById('sectorList');
+      if (!exposures || exposures.length === 0) {
+        el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No sector data.</p>';
+        return;
+      }
+      const breachSet = new Set((breaches || []).map(b => b.sector));
+      el.innerHTML = exposures.map(e => {
+        const breached = breachSet.has(e.sector);
+        const barWidth = Math.min(e.valuePct * 2, 100);
+        return `
+          <div style="margin-bottom: 0.5rem;">
+            <div style="display:flex; justify-content:space-between; font-size: 0.85rem; margin-bottom: 2px;">
+              <span>${e.sector}${breached ? ' <span class="status-pill status-warn">breach</span>' : ''}</span>
+              <span>${e.valuePct}%</span>
+            </div>
+            <div style="height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px;">
+              <div style="height: 100%; width: ${barWidth}%; background: ${breached ? '#eab308' : '#3b82f6'}; border-radius: 3px;"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    };
+
+    // ── Risk card actions ────────────────────────────────
+    const actions = {
+      status: async () => {
+        const r = await fetch('/api/risk/status').then(x => x.json());
+        out('out-status', r);
+        setGlobal(r);
+        renderAlerts(r.alerts);
+        renderSectors(r.sectorExposures, r.sectorBreaches);
+      },
+      check: async () => {
+        const r = await fetch('/api/risk/check', { method: 'POST' }).then(x => x.json());
+        out('out-check', r);
+        setGlobal(r);
+      },
+      alerts: async () => {
+        const r = await fetch('/api/risk/alerts?limit=50').then(x => x.json());
+        out('out-alerts', r);
+      },
+      'alerts-unack': async () => {
+        const r = await fetch('/api/risk/alerts?limit=50&unack=true').then(x => x.json());
+        out('out-alerts', r);
+      },
+      sizes: async () => {
+        const aum = document.getElementById('aumInput').value;
+        const r = await fetch(`/api/risk/position-sizes?portfolioValue=${aum}`).then(x => x.json());
+        out('out-sizes', r);
+      },
+    };
+
+    document.querySelectorAll('button[data-action]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.dataset.action;
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Running...';
+        try { await actions[action](); }
+        catch (err) { out('out-' + action.split('-')[0], 'ERROR: ' + err.message); }
+        finally { btn.disabled = false; btn.textContent = label; }
+      });
+    });
+
+    // ── Init ─────────────────────────────────────────────
+    loadQueue();
+    actions.status().catch(() => {});
+  </script>
+</body>
+</html>
