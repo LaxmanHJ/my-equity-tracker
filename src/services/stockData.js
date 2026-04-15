@@ -8,6 +8,7 @@
 import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
 import { getAlphaVantageChartData } from './alphaVantageService.js';
+import { fetchDailyOHLC as getAngelOneDailyOHLC } from './angelOneHistorical.js';
 import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii, saveBulkDeals } from '../database/db.js';
 import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
@@ -134,6 +135,37 @@ const INDEX_SYMBOL_MAP = {
   'BSESN': 'BSE SENSEX',
 };
 
+// Convert our period codes to a lookback window in days for Angel One.
+const PERIOD_TO_DAYS = {
+  '1m': 35, '3m': 100, '6m': 190, '1y': 380,
+  '2y': 760, '5y': 1900, '10y': 3800, 'max': 7500,
+};
+
+function dateNDaysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function isoToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Normalize Angel One candle dates (ISO with +05:30) to YYYY-MM-DD strings
+ * so downstream DB/dedup keys match what AlphaVantage/RapidAPI produce.
+ */
+function normalizeAngelCandles(rows) {
+  return rows.map(r => ({
+    date: typeof r.date === 'string' ? r.date.slice(0, 10) : r.date,
+    open: r.open,
+    high: r.high,
+    low: r.low,
+    close: r.close,
+    volume: r.volume,
+  }));
+}
+
 export async function getHistoricalData(symbol, period = '1y', forceRefresh = false) {
   try {
     const cleanSymbol = symbol.replace('.NS', '').replace('.BO', '');
@@ -176,15 +208,28 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '10y') rapidApiPeriod = '10yr';
     }
 
-    // Fetch new data: try Alpha Vantage first (real OHLCV), fall back to RapidAPI
-    // Index symbols (^NSEI, ^BSESN) are not supported by Alpha Vantage — go directly to RapidAPI
+    // Fetch new data: Angel One (primary) → AlphaVantage → RapidAPI
+    // Index symbols (^NSEI, ^BSESN) are equity-only on Angel; skip to existing chain.
     let newData = [];
     const isIndex = cleanSymbol.startsWith('^');
 
     if (!isIndex) {
       try {
+        const lookbackDays = PERIOD_TO_DAYS[rapidApiPeriod] ?? PERIOD_TO_DAYS[period] ?? 35;
+        const from = dateNDaysAgo(lookbackDays);
+        const to = isoToday();
+        const angelRows = await getAngelOneDailyOHLC(cleanSymbol, from, to);
+        newData = normalizeAngelCandles(angelRows);
+        console.log(`[AngelOne] ✅ ${dbSymbol}: ${newData.length} records (real OHLCV)`);
+      } catch (angelErr) {
+        console.warn(`[AngelOne] ❌ ${dbSymbol}: ${angelErr.message}`);
+      }
+    }
+
+    if (!isIndex && newData.length === 0) {
+      try {
         newData = await getAlphaVantageChartData(cleanSymbol);
-        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records (real OHLCV)`);
+        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records (fallback)`);
       } catch (avErr) {
         console.warn(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
       }
