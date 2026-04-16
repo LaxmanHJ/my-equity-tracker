@@ -116,12 +116,19 @@ def _fetch_signals(limit: int) -> pd.DataFrame:
         exit_col = f"exit_price_{h['days']}d"
         df[h["col"]] = (df[exit_col] - df["entry_price"]) / df["entry_price"] * 100
 
-    # Signed ML confidence: LONG=+confidence, SHORT=-confidence, HOLD=0
-    ml_dir = df["signal"].map({"LONG": 1.0, "SHORT": -1.0, "HOLD": 0.0}).fillna(0.0)
-    df["signed_confidence"] = df["ml_confidence"].fillna(50.0) * ml_dir
+    # ML engine track — only rows where ml_confidence was actually recorded.
+    # Rows written by backfill_signals.py have NULL ml_confidence and their
+    # `signal` column holds the LINEAR direction, not ML. Leaving
+    # signed_confidence as NaN on those rows makes _engine_horizons drop them.
+    ml_dir = df["signal"].map({"LONG": 1.0, "SHORT": -1.0, "HOLD": 0.0})
+    df["signed_confidence"] = df["ml_confidence"] * ml_dir
 
-    # Signed linear score: composite_score already carries direction (-100 to +100)
+    # Linear engine track — composite_score is populated on every row.
+    # Backfilled rows have NULL linear_signal but their `signal` column IS the
+    # linear direction; live rows have both columns populated. Coalesce so one
+    # column always reflects the linear direction for hit-rate computation.
     df["signed_linear"] = df["composite_score"].fillna(0.0)
+    df["effective_linear_signal"] = df["linear_signal"].fillna(df["signal"])
 
     return df
 
@@ -230,9 +237,12 @@ def get_signal_quality(limit: int = 500):
 
     # Per-engine horizon stats
     ml_horizons     = _engine_horizons(df, "signed_confidence", "signal")
-    linear_horizons = _engine_horizons(df, "signed_linear",     "linear_signal")
+    linear_horizons = _engine_horizons(df, "signed_linear",     "effective_linear_signal")
 
-    def _summary(horizons, fwd_col):
+    ml_eligible     = int(df["ml_confidence"].notna().sum())
+    linear_eligible = int(df["composite_score"].notna().sum())
+
+    def _summary(horizons, fwd_col, eligible):
         h20 = next((h for h in horizons if h["days"] == 20), {})
         return _clean_dict({
             "mean_ic_20d":   h20.get("mean_ic"),
@@ -241,6 +251,7 @@ def get_signal_quality(limit: int = 500):
             "settled_20d":   int(h20.get("n_obs", 0)),
             "pending_20d":   int(df[fwd_col].isna().sum()),
             "total_signals": int(len(df)),
+            "eligible_rows": eligible,
         })
 
     # Most recent 40 signals — both engines side by side
@@ -256,9 +267,9 @@ def get_signal_quality(limit: int = 500):
     recent = df[existing].head(40).where(pd.notna(df[existing]), None)
 
     return {
-        "ml":             {"summary": _summary(ml_horizons,     "fwd_ret_20d"),
+        "ml":             {"summary": _summary(ml_horizons,     "fwd_ret_20d", ml_eligible),
                            "horizons": _clean_records(ml_horizons)},
-        "linear":         {"summary": _summary(linear_horizons, "fwd_ret_20d"),
+        "linear":         {"summary": _summary(linear_horizons, "fwd_ret_20d", linear_eligible),
                            "horizons": _clean_records(linear_horizons)},
         "recent_signals": _clean_records(recent.to_dict(orient="records")),
     }
