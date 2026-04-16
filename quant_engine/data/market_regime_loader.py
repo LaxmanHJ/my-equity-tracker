@@ -185,6 +185,81 @@ def load_fii_fo_series(limit: int = 2000) -> pd.Series:
         conn.close()
 
 
+def load_pcr_series(limit: int = 2000) -> pd.Series:
+    """
+    Returns a pd.Series of PCR values indexed by date.
+    Reads from pcr_history table; parses the JSON blob and extracts a scalar PCR.
+    PCR > 1 → bearish sentiment (more puts), PCR < 1 → bullish (more calls).
+    """
+    conn = _get_connection()
+    try:
+        df = pd.read_sql_query(
+            f"SELECT date, pcr_data FROM pcr_history ORDER BY date ASC LIMIT {limit}",
+            conn,
+        )
+        if df.empty:
+            return pd.Series(dtype=float)
+        df["date"] = pd.to_datetime(df["date"])
+
+        def _extract_pcr(raw):
+            import json
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(data, (int, float)):
+                    return float(data)
+                if isinstance(data, list) and len(data) > 0:
+                    # Take PCR for NIFTY if available
+                    for item in data:
+                        if isinstance(item, dict):
+                            for k, v in item.items():
+                                if "pcr" in k.lower() and v:
+                                    return float(v)
+                    return float(data[0].get("pcr", data[0].get("putCallRatio", np.nan)))
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if "pcr" in k.lower() and v:
+                            return float(v)
+                return np.nan
+            except Exception:
+                return np.nan
+
+        df["pcr"] = df["pcr_data"].apply(_extract_pcr)
+        df = df.dropna(subset=["pcr"])
+        if df.empty:
+            return pd.Series(dtype=float)
+        return df.set_index("date")["pcr"]
+    except Exception:
+        return pd.Series(dtype=float)
+    finally:
+        conn.close()
+
+
+def pcr_to_score(pcr_series: pd.Series, window: int = 252) -> pd.Series:
+    """
+    Convert raw PCR to [-1, +1] using rolling percentile rank.
+
+    High PCR (many puts, bearish sentiment) → score near -1.
+    Low PCR  (many calls, bullish sentiment) → score near +1.
+
+    Inverted because high PCR = fear = bearish.
+    """
+    def _pct(s):
+        return s.rank(pct=True).iloc[-1]
+
+    rolling_pct = pcr_series.rolling(window, min_periods=30).apply(_pct, raw=False)
+    score = (1 - 2 * rolling_pct).clip(-1.0, 1.0).fillna(0.0)
+    return score
+
+
+def load_pcr_score_today() -> float:
+    """Returns today's PCR regime score. 0.0 if no data."""
+    series = load_pcr_series(limit=300)
+    if series.empty:
+        return 0.0
+    score = pcr_to_score(series)
+    return float(score.iloc[-1])
+
+
 def load_fii_flow_score_today() -> float:
     """Returns today's fii_flow_score for live inference. 0.0 if no data."""
     series = load_fii_flow_series(limit=300)

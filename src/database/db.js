@@ -324,6 +324,38 @@ export async function initDatabase() {
   try { await db.execute(`ALTER TABLE signal_queue ADD COLUMN signal_source TEXT`); } catch (_) {}
   try { await db.execute(`ALTER TABLE signal_queue ADD COLUMN ml_confidence REAL`); } catch (_) {}
 
+  // PCR (Put-Call Ratio) daily snapshot
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS pcr_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      date        TEXT NOT NULL,
+      pcr_data    TEXT NOT NULL,
+      fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(date)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_pcr_date ON pcr_history(date)`);
+
+  // OI Buildup snapshots — one row per symbol+category per day
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS oi_buildup (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      date             TEXT NOT NULL,
+      symbol           TEXT NOT NULL,
+      category         TEXT NOT NULL,
+      ltp              REAL,
+      net_change       REAL,
+      percent_change   REAL,
+      opn_interest     REAL,
+      net_change_oi    REAL,
+      trading_symbol   TEXT,
+      fetched_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(date, symbol, category)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_date ON oi_buildup(date)`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_symbol ON oi_buildup(symbol)`);
+
   console.log('Database initialized');
 }
 
@@ -909,6 +941,61 @@ export async function markSignalRejected(id, reason, status = 'rejected_risk') {
           WHERE id = ?`,
     args: nn(status, reason, id),
   });
+}
+
+// ═══════════════════════════════════════════════════════
+// PCR + OI Buildup CRUD
+// ═══════════════════════════════════════════════════════
+
+export async function savePCR(date, pcrData) {
+  await db.execute({
+    sql: `INSERT INTO pcr_history (date, pcr_data) VALUES (?, ?)
+          ON CONFLICT(date) DO UPDATE SET pcr_data = excluded.pcr_data, fetched_at = datetime('now')`,
+    args: nn(date, JSON.stringify(pcrData))
+  });
+}
+
+export async function getLatestPCR(limit = 30) {
+  const result = await db.execute({
+    sql: `SELECT date, pcr_data FROM pcr_history ORDER BY date DESC LIMIT ?`,
+    args: [limit]
+  });
+  return result.rows.map(r => ({ ...r, pcr_data: JSON.parse(r.pcr_data) }));
+}
+
+export async function saveOIBuildup(date, category, rows) {
+  for (const r of rows) {
+    const sym = (r.tradingSymbol || '').replace(/\d{2}[A-Z]{3}\d{2}FUT$/, '').trim();
+    await db.execute({
+      sql: `INSERT INTO oi_buildup (date, symbol, category, ltp, net_change, percent_change, opn_interest, net_change_oi, trading_symbol)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date, symbol, category) DO UPDATE SET
+              ltp = excluded.ltp, net_change = excluded.net_change, percent_change = excluded.percent_change,
+              opn_interest = excluded.opn_interest, net_change_oi = excluded.net_change_oi,
+              trading_symbol = excluded.trading_symbol, fetched_at = datetime('now')`,
+      args: nn(date, sym, category,
+        parseFloat(r.ltp), parseFloat(r.netChange), parseFloat(r.percentChange),
+        parseFloat(r.opnInterest), parseFloat(r.netChangeOpnInterest), r.tradingSymbol)
+    });
+  }
+}
+
+export async function getOIBuildupForSymbol(symbol, limit = 30) {
+  const result = await db.execute({
+    sql: `SELECT date, category, ltp, net_change, percent_change, opn_interest, net_change_oi
+          FROM oi_buildup WHERE symbol = ? ORDER BY date DESC LIMIT ?`,
+    args: [symbol, limit]
+  });
+  return result.rows;
+}
+
+export async function getOIBuildupByDate(date) {
+  const result = await db.execute({
+    sql: `SELECT symbol, category, ltp, percent_change, opn_interest, net_change_oi
+          FROM oi_buildup WHERE date = ? ORDER BY category, symbol`,
+    args: [date]
+  });
+  return result.rows;
 }
 
 // Initialize on import

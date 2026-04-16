@@ -8,7 +8,8 @@ import {
   getBenchmarkData,
   fetchIndexData,
   fetchFiiDiiToday,
-  fetchBulkDealsToday
+  fetchBulkDealsToday,
+  fetchPCRAndOIBuildup
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -457,6 +458,9 @@ router.post('/portfolio/sync', async (req, res) => {
 
     // Fetch today's bulk/block deals — accumulates institutional activity data over time
     await fetchBulkDealsToday();
+
+    // Fetch PCR + OI Buildup from Angel One
+    await fetchPCRAndOIBuildup();
 
     // Fetch today's India VIX from NSE and upsert into market_regime
     try {

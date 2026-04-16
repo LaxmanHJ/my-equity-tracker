@@ -42,6 +42,7 @@ from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.market_regime_loader import (
     load_vix_series, vix_to_score, build_markov_score_series,
     load_fii_flow_series, load_fii_fo_series, _flow_to_score,
+    load_pcr_series, pcr_to_score,
 )
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
@@ -70,6 +71,8 @@ FEATURE_COLS = [
     # FII flow signals (market-wide, same value for every stock on the same date)
     "fii_flow_score",     # 10-day rolling FII net cash, percentile-ranked → [-1 outflow, +1 inflow]
     "fii_fo_score",       # FII net index futures (long-short), percentile-ranked → [-1 short, +1 long]
+    # PCR sentiment (market-wide)
+    "pcr_score",          # put-call ratio percentile-ranked → [-1 bearish, +1 bullish]
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -193,17 +196,10 @@ def _build_feature_frame(
     delivery_score: pd.Series,
     fii_flow_score: pd.Series,
     fii_fo_score: pd.Series,
+    pcr_score: pd.Series,
 ) -> pd.DataFrame:
     """
     Compute all sub-scores for every bar in df.
-
-    sector_score    – pre-computed industry series aligned by date; reindexed to df.
-    vix_score       – market-wide VIX percentile score series; reindexed to df.
-    nifty_trend     – market-wide NIFTY trend score series; reindexed to df.
-    markov_score    – rolling Markov P(Bull)-P(Bear) series; reindexed to df.
-    delivery_score  – rolling z-score of NSE delivery pct vs 60-day mean; reindexed to df.
-    fii_flow_score  – 10-day rolling FII net cash, percentile-ranked; reindexed to df.
-    fii_fo_score    – FII net index futures, percentile-ranked; reindexed to df.
     """
     strat = SicilianStrategy("_trainer")
     close = df["close"]
@@ -232,6 +228,7 @@ def _build_feature_frame(
             "delivery_score":    _align(delivery_score),
             "fii_flow_score":    _align(fii_flow_score),
             "fii_fo_score":      _align(fii_fo_score),
+            "pcr_score":         _align(pcr_score),
         },
         index=df.index,
     )
@@ -309,6 +306,16 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
         logger.warning("No FII F&O data — fii_fo_score will be 0. "
                        "Run: python -m quant_engine.data.backfill_fo_oi --from 2023-01-01")
 
+    # PCR score: put-call ratio percentile-ranked → [-1 bearish, +1 bullish]
+    raw_pcr = load_pcr_series(limit=2000)
+    if not raw_pcr.empty:
+        pcr_score_series = pcr_to_score(raw_pcr)
+        logger.info("PCR series: %d bars", len(pcr_score_series))
+    else:
+        pcr_score_series = pd.Series(dtype=float)
+        logger.warning("No PCR data — pcr_score will be 0. "
+                       "Accumulates via force-sync from Angel One PCR API.")
+
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
     skipped_train: list[str] = []
@@ -336,6 +343,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 delivery_score_series,
                 fii_flow_score_series,
                 fii_fo_score_series,
+                pcr_score_series,
             )
 
             # 20-day forward return (labelled without look-ahead: we shift backward)

@@ -9,7 +9,8 @@ import yahooFinance from 'yahoo-finance2';
 import { getRapidApiChartData } from './rapidApiService.js';
 import { getAlphaVantageChartData } from './alphaVantageService.js';
 import { fetchDailyOHLC as getAngelOneDailyOHLC } from './angelOneHistorical.js';
-import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii, saveBulkDeals } from '../database/db.js';
+import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii, saveBulkDeals, savePCR, saveOIBuildup } from '../database/db.js';
+import { fetchPCR, fetchAllOIBuildup } from './angelOneMarketData.js';
 import { portfolio, getSymbols, benchmark, indexes } from '../config/portfolio.js';
 import { settings } from '../config/settings.js';
 
@@ -444,6 +445,40 @@ export async function fetchBulkDealsToday() {
     }
   }
   return total;
+}
+
+/**
+ * Fetch PCR + OI Buildup from Angel One and persist to DB.
+ * Called on every force-sync. Silently no-ops if markets are closed (PCR returns no data).
+ */
+export async function fetchPCRAndOIBuildup() {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // PCR
+  try {
+    const pcrData = await fetchPCR();
+    if (pcrData) {
+      await savePCR(today, pcrData);
+      console.log(`[PCR] ${today} — saved`);
+    }
+  } catch (err) {
+    console.warn('[PCR] Fetch failed (non-critical):', err.message);
+  }
+
+  // OI Buildup — all 4 categories
+  try {
+    const allOI = await fetchAllOIBuildup();
+    let total = 0;
+    for (const [category, rows] of Object.entries(allOI)) {
+      if (Array.isArray(rows) && rows.length > 0) {
+        await saveOIBuildup(today, category, rows);
+        total += rows.length;
+      }
+    }
+    if (total > 0) console.log(`[OI Buildup] ${today} — ${total} entries across 4 categories`);
+  } catch (err) {
+    console.warn('[OI Buildup] Fetch failed (non-critical):', err.message);
+  }
 }
 
 // Export for testing

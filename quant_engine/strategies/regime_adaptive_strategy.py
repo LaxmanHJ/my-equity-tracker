@@ -7,10 +7,11 @@ Switches between two signal modes depending on the current market regime:
   BEAR regime  (score < -0.15) — mean reversion  (buy oversold, exit at mean)
   NEUTRAL zone (|score| ≤ 0.15) — cash
 
-Regime score is a weighted blend of four macro signals, each on [-1, +1]:
-  VIX regime    35%  — low VIX = calm market = trend-friendly
-  Nifty trend   25%  — price above SMA50/200 = bull
-  Markov        25%  — hidden-state bull/bear probability
+Regime score is a weighted blend of five macro signals, each on [-1, +1]:
+  VIX regime    30%  — low VIX = calm market = trend-friendly
+  Nifty trend   20%  — price above SMA50/200 = bull
+  Markov        20%  — hidden-state bull/bear probability
+  PCR           15%  — put-call ratio sentiment (high PCR = bearish)
   FII flow      15%  — institutional money direction
 
 All signal computation reuses SicilianStrategy's vectorized helpers — nothing
@@ -98,10 +99,11 @@ class RegimeAdaptiveStrategy(SicilianStrategy):
         """
         Compute a rolling regime score for every bar in df.
 
-        Four components, each on [-1, +1], weighted and summed:
-          VIX regime  35% — low VIX = calm market = bullish regime
-          Nifty trend 25% — price vs SMA50/200
-          Markov      25% — hidden Markov bull/bear state
+        Five components, each on [-1, +1], weighted and summed:
+          VIX regime  30% — low VIX = calm market = bullish regime
+          Nifty trend 20% — price vs SMA50/200
+          Markov      20% — hidden Markov bull/bear state
+          PCR         15% — put-call ratio sentiment (high PCR = bearish)
           FII flow    15% — institutional buying/selling pressure
 
         Missing data (e.g. VIX table empty) gracefully falls back to 0.0
@@ -111,6 +113,7 @@ class RegimeAdaptiveStrategy(SicilianStrategy):
             load_vix_series, vix_to_score,
             build_markov_score_series,
             load_fii_flow_series, _flow_to_score,
+            load_pcr_series, pcr_to_score,
         )
 
         def _align(series: pd.Series) -> pd.Series:
@@ -135,6 +138,12 @@ class RegimeAdaptiveStrategy(SicilianStrategy):
             else pd.Series(dtype=float)
         )
 
+        # PCR sentiment — high PCR (bearish) → -1, low PCR (bullish) → +1
+        pcr_raw = load_pcr_series(limit=2000)
+        pcr_score = (
+            pcr_to_score(pcr_raw) if not pcr_raw.empty else pd.Series(dtype=float)
+        )
+
         # FII cash flow — rolling 10-day net buying pressure
         fii_raw = load_fii_flow_series(limit=2000)
         fii_score = (
@@ -144,9 +153,10 @@ class RegimeAdaptiveStrategy(SicilianStrategy):
         )
 
         regime = (
-            0.35 * _align(vix_score)   +
-            0.25 * _align(nifty_trend) +
-            0.25 * _align(markov)      +
+            0.30 * _align(vix_score)   +
+            0.20 * _align(nifty_trend) +
+            0.20 * _align(markov)      +
+            0.15 * _align(pcr_score)   +
             0.15 * _align(fii_score)
         ).clip(-1.0, 1.0)
 
