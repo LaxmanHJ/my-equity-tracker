@@ -220,58 +220,56 @@
     <!-- Signal Quality Section -->
     <section id="signal-quality" class="section">
 
-      <!-- Engine Toggle -->
-      <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;align-items:center;">
-        <span style="font-size:0.8rem;color:var(--text-muted);margin-right:0.5rem;">Engine:</span>
-        <button id="sqEngineML"     onclick="setSQEngine('ml')"     style="padding:6px 18px;border-radius:20px;border:1px solid var(--accent-primary);background:var(--accent-primary);color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;">ML Model</button>
-        <button id="sqEngineLinear" onclick="setSQEngine('linear')" style="padding:6px 18px;border-radius:20px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);font-size:0.82rem;font-weight:600;cursor:pointer;">Linear (Sicilian)</button>
+      <!-- Header -->
+      <div class="section-header" style="margin-bottom:1rem;">
+        <h2>Signal Quality</h2>
+        <p class="section-subtitle" style="color:var(--text-muted);font-size:0.85rem;">
+          Historical walk-forward IC is the quality bar. Live tracker below is a drift detector —
+          it watches whether current signals diverge from the historical baseline.
+        </p>
       </div>
 
-      <!-- Scorecard -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem;">
-        <div class="summary-card glass">
-          <div class="card-icon">🎯</div>
-          <div class="card-content">
-            <span class="card-label">Hit Rate (20d)</span>
-            <span class="card-value" id="sqHitRate">—</span>
+      <!-- Historical Diagnostic Headline -->
+      <div class="holdings-container glass" style="margin-bottom:1.5rem;padding:1.5rem;">
+        <div class="section-header" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+          <div>
+            <h2 style="margin:0;">Historical Quality (Walk-Forward OOS)</h2>
+            <span id="sqDiagMeta" style="font-size:0.78rem;color:var(--text-muted);">Loading diagnostic…</span>
           </div>
-        </div>
-        <div class="summary-card glass">
-          <div class="card-icon">📐</div>
-          <div class="card-content">
-            <span class="card-label">Mean IC (20d)</span>
-            <span class="card-value" id="sqIC">—</span>
-          </div>
-        </div>
-        <div class="summary-card glass">
-          <div class="card-icon">📏</div>
-          <div class="card-content">
-            <span class="card-label">ICIR (20d)</span>
-            <span class="card-value" id="sqICIR">—</span>
-          </div>
-        </div>
-        <div class="summary-card glass">
-          <div class="card-icon">📋</div>
-          <div class="card-content">
-            <span class="card-label">Signals Logged</span>
-            <span class="card-value" id="sqTotal">—</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- IC Decay Chart -->
-      <div class="holdings-container glass" style="margin-bottom:2rem;padding:1.5rem;">
-        <div class="section-header" style="margin-bottom:1rem;">
-          <h2>IC Decay Curve</h2>
-          <span style="font-size:0.8rem;color:var(--text-muted);">
-            How fast the signal's predictive edge fades. Peak = optimal holding period.
+          <span style="font-size:0.72rem;padding:3px 10px;border-radius:12px;background:rgba(16,185,129,0.12);color:#10b981;">
+            Grinold-Kahn IC • López de Prado purged CV
           </span>
         </div>
+
+        <!-- Side-by-side ML vs Linear 20d scorecard -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.2rem;" id="sqDiagScorecards">
+          <div id="sqDiagML"     class="glass" style="padding:1.1rem;border-radius:12px;"></div>
+          <div id="sqDiagLinear" class="glass" style="padding:1.1rem;border-radius:12px;"></div>
+        </div>
+
+        <!-- Winning engine banner -->
+        <div id="sqDiagVerdict" style="font-size:0.88rem;padding:0.8rem 1rem;border-radius:8px;margin-bottom:1rem;"></div>
+
+        <!-- IC decay across horizons — both engines overlaid -->
+        <h3 style="font-size:0.95rem;margin:1rem 0 0.5rem;">IC Decay — 1d / 5d / 10d / 20d</h3>
         <div style="height:220px;position:relative;">
           <canvas id="sqDecayChart"></canvas>
         </div>
-        <!-- Horizon stats table -->
-        <div id="sqHorizonTable" style="margin-top:1.2rem;overflow-x:auto;"></div>
+        <div id="sqHorizonTable" style="margin-top:1rem;overflow-x:auto;"></div>
+      </div>
+
+      <!-- Live Drift Detector -->
+      <div class="holdings-container glass" style="margin-bottom:1.5rem;padding:1.5rem;">
+        <div class="section-header" style="margin-bottom:0.8rem;">
+          <h2 style="margin:0;">Live Drift Detector</h2>
+          <span style="font-size:0.78rem;color:var(--text-muted);">
+            20d IC on signals recorded since the log was rebuilt. Flags divergence from the historical baseline.
+          </span>
+        </div>
+        <div id="sqLiveDrift" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+          <div class="glass" style="padding:1rem;border-radius:12px;" id="sqLiveML"></div>
+          <div class="glass" style="padding:1rem;border-radius:12px;" id="sqLiveLinear"></div>
+        </div>
       </div>
 
       <!-- Signal Journal -->
@@ -279,7 +277,7 @@
         <div class="section-header" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
           <h2>Signal Journal</h2>
           <span style="font-size:0.8rem;color:var(--text-muted);">
-            WIN = signal direction matched return &nbsp;|&nbsp; LOSS = wrong &nbsp;|&nbsp; PENDING = return not yet settled
+            WIN = signal direction matched return &nbsp;|&nbsp; LOSS = wrong &nbsp;|&nbsp; PENDING = not yet settled
           </span>
         </div>
         <div id="sqJournalTable" style="overflow-x:auto;">

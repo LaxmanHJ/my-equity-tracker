@@ -609,6 +609,33 @@ router.get('/signal-quality', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/ml/diagnostic — walk-forward purged CV results (cached).
+ * POST /api/ml/diagnostic — trigger a re-run in the background.
+ * Both proxy to the Python engine so the dashboard can reach ML quality data.
+ */
+router.get('/ml/diagnostic', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/ml/diagnostic`);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('ml/diagnostic error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
+router.post('/ml/diagnostic', async (req, res) => {
+  try {
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/ml/diagnostic`, { method: 'POST' });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    console.error('ml/diagnostic trigger error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
 router.post('/quant/backtest', async (req, res) => {
   try {
     const response = await fetch(`${QUANT_ENGINE_URL}/api/quant/backtest/`, {

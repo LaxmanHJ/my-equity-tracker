@@ -70,7 +70,8 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import TimeSeriesSplit
 
-from quant_engine.config import PROJECT_ROOT
+from quant_engine.config import FACTOR_WEIGHTS, PROJECT_ROOT
+from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 
 def _safe_pearsonr(a, b):
@@ -97,7 +98,9 @@ from quant_engine.data.market_regime_loader import (
     build_markov_score_series,
     load_fii_flow_series,
     load_fii_fo_series,
+    load_pcr_series,
     load_vix_series,
+    pcr_to_score,
     vix_to_score,
 )
 from quant_engine.ml.trainer import (
@@ -124,12 +127,38 @@ DIAG_OUTPUT_PATH = PROJECT_ROOT / "data" / "ml_diagnostic.json"
 
 
 # ── Dataset build ────────────────────────────────────────────────────────────
+def _compute_linear_composite(df: pd.DataFrame,
+                              benchmark_df: pd.DataFrame) -> pd.Series:
+    """Per-bar 7-factor Sicilian linear composite in [-1, +1].
+
+    Matches the production FACTOR_WEIGHTS (bollinger in place of
+    mean_reversion, RSI trend-confirming). Used as the linear track
+    baseline in the walk-forward IC diagnostic.
+    """
+    strat = SicilianStrategy("_diag_linear")
+    close = df["close"]
+    volume = df["volume"]
+    factor_scores = {
+        "momentum":          strat._rolling_momentum_score(close),
+        "bollinger":         strat._rolling_bollinger_score(close),
+        "rsi":               strat._rolling_rsi_score(close),
+        "macd":              strat._rolling_macd_score(close),
+        "volatility":        strat._rolling_volatility_score(close),
+        "volume":            strat._rolling_volume_score(close, volume),
+        "relative_strength": strat._rolling_relative_strength_score(close, benchmark_df),
+    }
+    return sum(
+        FACTOR_WEIGHTS[name] * scores for name, scores in factor_scores.items()
+    ).clip(-1.0, 1.0)
+
+
 def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build (X, meta) where:
       X    — FEATURE_COLS feature matrix, date-sorted (same as trainer.py).
       meta — parallel DataFrame aligned row-for-row with X, containing:
-               symbol, label, fwd_ret_1d, fwd_ret_5d, fwd_ret_10d, fwd_ret_20d
+               symbol, label, linear_score,
+               fwd_ret_1d, fwd_ret_5d, fwd_ret_10d, fwd_ret_20d
 
     The row alignment between X and meta is positional (iloc). Both are
     sorted by date ascending via mergesort (stable) — same order that
@@ -174,6 +203,11 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
         _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
     )
 
+    raw_pcr = load_pcr_series(limit=2000)
+    pcr_score_series = (
+        pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
+    )
+
     all_X: list[pd.DataFrame] = []
     all_meta: list[pd.DataFrame] = []
 
@@ -205,6 +239,7 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
                 delivery_score_series,
                 fii_flow_score_series,
                 fii_fo_score_series,
+                pcr_score_series,
             )
 
             # Multi-horizon forward returns (no look-ahead: we shift backward).
@@ -214,6 +249,10 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
                 index=df.index,
             )
 
+            # Linear composite — computed from raw OHLC so the linear track
+            # in walk-forward diagnostic is identical to the live engine.
+            linear_score = _compute_linear_composite(df, benchmark_df)
+
             # Valid-mask rule: match trainer.py — require all features + the
             # 20d label to be non-null. 20d is the longest horizon, so the
             # shorter horizons are automatically non-null for these rows.
@@ -221,6 +260,7 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
             valid_mask = features.notna().all(axis=1) & label_fwd.notna()
             features = features[valid_mask]
             fwd_rets = fwd_rets[valid_mask]
+            linear_score = linear_score.reindex(features.index)
 
             if len(features) < 60:
                 continue
@@ -232,6 +272,7 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
             meta = fwd_rets.copy()
             meta["symbol"] = symbol
             meta["label"] = label
+            meta["linear_score"] = linear_score.values
 
             all_X.append(features)
             all_meta.append(meta)
@@ -405,10 +446,17 @@ def run_diagnostic() -> dict:
     tscv = TimeSeriesSplit(n_splits=N_SPLITS)
     fold_details: list[dict] = []
 
-    # Collect all test predictions for pooled across-fold aggregation.
-    all_scores: dict[int, list[float]] = {h: [] for h in FWD_HORIZONS}
-    all_fwds: dict[int, list[float]] = {h: [] for h in FWD_HORIZONS}
-    all_dates: dict[int, list[pd.Timestamp]] = {h: [] for h in FWD_HORIZONS}
+    # Pooled accumulators — one set per engine track (ML vs linear).
+    TRACKS = ("ml", "linear")
+    all_scores: dict[str, dict[int, list[float]]] = {
+        t: {h: [] for h in FWD_HORIZONS} for t in TRACKS
+    }
+    all_fwds: dict[str, dict[int, list[float]]] = {
+        t: {h: [] for h in FWD_HORIZONS} for t in TRACKS
+    }
+    all_dates: dict[str, dict[int, list[pd.Timestamp]]] = {
+        t: {h: [] for h in FWD_HORIZONS} for t in TRACKS
+    }
 
     for fold, (train_idx, test_idx) in enumerate(tscv.split(X), 1):
         train_idx_purged = _purge_train_indices(
@@ -452,6 +500,11 @@ def run_diagnostic() -> dict:
 
         test_dates = dates[test_idx]
 
+        # Linear composite score on the same test rows (no training needed —
+        # it's a deterministic function of the features written by
+        # build_dataset_with_horizons).
+        linear_score = test_meta["linear_score"].astype(float).values
+
         fold_entry: dict = {
             "fold": fold,
             "train_size": int(len(train_idx_purged)),
@@ -460,57 +513,61 @@ def run_diagnostic() -> dict:
             "train_end": str(pd.Timestamp(dates[train_idx_purged[-1]]).date()),
             "test_start": str(pd.Timestamp(test_dates[0]).date()),
             "test_end": str(pd.Timestamp(test_dates[-1]).date()),
-            "horizons": {},
+            "horizons": {"ml": {}, "linear": {}},
         }
 
-        for h in FWD_HORIZONS:
-            fwd = test_meta[f"fwd_ret_{h}d"].values
-            metrics = _horizon_metrics(signed_score, fwd, test_dates)
-            fold_entry["horizons"][f"{h}d"] = metrics
+        track_scores = {"ml": signed_score, "linear": linear_score}
 
-            # Accumulate for pooled across-fold metric.
-            mask = ~np.isnan(signed_score) & ~np.isnan(fwd)
-            all_scores[h].extend(signed_score[mask].tolist())
-            all_fwds[h].extend(fwd[mask].tolist())
-            all_dates[h].extend(test_dates[mask].tolist())
+        for track, score_arr in track_scores.items():
+            for h in FWD_HORIZONS:
+                fwd = test_meta[f"fwd_ret_{h}d"].values
+                metrics = _horizon_metrics(score_arr, fwd, test_dates)
+                fold_entry["horizons"][track][f"{h}d"] = metrics
+
+                mask = ~np.isnan(score_arr) & ~np.isnan(fwd)
+                all_scores[track][h].extend(score_arr[mask].tolist())
+                all_fwds[track][h].extend(fwd[mask].tolist())
+                all_dates[track][h].extend(test_dates[mask].tolist())
 
         fold_details.append(fold_entry)
 
     # Aggregate across all folds (pooled metric — tighter SE than fold means).
-    aggregate: dict[str, Optional[dict]] = {}
-    for h in FWD_HORIZONS:
-        if not all_scores[h]:
-            aggregate[f"{h}d"] = None
-            continue
-        aggregate[f"{h}d"] = _horizon_metrics(
-            np.array(all_scores[h]),
-            np.array(all_fwds[h]),
-            pd.DatetimeIndex(all_dates[h]),
-        )
+    aggregate: dict[str, dict[str, Optional[dict]]] = {t: {} for t in TRACKS}
+    for track in TRACKS:
+        for h in FWD_HORIZONS:
+            if not all_scores[track][h]:
+                aggregate[track][f"{h}d"] = None
+                continue
+            aggregate[track][f"{h}d"] = _horizon_metrics(
+                np.array(all_scores[track][h]),
+                np.array(all_fwds[track][h]),
+                pd.DatetimeIndex(all_dates[track][h]),
+            )
 
     # Mean-of-fold-means (alternative aggregate, useful for fold variance view)
-    fold_means: dict[str, Optional[dict]] = {}
-    for h in FWD_HORIZONS:
-        key = f"{h}d"
-        ic_list = [
-            fd["horizons"][key]["mean_cs_ic"]
-            for fd in fold_details
-            if fd["horizons"].get(key, {}).get("mean_cs_ic") is not None
-        ]
-        hit_list = [
-            fd["horizons"][key]["hit_rate"]
-            for fd in fold_details
-            if fd["horizons"].get(key, {}).get("hit_rate") is not None
-        ]
-        if ic_list:
-            fold_means[key] = {
-                "mean_of_fold_ics": round(float(np.mean(ic_list)), 4),
-                "std_of_fold_ics": round(float(np.std(ic_list)), 4),
-                "mean_of_fold_hits": round(float(np.mean(hit_list)), 1) if hit_list else None,
-                "n_folds_with_data": len(ic_list),
-            }
-        else:
-            fold_means[key] = None
+    fold_means: dict[str, dict[str, Optional[dict]]] = {t: {} for t in TRACKS}
+    for track in TRACKS:
+        for h in FWD_HORIZONS:
+            key = f"{h}d"
+            ic_list = [
+                fd["horizons"][track][key]["mean_cs_ic"]
+                for fd in fold_details
+                if fd["horizons"].get(track, {}).get(key, {}).get("mean_cs_ic") is not None
+            ]
+            hit_list = [
+                fd["horizons"][track][key]["hit_rate"]
+                for fd in fold_details
+                if fd["horizons"].get(track, {}).get(key, {}).get("hit_rate") is not None
+            ]
+            if ic_list:
+                fold_means[track][key] = {
+                    "mean_of_fold_ics": round(float(np.mean(ic_list)), 4),
+                    "std_of_fold_ics": round(float(np.std(ic_list)), 4),
+                    "mean_of_fold_hits": round(float(np.mean(hit_list)), 1) if hit_list else None,
+                    "n_folds_with_data": len(ic_list),
+                }
+            else:
+                fold_means[track][key] = None
 
     result = {
         "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -527,15 +584,15 @@ def run_diagnostic() -> dict:
         "folds": fold_details,
         "aggregate_pooled": aggregate,
         "aggregate_fold_means": fold_means,
+        "factor_weights": FACTOR_WEIGHTS,
         "notes": (
             "Walk-forward TimeSeriesSplit with label-horizon purging "
-            "(Lopez de Prado AFML Ch.10). Hyperparameters are fixed at the "
-            "production RF_PARAMS — no re-tuning, so this measures the "
-            "actual production model. Cross-sectional IC is Spearman per "
-            "date averaged across dates (Grinold-Kahn). Signed score = "
-            "P(BUY) - P(SELL). Unlike trainer.py's CV, this version purges "
-            "labels that leak into the test fold — so the IC here is a "
-            "cleaner out-of-sample number than the reported CV accuracy."
+            "(Lopez de Prado AFML Ch.10). Two tracks evaluated on identical "
+            "test rows: (1) ML — RF at production RF_PARAMS, signed score "
+            "= P(BUY)-P(SELL); (2) Linear — 7-factor Sicilian composite at "
+            "production FACTOR_WEIGHTS. Cross-sectional IC is Spearman per "
+            "date averaged across dates (Grinold-Kahn). Unlike trainer.py's "
+            "CV, this version purges labels that leak into the test fold."
         ),
     }
 
@@ -566,15 +623,17 @@ if __name__ == "__main__":
     )
     result = run_diagnostic()
 
-    print("\n=== Sicilian ML Diagnostic — Pooled Aggregate ===")
+    print("\n=== Sicilian Diagnostic — Pooled Aggregate ===")
     print(f"samples={result['n_samples_total']}  folds={result['n_folds_completed']}")
-    for h, metrics in result["aggregate_pooled"].items():
-        if metrics is None:
-            print(f"  {h}: no data")
-            continue
-        print(
-            f"  {h}:  cs_IC={metrics['mean_cs_ic']}  "
-            f"ICIR={metrics['icir']}  "
-            f"hit={metrics['hit_rate']}%  "
-            f"n={metrics['n_obs']}  dates={metrics['n_dates']}"
-        )
+    for track in ("ml", "linear"):
+        print(f"\n  [{track.upper()}]")
+        for h, metrics in result["aggregate_pooled"][track].items():
+            if metrics is None:
+                print(f"    {h}: no data")
+                continue
+            print(
+                f"    {h}:  cs_IC={metrics['mean_cs_ic']}  "
+                f"ICIR={metrics['icir']}  "
+                f"hit={metrics['hit_rate']}%  "
+                f"n={metrics['n_obs']}  dates={metrics['n_dates']}"
+            )

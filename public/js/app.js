@@ -1467,120 +1467,156 @@ function renderIndexCard(index) {
 }
 
 // =============================================
-// Signal Quality
+// Signal Quality — historical diagnostic (quality) + live drift detector
 // =============================================
 
-let _sqData   = null;
-let _sqEngine = 'ml';  // 'ml' | 'linear'
-
-function setSQEngine(engine) {
-  _sqEngine = engine;
-  const mlBtn  = document.getElementById('sqEngineML');
-  const linBtn = document.getElementById('sqEngineLinear');
-  if (engine === 'ml') {
-    mlBtn.style.background  = 'var(--accent-primary)';
-    mlBtn.style.color       = '#fff';
-    mlBtn.style.border      = '1px solid var(--accent-primary)';
-    linBtn.style.background = 'transparent';
-    linBtn.style.color      = 'var(--text-secondary)';
-    linBtn.style.border     = '1px solid var(--border-color)';
-  } else {
-    linBtn.style.background = 'var(--accent-primary)';
-    linBtn.style.color      = '#fff';
-    linBtn.style.border     = '1px solid var(--accent-primary)';
-    mlBtn.style.background  = 'transparent';
-    mlBtn.style.color       = 'var(--text-secondary)';
-    mlBtn.style.border      = '1px solid var(--border-color)';
-  }
-  if (_sqData) {
-    const engineData = _sqData[_sqEngine];
-    const horizonEl  = document.getElementById('sqHorizonTable');
-    renderSignalScorecard(engineData.summary);
-    renderSignalDecayChart(engineData.horizons);
-    renderSignalHorizonTable(horizonEl, engineData.horizons);
-  }
-}
+let _sqDiag = null;   // cached /api/ml/diagnostic payload
+let _sqLive = null;   // cached /api/quant/signal-quality payload
 
 async function loadSignalQuality() {
   const journalEl = document.getElementById('sqJournalTable');
-  const horizonEl = document.getElementById('sqHorizonTable');
+  const diagMetaEl = document.getElementById('sqDiagMeta');
   journalEl.innerHTML = '<p style="color:var(--text-muted);padding:2rem;text-align:center;">Loading...</p>';
 
   try {
-    const res  = await fetch(`${API_BASE}/signal-quality`);
-    if (!res.ok) throw new Error('Signal quality endpoint unavailable');
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const [diagRes, liveRes] = await Promise.all([
+      fetch('/api/ml/diagnostic'),
+      fetch(`${API_BASE}/signal-quality`),
+    ]);
+    const diagPayload = diagRes.ok ? await diagRes.json() : null;
+    const live        = liveRes.ok ? await liveRes.json() : null;
 
-    _sqData = data;
+    _sqDiag = diagPayload?.result || null;
+    _sqLive = live;
 
-    const engineData = data[_sqEngine];
-    renderSignalScorecard(engineData.summary);
-    renderSignalDecayChart(engineData.horizons);
-    renderSignalHorizonTable(horizonEl, engineData.horizons);
-    renderSignalJournal(journalEl, data.recent_signals);
+    renderSignalDiagnostic(_sqDiag);
+    renderSignalLiveDrift(_sqLive, _sqDiag);
+    renderSignalJournal(journalEl, live?.recent_signals || []);
   } catch (err) {
     console.error('Signal quality load error:', err);
+    if (diagMetaEl) diagMetaEl.textContent = 'Failed to load.';
     journalEl.innerHTML = `<p style="color:var(--danger);padding:2rem;text-align:center;">
       Failed to load signal quality — is the Python quant engine running?</p>`;
   }
 }
 
-function renderSignalScorecard(s) {
-  if (!s) return;
+// ── Historical Diagnostic (quality bar) ──────────────────────────────────────
+function renderSignalDiagnostic(diag) {
+  const metaEl    = document.getElementById('sqDiagMeta');
+  const mlCardEl  = document.getElementById('sqDiagML');
+  const linCardEl = document.getElementById('sqDiagLinear');
+  const verdictEl = document.getElementById('sqDiagVerdict');
+  const tableEl   = document.getElementById('sqHorizonTable');
 
-  const hitRate = s.hit_rate_20d != null ? `${s.hit_rate_20d}%` : '—';
-  const ic      = s.mean_ic_20d  != null ? s.mean_ic_20d.toFixed(4) : '—';
-  const icir    = s.icir_20d     != null ? s.icir_20d.toFixed(2) : '—';
+  if (!diag) {
+    metaEl.innerHTML = 'Diagnostic not yet computed. Run <code>POST /api/ml/diagnostic</code> or <code>python -m quant_engine.ml.diagnostic</code>.';
+    mlCardEl.innerHTML = linCardEl.innerHTML = '';
+    verdictEl.innerHTML = '';
+    renderSignalDecayChart(null);
+    tableEl.innerHTML = '';
+    return;
+  }
 
-  const hitColor = s.hit_rate_20d >= 55 ? 'var(--success)'
-                 : s.hit_rate_20d >= 50 ? 'var(--warning)'
-                 : s.hit_rate_20d != null ? 'var(--danger)' : 'var(--text-primary)';
-  const icColor  = s.mean_ic_20d >= 0.05 ? 'var(--success)'
-                 : s.mean_ic_20d >= 0.02 ? 'var(--warning)'
-                 : s.mean_ic_20d != null ? 'var(--danger)' : 'var(--text-primary)';
+  const mlAgg  = diag.aggregate_pooled?.ml     || {};
+  const linAgg = diag.aggregate_pooled?.linear || {};
+  const ml20   = mlAgg['20d']  || {};
+  const lin20  = linAgg['20d'] || {};
 
-  document.getElementById('sqHitRate').textContent = hitRate;
-  document.getElementById('sqHitRate').style.color = hitColor;
-  document.getElementById('sqIC').textContent       = ic;
-  document.getElementById('sqIC').style.color       = icColor;
-  document.getElementById('sqICIR').textContent     = icir;
-  document.getElementById('sqTotal').textContent    = `${s.settled_20d} / ${s.total_signals}`;
+  const computed = diag.computed_at ? new Date(diag.computed_at).toISOString().slice(0, 10) : '?';
+  metaEl.innerHTML = `
+    Computed ${computed} · ${diag.n_samples_total?.toLocaleString() || '?'} rows ·
+    ${diag.n_folds_completed || 0} folds · label = ${diag.label_horizon_days || '?'}d forward return,
+    purge = ${diag.purge_days || '?'}d
+  `;
+
+  mlCardEl.innerHTML  = buildDiagEngineCard('ML model',     ml20);
+  linCardEl.innerHTML = buildDiagEngineCard('Linear (7-factor)', lin20);
+
+  // Verdict banner — which engine has the higher 20d IC on current data
+  const mlIC  = ml20.mean_cs_ic;
+  const linIC = lin20.mean_cs_ic;
+  let verdictHtml = '';
+  if (mlIC != null && linIC != null) {
+    const better = linIC > mlIC ? 'Linear' : 'ML';
+    const edge   = Math.abs((linIC ?? 0) - (mlIC ?? 0));
+    const bg     = better === 'ML' ? 'rgba(99,102,241,0.12)' : 'rgba(16,185,129,0.12)';
+    const fg     = better === 'ML' ? '#818cf8' : '#10b981';
+    verdictHtml = `
+      <div style="background:${bg};color:${fg};border-left:3px solid ${fg};padding:0.7rem 1rem;border-radius:6px;">
+        <strong>${better}</strong> currently has the higher OOS 20d IC
+        (${(linIC ?? 0).toFixed(3)} vs ${(mlIC ?? 0).toFixed(3)} — edge ${edge.toFixed(3)}).
+        Treat this as the preferred engine for next-day decisions.
+      </div>`;
+  }
+  verdictEl.innerHTML = verdictHtml;
+
+  renderSignalDecayChart(diag);
+  renderDiagHorizonTable(tableEl, diag);
 }
 
-function renderSignalDecayChart(horizons) {
+function buildDiagEngineCard(title, h) {
+  const icColor = v =>
+    v == null ? 'var(--text-muted)' :
+    v >= 0.05 ? '#10b981' :
+    v >= 0.02 ? '#f59e0b' :
+    v >= 0    ? '#94a3b8' : '#ef4444';
+  const hitColor = v =>
+    v == null ? 'var(--text-muted)' :
+    v >= 55   ? '#10b981' :
+    v >= 50   ? '#f59e0b' : '#ef4444';
+  const fmt = (v, d = 3) => v == null ? '—' : v.toFixed(d);
+
+  return `
+    <div style="font-size:0.82rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.4rem;">${title}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;">
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">IC (20d)</div>
+        <div style="font-size:1.15rem;font-weight:700;color:${icColor(h.mean_cs_ic)};">${fmt(h.mean_cs_ic, 3)}</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">ICIR</div>
+        <div style="font-size:1.15rem;font-weight:700;color:var(--text-primary);">${fmt(h.icir, 2)}</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">Hit rate</div>
+        <div style="font-size:1.15rem;font-weight:700;color:${hitColor(h.hit_rate)};">${h.hit_rate != null ? h.hit_rate.toFixed(1) + '%' : '—'}</div>
+      </div>
+    </div>
+    <div style="margin-top:0.6rem;font-size:0.7rem;color:var(--text-muted);">
+      n=${h.n_obs?.toLocaleString() ?? 0} OOS rows · ${h.n_dates ?? 0} distinct dates
+    </div>`;
+}
+
+function renderSignalDecayChart(diag) {
   const ctx = document.getElementById('sqDecayChart');
   if (!ctx) return;
-
   if (charts.sqDecay) charts.sqDecay.destroy();
 
-  const labels = horizons.map(h => `${h.days}d`);
-  const icData  = horizons.map(h => h.mean_ic  ?? null);
-  const hitData = horizons.map(h => h.hit_rate != null ? (h.hit_rate - 50) / 50 : null);
+  if (!diag) { charts.sqDecay = null; return; }
+
+  const horizons = ['1d', '5d', '10d', '20d'];
+  const mlIC  = horizons.map(h => diag.aggregate_pooled?.ml?.[h]?.mean_cs_ic     ?? null);
+  const linIC = horizons.map(h => diag.aggregate_pooled?.linear?.[h]?.mean_cs_ic ?? null);
 
   charts.sqDecay = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
+      labels: horizons,
       datasets: [
         {
-          label: 'Mean IC (rank)',
-          data: icData,
-          borderColor: '#e79119',
-          backgroundColor: 'rgba(231,145,25,0.1)',
-          tension: 0.3,
-          pointRadius: 5,
-          yAxisID: 'y',
+          label: 'ML IC',
+          data: mlIC,
+          borderColor: '#818cf8',
+          backgroundColor: 'rgba(129,140,248,0.1)',
+          tension: 0.3, pointRadius: 5,
         },
         {
-          label: 'Hit Rate edge (% above 50)',
-          data: hitData,
+          label: 'Linear IC',
+          data: linIC,
           borderColor: '#10b981',
           backgroundColor: 'rgba(16,185,129,0.1)',
-          tension: 0.3,
-          pointRadius: 5,
+          tension: 0.3, pointRadius: 5,
           borderDash: [4, 3],
-          yAxisID: 'y',
         },
       ]
     },
@@ -1592,13 +1628,7 @@ function renderSignalDecayChart(horizons) {
         legend: { labels: { color: '#94a3b8', font: { size: 12 } } },
         tooltip: {
           callbacks: {
-            label: ctx => {
-              const v = ctx.raw;
-              if (v == null) return `${ctx.dataset.label}: N/A`;
-              return ctx.datasetIndex === 1
-                ? `Hit Rate edge: ${(v * 50 + 50).toFixed(1)}%`
-                : `IC: ${v.toFixed(4)}`;
-            }
+            label: c => c.raw == null ? `${c.dataset.label}: N/A` : `${c.dataset.label}: ${c.raw.toFixed(4)}`,
           }
         }
       },
@@ -1607,50 +1637,122 @@ function renderSignalDecayChart(horizons) {
         y: {
           ticks: { color: '#94a3b8' },
           grid: { color: 'rgba(255,255,255,0.05)' },
-          title: { display: true, text: 'IC / Hit Rate edge', color: '#64748b', font: { size: 11 } }
+          title: { display: true, text: 'Cross-sectional Spearman IC', color: '#64748b', font: { size: 11 } }
         }
       }
     }
   });
 }
 
-function renderSignalHorizonTable(el, horizons) {
-  if (!horizons || !horizons.length) { el.innerHTML = ''; return; }
+function renderDiagHorizonTable(el, diag) {
+  if (!el || !diag) { el.innerHTML = ''; return; }
+  const horizons = ['1d', '5d', '10d', '20d'];
 
   const icBadge = ic => {
     if (ic == null) return '<span style="color:var(--text-muted)">—</span>';
-    const color = ic >= 0.05 ? '#10b981' : ic >= 0.02 ? '#f59e0b' : '#ef4444';
+    const color = ic >= 0.05 ? '#10b981' : ic >= 0.02 ? '#f59e0b' : ic >= 0 ? '#94a3b8' : '#ef4444';
     return `<span style="color:${color};font-weight:600;">${ic.toFixed(4)}</span>`;
   };
   const hitBadge = hr => {
     if (hr == null) return '<span style="color:var(--text-muted)">—</span>';
     const color = hr >= 55 ? '#10b981' : hr >= 50 ? '#f59e0b' : '#ef4444';
-    return `<span style="color:${color};font-weight:600;">${hr}%</span>`;
+    return `<span style="color:${color};font-weight:600;">${hr.toFixed(1)}%</span>`;
+  };
+  const icir = v => v == null ? '—' : v.toFixed(2);
+
+  const row = h => {
+    const m = diag.aggregate_pooled?.ml?.[h]     || {};
+    const l = diag.aggregate_pooled?.linear?.[h] || {};
+    return `
+      <tr style="border-bottom:1px solid var(--border-color);">
+        <td style="padding:7px 10px;font-weight:600;">${h}</td>
+        <td style="padding:7px 10px;text-align:right;">${icBadge(m.mean_cs_ic)}</td>
+        <td style="padding:7px 10px;text-align:right;color:var(--text-secondary);">${icir(m.icir)}</td>
+        <td style="padding:7px 10px;text-align:right;">${hitBadge(m.hit_rate)}</td>
+        <td style="padding:7px 10px;text-align:right;">${icBadge(l.mean_cs_ic)}</td>
+        <td style="padding:7px 10px;text-align:right;color:var(--text-secondary);">${icir(l.icir)}</td>
+        <td style="padding:7px 10px;text-align:right;">${hitBadge(l.hit_rate)}</td>
+      </tr>`;
   };
 
   el.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-top:0.5rem;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
       <thead>
-        <tr style="color:var(--text-muted);text-transform:uppercase;font-size:0.7rem;border-bottom:1px solid var(--border-color);">
-          <th style="padding:6px 10px;text-align:left;">Horizon</th>
-          <th style="padding:6px 10px;text-align:right;">Mean IC</th>
+        <tr style="color:var(--text-muted);text-transform:uppercase;font-size:0.68rem;border-bottom:1px solid var(--border-color);">
+          <th rowspan="2" style="padding:6px 10px;text-align:left;vertical-align:bottom;">Horizon</th>
+          <th colspan="3" style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border-color);">ML</th>
+          <th colspan="3" style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border-color);">Linear</th>
+        </tr>
+        <tr style="color:var(--text-muted);text-transform:uppercase;font-size:0.68rem;border-bottom:1px solid var(--border-color);">
+          <th style="padding:6px 10px;text-align:right;">IC</th>
           <th style="padding:6px 10px;text-align:right;">ICIR</th>
-          <th style="padding:6px 10px;text-align:right;">Hit Rate</th>
-          <th style="padding:6px 10px;text-align:right;">Settled Obs</th>
+          <th style="padding:6px 10px;text-align:right;">Hit</th>
+          <th style="padding:6px 10px;text-align:right;">IC</th>
+          <th style="padding:6px 10px;text-align:right;">ICIR</th>
+          <th style="padding:6px 10px;text-align:right;">Hit</th>
         </tr>
       </thead>
-      <tbody>
-        ${horizons.map(h => `
-          <tr style="border-bottom:1px solid var(--border-color);">
-            <td style="padding:7px 10px;font-weight:600;">${h.days}d</td>
-            <td style="padding:7px 10px;text-align:right;">${icBadge(h.mean_ic)}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--text-secondary);">${h.icir != null ? h.icir.toFixed(2) : '—'}</td>
-            <td style="padding:7px 10px;text-align:right;">${hitBadge(h.hit_rate)}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--text-muted);">${h.n_obs}</td>
-          </tr>
-        `).join('')}
-      </tbody>
+      <tbody>${horizons.map(row).join('')}</tbody>
     </table>`;
+}
+
+// ── Live Drift Detector ──────────────────────────────────────────────────────
+function renderSignalLiveDrift(live, diag) {
+  const mlEl  = document.getElementById('sqLiveML');
+  const linEl = document.getElementById('sqLiveLinear');
+  if (!mlEl || !linEl) return;
+
+  const mlBase  = diag?.aggregate_pooled?.ml?.['20d']?.mean_cs_ic     ?? null;
+  const linBase = diag?.aggregate_pooled?.linear?.['20d']?.mean_cs_ic ?? null;
+
+  mlEl.innerHTML  = buildLiveCard('ML live',     live?.ml?.summary,     mlBase);
+  linEl.innerHTML = buildLiveCard('Linear live', live?.linear?.summary, linBase);
+}
+
+function buildLiveCard(title, summary, baselineIC) {
+  if (!summary) {
+    return `<div style="color:var(--text-muted);font-size:0.85rem;">${title}: no data.</div>`;
+  }
+  const { mean_ic_20d, hit_rate_20d, settled_20d, eligible_rows, total_signals } = summary;
+
+  let drift = '';
+  if (mean_ic_20d != null && baselineIC != null) {
+    const delta = mean_ic_20d - baselineIC;
+    // Rough IC SE ≈ 1/sqrt(n) per date pooled; flag drift if |delta| > 2×SE.
+    const se = settled_20d > 0 ? 1 / Math.sqrt(settled_20d) : 1;
+    const z  = delta / se;
+    const ok = Math.abs(z) < 2;
+    const color = ok ? '#10b981' : '#f59e0b';
+    const tag   = ok ? 'within noise' : 'diverges from baseline';
+    drift = `<span style="color:${color};font-weight:600;">Δ ${(delta >= 0 ? '+' : '') + delta.toFixed(3)} · ${tag}</span>`;
+  } else if (settled_20d != null && settled_20d < 100) {
+    drift = `<span style="color:var(--warning);">sample too small for drift check (n=${settled_20d})</span>`;
+  }
+
+  const ic  = mean_ic_20d   != null ? mean_ic_20d.toFixed(3)       : '—';
+  const hit = hit_rate_20d  != null ? hit_rate_20d.toFixed(1) + '%' : '—';
+  const base = baselineIC   != null ? baselineIC.toFixed(3)        : '—';
+
+  return `
+    <div style="font-size:0.82rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.5rem;">${title}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.6rem;">
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">Live IC (20d)</div>
+        <div style="font-size:1.05rem;font-weight:700;">${ic}</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">Hit rate</div>
+        <div style="font-size:1.05rem;font-weight:700;">${hit}</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">Historical baseline</div>
+        <div style="font-size:1.05rem;font-weight:700;color:var(--text-secondary);">${base}</div>
+      </div>
+    </div>
+    <div style="margin-top:0.5rem;font-size:0.72rem;color:var(--text-muted);">
+      eligible=${eligible_rows?.toLocaleString() ?? 0} · settled@20d=${settled_20d?.toLocaleString() ?? 0} · logged=${total_signals?.toLocaleString() ?? 0}
+    </div>
+    <div style="margin-top:0.3rem;font-size:0.78rem;">${drift}</div>`;
 }
 
 function renderSignalJournal(el, signals) {

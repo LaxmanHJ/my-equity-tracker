@@ -150,6 +150,50 @@ Trainer run after backfill:
 4. Prevent regression: stop using RapidAPI `historical_data` as the primary ingest source (see live_trading_checklist.md C2)
 5. CPCV implementation is still pending (was blocked on the cadence issue)
 
+### 2026-04-16 Daily Cadence Restored (Angel One)
+
+After Angel One integration (`src/services/angelOneService.js` became primary OHLC source), `price_history` was rebuilt at **daily** cadence again — 247-252 bars/year from 2011 onward (verified via Turso). The 2026-04-09 weekly regime was therefore transient. All downstream row-position semantics flip back to days: `shift(-20)` = 20-day forward return; momentum 21/63/126 = 1m/3m/6m.
+
+Practical effects:
+- `BUY_RETURN_THRESHOLD = +3%` is now a 1-month target again (much stricter than it was under weekly)
+- Fold-5 post-fix diagnostic of +0.187 IC was measured on weekly data — it does not directly carry to the current daily regime. Re-run `python -m quant_engine.ml.diagnostic` after any cadence change.
+- Wiki historical entries above remain accurate to what happened; the live state is now **daily**.
+
+### 2026-04-17 Daily-Cadence Diagnostic — Linear Beats ML
+
+Fresh walk-forward purged CV on the now-daily dataset (24,578 rows, 14 stocks, 2018-03 → 2026-03), with the linear track scored on the same folds:
+
+**Pooled aggregate (all folds, n=20,480 OOS rows per horizon):**
+
+| Horizon | ML cs_IC | ML ICIR | ML hit | Linear cs_IC | Linear ICIR | Linear hit |
+|---------|---------:|--------:|-------:|-------------:|------------:|-----------:|
+| 1d  | +0.005 | +0.01 | 49.1% | +0.016 | +0.05 | 50.4% |
+| 5d  | +0.011 | +0.04 | 49.4% | +0.025 | +0.08 | 51.2% |
+| 10d | +0.003 | +0.01 | 49.6% | +0.043 | +0.14 | 52.0% |
+| 20d | −0.000 | −0.00 | 49.0% | **+0.040** | **+0.13** | **53.1%** |
+
+**Takeaway**: on current daily data the RF model (at production `RF_PARAMS`, 15 features) shows **no out-of-sample edge** — IC indistinguishable from zero, hit rate at coin flip. The 7-factor linear composite has a small but real edge at 10-20d (IC ~0.04, hit ~52-53%) — modest by Grinold-Kahn standards but non-zero.
+
+This is a reversal of the 2026-04-09 weekly diagnostic (where fold-5 ML IC was +0.187). The model learned on weekly bars generalised to weekly test folds. Retrained on daily, the same RF architecture does not find edge.
+
+**Decision implications**:
+- For live trading buy decisions: prefer the **linear composite** signal until the ML model is rebuilt with a daily-aware label/feature redesign.
+- The ML pipeline needs work: label horizon (shift(-20) = 20 days now, ±3% threshold too tight?), feature set review, and possibly meta-labeling (López de Prado) to get a daily edge.
+
+### 2026-04-17 Signal Quality Pollution Fix
+
+`routers/signal_quality.py` was reporting a live "ML IC = −0.243" that was misleading. Root cause: `signals_log` was 98% polluted with linear-only rows bulk-written by an earlier one-shot `backfill_signals.py` (ML predictor never ran; `ml_confidence` was NULL for 9,263/9,428 rows). The endpoint then used `ml_confidence.fillna(50.0) * ml_dir` — constant-50 substitution turned the "ML IC" into a degraded 3-valued ordinal of the LINEAR direction. It was not measuring the ML model.
+
+Fixes applied:
+1. **`routers/signal_quality.py`** — no longer fillna-s `ml_confidence`; NaN rows are dropped by `_engine_horizons`. Linear track uses `effective_linear_signal = COALESCE(linear_signal, signal)` for hit-rate direction. Response now includes `eligible_rows` per track so the UI can show sample-size honestly.
+2. **`backfill_signals.py`** rewritten to produce **walk-forward OOS ML predictions** (reproducing `diagnostic.py`'s purged TimeSeriesSplit) and write both `ml_confidence` + `linear_signal` for every historical bar. No lookahead — each test fold's predictions come from a model trained strictly on earlier data.
+3. **`ml/diagnostic.py`** extended to score the linear composite on the same walk-forward folds. `aggregate_pooled` now contains both `"ml"` and `"linear"` sub-dicts for apples-to-apples comparison.
+
+**Methodology decision — quality bar vs drift detector** (per Grinold-Kahn / López de Prado):
+- **Historical diagnostic** (`ml_diagnostic.json`) is the model-quality measure. It has thousands of OOS observations per horizon and purges label leakage.
+- **Live signal-quality tracker** is a **drift detector**. Given limited sample (even after backfill, ~20k OOS rows), it cannot cleanly separate a −0.02 IC from zero on short windows. Its role is to flag when live IC diverges from the historical baseline.
+- UI must lead with the historical diagnostic, not the live tracker. See `public/js/app.js` Signal Quality section.
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML

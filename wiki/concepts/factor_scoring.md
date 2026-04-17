@@ -6,18 +6,19 @@ Each factor returns a raw score in **[−1.0, +1.0]**. Scores are combined as a 
 
 ## Current Factors and Weights
 
+Calibrated against ML feature importances (per `quant_engine/config.py`):
+
 | Factor | Module | Weight | Type |
 |--------|--------|--------|------|
-| Momentum | `factors/momentum.py` | 25% | Trend |
-| Mean Reversion | `factors/mean_reversion.py` | 15% | Reversal |
-| RSI | `factors/rsi.py` | 15% | Oscillator |
-| MACD | `factors/macd.py` | 15% | Trend |
-| Volatility | `factors/volatility.py` | 10% | Risk |
-| Volume | `factors/volume.py` | 10% | Sentiment |
-| Relative Strength | `factors/relative_strength.py` | 10% | Cross-sectional |
-| Bollinger Bands | `factors/bollinger.py` | **0%** | Oscillator |
+| Momentum | `factors/momentum.py` | 20% | Trend |
+| Volatility | `factors/volatility.py` | 20% | Risk |
+| RSI (trend-confirming) | `factors/rsi.py` | 20% | Oscillator |
+| Bollinger Bands | `factors/bollinger.py` | 15% | Oscillator (replaces mean_reversion) |
+| MACD | `factors/macd.py` | 12% | Trend |
+| Relative Strength | `factors/relative_strength.py` | 8% | Cross-sectional |
+| Volume | `factors/volume.py` | 5% | Sentiment |
 
-**Sum of active weights: 100%**. Bollinger computed but unused.
+**Sum: 100%**. `mean_reversion` replaced by `bollinger` (same contrarian intent, volatility-adaptive). RSI direction flipped to trend-confirmation — high RSI = bullish, not overbought.
 
 ## Signal Thresholds
 
@@ -31,13 +32,13 @@ composite ≤ −40  → SHORT
 
 ```python
 composite = (
-    0.25 * momentum_score +
-    0.15 * mean_reversion_score +
-    0.15 * rsi_score +
-    0.15 * macd_score +
-    0.10 * volatility_score +
-    0.10 * volume_score +
-    0.10 * relative_strength_score
+    0.20 * momentum_score +
+    0.20 * volatility_score +
+    0.20 * rsi_score +
+    0.15 * bollinger_score +
+    0.12 * macd_score +
+    0.08 * relative_strength_score +
+    0.05 * volume_score
 ) * 100
 ```
 
@@ -61,16 +62,22 @@ Each factor outputs a **cross-sectionally ranked** score:
 
 This mirrors the `rank()` operator from Kakushadze (2015)'s 101 alphas.
 
-## IC (Information Coefficient) — NOT YET TRACKED
+## IC (Information Coefficient) — TRACKED
 
-Per Grinold & Kahn: signal quality = IC (correlation of score rank vs. next-period return rank). Should be measured for each factor separately.
+Signal quality is measured in two places (Grinold-Kahn framework):
 
-Target IC per factor: 0.03–0.08 (any above 0.10 is exceptional).
+1. **Historical diagnostic** (`quant_engine/ml/diagnostic.py`) — walk-forward purged CV on ~10 years of data. Reports cross-sectional Spearman IC + ICIR + hit-rate at 1d/5d/10d/20d for **both ML and linear composite** tracks. Results cached at `data/ml_diagnostic.json`. This is the headline quality metric.
+2. **Live tracker** (`quant_engine/routers/signal_quality.py`) — joins `signals_log` to `price_history` and computes IC on recorded live signals. Role is **drift detection** against the historical baseline, not quality measurement (sample too small for clean IC).
 
-```python
-# Roadmap: quant_engine/risk/ic_tracker.py
-# ic = spearman_corr(factor_score_today, return_next_week)
-```
+Target composite IC: 0.03–0.08 at the target horizon (any above 0.10 is exceptional).
+
+**Current daily-cadence numbers (2026-04-17, pooled 20,480 OOS rows)**:
+- Linear composite at 20d: IC +0.040, ICIR +0.13, hit 53.1% — small but real edge
+- RF ML at 20d: IC ≈ 0, hit 49% — no OOS edge on current daily data
+
+See `wiki/concepts/ml_pipeline.md` for the full diagnostic table and the context around the weekly→daily cadence flip.
+
+**Still open**: per-factor IC tracking (we currently measure composite-level IC, not factor-by-factor).
 
 ## ML Overlay
 
