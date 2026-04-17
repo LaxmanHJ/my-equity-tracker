@@ -25,6 +25,7 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [mean_reversion.md](concepts/mean_reversion.md) | Mean reversion — evidence, signals, regime dependency |
 | [regime_detection.md](concepts/regime_detection.md) | Market regime — VIX, Markov, FII flow |
 | [ml_pipeline.md](concepts/ml_pipeline.md) | ML training, CV, labeling, features |
+| [intraday_features.md](concepts/intraday_features.md) | Angel One 15-min candle features (Phase 4) |
 | [backtesting.md](concepts/backtesting.md) | Backtesting methodology, pitfalls, CPCV |
 | [covariance_estimation.md](concepts/covariance_estimation.md) | Portfolio risk — shrinkage, HRP |
 

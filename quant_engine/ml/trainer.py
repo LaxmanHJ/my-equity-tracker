@@ -45,6 +45,7 @@ from quant_engine.data.market_regime_loader import (
     load_pcr_series, pcr_to_score,
 )
 from quant_engine.data.sector_indices_loader import load_sector_series
+from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ FEATURE_COLS = [
     "fii_fo_score",       # FII net index futures (long-short), percentile-ranked → [-1 short, +1 long]
     # PCR sentiment (market-wide)
     "pcr_score",          # put-call ratio percentile-ranked → [-1 bearish, +1 bullish]
+    # Intraday-derived features (from 15-min candles, Angel One; ~2018+ coverage)
+    "overnight_gap",          # (today_open - prev_close) / prev_close
+    "intraday_range_ratio",   # (day_high - day_low) / ATR14
+    "last_hour_momentum",     # (close_15:15 - close_14:15) / close_14:15
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -197,6 +202,7 @@ def _build_feature_frame(
     fii_flow_score: pd.Series,
     fii_fo_score: pd.Series,
     pcr_score: pd.Series,
+    intraday_feats: pd.DataFrame,
 ) -> pd.DataFrame:
     """
     Compute all sub-scores for every bar in df.
@@ -211,6 +217,15 @@ def _build_feature_frame(
         if series.empty:
             return pd.Series(0.0, index=df.index)
         return series.reindex(df.index, method="ffill").fillna(0.0)
+
+    # Intraday features: point-in-time, NOT ffilled. Missing rows stay NaN so
+    # that valid_mask drops them — prevents pre-2018 rows (where intraday is
+    # unavailable) from polluting the tree with a spurious zero-constant that
+    # encodes a pre/post-2018 regime split.
+    def _align_intraday(col: str) -> pd.Series:
+        if intraday_feats.empty or col not in intraday_feats.columns:
+            return pd.Series(np.nan, index=df.index)
+        return intraday_feats[col].reindex(df.index)
 
     return pd.DataFrame(
         {
@@ -229,6 +244,9 @@ def _build_feature_frame(
             "fii_flow_score":    _align(fii_flow_score),
             "fii_fo_score":      _align(fii_fo_score),
             "pcr_score":         _align(pcr_score),
+            "overnight_gap":         _align_intraday("overnight_gap"),
+            "intraday_range_ratio":  _align_intraday("intraday_range_ratio"),
+            "last_hour_momentum":    _align_intraday("last_hour_momentum"),
         },
         index=df.index,
     )
@@ -335,6 +353,9 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
             else:
                 delivery_score_series = pd.Series(dtype=float)
 
+            # intraday features per-stock (date-indexed, 3 columns)
+            intraday_feats = build_intraday_features(symbol)
+
             features = _build_feature_frame(
                 df, benchmark_df,
                 sector_score,
@@ -344,6 +365,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 fii_flow_score_series,
                 fii_fo_score_series,
                 pcr_score_series,
+                intraday_feats,
             )
 
             # 20-day forward return (labelled without look-ahead: we shift backward)

@@ -87,6 +87,7 @@ def _safe_spearmanr(a, b):
         return float("nan")
     return spearmanr(a, b)[0]
 from quant_engine.data.delivery_loader import load_delivery_series
+from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.data.loader import (
     load_all_symbols,
     load_benchmark,
@@ -229,6 +230,8 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
             else:
                 delivery_score_series = pd.Series(dtype=float)
 
+            intraday_feats = build_intraday_features(symbol)
+
             features = _build_feature_frame(
                 df,
                 benchmark_df,
@@ -240,6 +243,7 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
                 fii_flow_score_series,
                 fii_fo_score_series,
                 pcr_score_series,
+                intraday_feats,
             )
 
             # Multi-horizon forward returns (no look-ahead: we shift backward).

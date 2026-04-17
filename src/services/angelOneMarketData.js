@@ -7,7 +7,8 @@ const PCR_URL = `${BASE_URL}/putCallRatio`;
 const OI_BUILDUP_URL = `${BASE_URL}/OIBuildup`;
 const GAINERS_LOSERS_URL = `${BASE_URL}/gainersLosers`;
 
-const MIN_GAP_MS = 350;
+const MIN_GAP_MS = 1100;
+const RATE_LIMIT_BACKOFF_MS = 1500;
 let lastCallAt = 0;
 
 async function rateLimit() {
@@ -41,6 +42,10 @@ async function apiCall(method, url, body = null, retried = false) {
     } catch (err) {
         if (!retried && err.response?.status === 401) {
             await refreshSession();
+            return apiCall(method, url, body, true);
+        }
+        if (!retried && (err.response?.status === 403 || err.response?.status === 429)) {
+            await new Promise(r => setTimeout(r, RATE_LIMIT_BACKOFF_MS));
             return apiCall(method, url, body, true);
         }
         throw err;

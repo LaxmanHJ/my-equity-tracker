@@ -21,18 +21,54 @@ function buildTokenMap(rows) {
     const map = {};
     for (const row of rows) {
         if (row.exch_seg !== 'NSE') continue;
-        if (!row.symbol?.endsWith('-EQ')) continue;
-        const baseSymbol = row.symbol.replace(/-EQ$/, '');
-        map[baseSymbol] = {
-            token: String(row.token),
-            name: row.name,
-            symbol: row.symbol,
-            lotsize: row.lotsize,
-            tick_size: row.tick_size
-        };
+
+        // NSE-EQ cash equities, keyed by base symbol (e.g. "RELIANCE")
+        if (row.symbol?.endsWith('-EQ')) {
+            const baseSymbol = row.symbol.replace(/-EQ$/, '');
+            map[baseSymbol] = {
+                token: String(row.token),
+                name: row.name,
+                symbol: row.symbol,
+                exch_seg: row.exch_seg,
+                instrumenttype: 'EQ',
+                lotsize: row.lotsize,
+                tick_size: row.tick_size
+            };
+            continue;
+        }
+
+        // AMXIDX indices (Nifty 50, Bank Nifty, India VIX, etc.), keyed by `name`
+        // e.g. name "NIFTY" → token 99926000 (Nifty 50)
+        if (row.instrumenttype === 'AMXIDX' && row.name) {
+            const key = String(row.name).toUpperCase();
+            if (!map[key]) {
+                map[key] = {
+                    token: String(row.token),
+                    name: row.name,
+                    symbol: row.symbol,
+                    exch_seg: row.exch_seg,
+                    instrumenttype: 'AMXIDX',
+                    lotsize: row.lotsize,
+                    tick_size: row.tick_size
+                };
+            }
+        }
     }
     return map;
 }
+
+// Aliases for how the rest of the codebase refers to indices.
+// Keys are what callers pass (e.g. "^NSEI"); values are scrip-master keys.
+const SYMBOL_ALIASES = {
+    '^NSEI': 'NIFTY',
+    'NSEI': 'NIFTY',
+    'NIFTY 50': 'NIFTY',
+    'NIFTY50': 'NIFTY',
+    '^NSEBANK': 'BANKNIFTY',
+    'NIFTY BANK': 'BANKNIFTY',
+    'INDIA VIX': 'INDIA VIX',
+    'INDIAVIX': 'INDIA VIX'
+};
 
 export async function refreshScripMaster() {
     console.log('[scripMaster] Downloading scrip master JSON...');
@@ -68,12 +104,14 @@ export async function loadScripMaster(force = false) {
  */
 export async function getToken(symbol) {
     await loadScripMaster();
-    const base = symbol
+    const raw = String(symbol).trim();
+    const base = raw
         .replace(/\.(NS|BO|BSE)$/i, '')
         .replace(/-EQ$/i, '')
         .toUpperCase();
-    const entry = tokenMap[base];
-    if (!entry) throw new Error(`Symbol not found in scrip master: ${symbol} (base: ${base})`);
+    const aliased = SYMBOL_ALIASES[raw.toUpperCase()] || SYMBOL_ALIASES[base] || base;
+    const entry = tokenMap[aliased];
+    if (!entry) throw new Error(`Symbol not found in scrip master: ${symbol} (base: ${base}, aliased: ${aliased})`);
     return entry;
 }
 

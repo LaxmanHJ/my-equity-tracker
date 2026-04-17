@@ -356,6 +356,23 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_date ON oi_buildup(date)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_symbol ON oi_buildup(symbol)`);
 
+  // 15-min intraday candles from Angel One — primary consumer is intraday feature engineering
+  // ts stored as ISO-8601 with +05:30 offset exactly as Angel returns it
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS intraday_candles (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol  TEXT NOT NULL,
+      ts      TEXT NOT NULL,
+      open    REAL,
+      high    REAL,
+      low     REAL,
+      close   REAL,
+      volume  INTEGER,
+      UNIQUE(symbol, ts)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_candles(symbol, ts)`);
+
   console.log('Database initialized');
 }
 
@@ -995,6 +1012,59 @@ export async function getOIBuildupByDate(date) {
           FROM oi_buildup WHERE date = ? ORDER BY category, symbol`,
     args: [date]
   });
+  return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════
+// Intraday candles (15-min)
+// ═══════════════════════════════════════════════════════
+
+export async function saveIntradayCandles(symbol, bars) {
+  if (!bars || bars.length === 0) return 0;
+  const sql = `INSERT INTO intraday_candles (symbol, ts, open, high, low, close, volume)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(symbol, ts) DO UPDATE SET
+                 open = excluded.open, high = excluded.high, low = excluded.low,
+                 close = excluded.close, volume = excluded.volume`;
+  const BATCH = 500;
+  let written = 0;
+  for (let i = 0; i < bars.length; i += BATCH) {
+    const slice = bars.slice(i, i + BATCH).filter(b => b.date);
+    if (slice.length === 0) continue;
+    const stmts = slice.map(b => ({
+      sql,
+      args: [symbol, b.date, b.open ?? null, b.high ?? null, b.low ?? null, b.close ?? null, b.volume ?? null]
+    }));
+    await db.batch(stmts, 'write');
+    written += slice.length;
+  }
+  return written;
+}
+
+export async function getLatestIntradayTs(symbol) {
+  const result = await db.execute({
+    sql: `SELECT MAX(ts) AS max_ts FROM intraday_candles WHERE symbol = ?`,
+    args: [symbol]
+  });
+  return result.rows[0]?.max_ts || null;
+}
+
+export async function getIntradayTsRange(symbol) {
+  const result = await db.execute({
+    sql: `SELECT MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM intraday_candles WHERE symbol = ?`,
+    args: [symbol]
+  });
+  const row = result.rows[0];
+  return { min_ts: row?.min_ts || null, max_ts: row?.max_ts || null };
+}
+
+export async function getIntradayCandles(symbol, fromTs = null, toTs = null) {
+  let sql = `SELECT ts, open, high, low, close, volume FROM intraday_candles WHERE symbol = ?`;
+  const args = [symbol];
+  if (fromTs) { sql += ` AND ts >= ?`; args.push(fromTs); }
+  if (toTs)   { sql += ` AND ts <= ?`; args.push(toTs); }
+  sql += ` ORDER BY ts ASC`;
+  const result = await db.execute({ sql, args });
   return result.rows;
 }
 

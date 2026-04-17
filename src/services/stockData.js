@@ -210,11 +210,15 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
     }
 
     // Fetch new data: Angel One (primary) → AlphaVantage → RapidAPI
-    // Index symbols (^NSEI, ^BSESN) are equity-only on Angel; skip to existing chain.
+    // Angel supports NSE equities AND NSE indices (via AMXIDX scrip-master entries).
+    // NIFTY 50 (^NSEI) resolves through the alias map in angelScripMaster.js.
+    // Other indices (e.g. ^BSESN on BSE) stay on the RapidAPI chain.
     let newData = [];
     const isIndex = cleanSymbol.startsWith('^');
+    const ANGEL_INDEX_ALLOWLIST = new Set(['^NSEI']);
+    const angelEligible = !isIndex || ANGEL_INDEX_ALLOWLIST.has(cleanSymbol);
 
-    if (!isIndex) {
+    if (angelEligible) {
       try {
         const lookbackDays = PERIOD_TO_DAYS[rapidApiPeriod] ?? PERIOD_TO_DAYS[period] ?? 35;
         const from = dateNDaysAgo(lookbackDays);

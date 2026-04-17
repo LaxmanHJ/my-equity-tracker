@@ -194,7 +194,43 @@ Fixes applied:
 - **Live signal-quality tracker** is a **drift detector**. Given limited sample (even after backfill, ~20k OOS rows), it cannot cleanly separate a −0.02 IC from zero on short windows. Its role is to flag when live IC diverges from the historical baseline.
 - UI must lead with the historical diagnostic, not the live tracker. See `public/js/app.js` Signal Quality section.
 
+### 2026-04-18 Phase 4 — Intraday Features Added
+
+Angel One 15-min candles backfilled for 15 portfolio stocks + NIFTY 50 (~662k bars, ~2018+). Three new features engineered in `quant_engine/data/intraday_features.py`:
+
+- `overnight_gap`        — `(today_open − prev_close) / prev_close`
+- `intraday_range_ratio` — `(day_high − day_low) / ATR14`   (Wilder ATR from daily)
+- `last_hour_momentum`   — `(close_15:15 − close_14:15) / close_14:15`
+
+Feature count grew from 15 → 18. Also added `pcr_score` (Angel One PCR).
+
+**Pre-2018 handling**: `_align_intraday` returns `NaN` (not `0.0`) for dates before a symbol's intraday history starts. The existing `valid_mask = features.notna().all(axis=1)` drops those rows — prevents zero-filled impostor values from encoding a spurious pre/post-2018 regime split.
+
+**Training**: 24,030 samples (was 24,578 pre-filter — only ~550 rows dropped; the 2000-bar cap in `load_price_history` meant most data was already post-2018). Best hyperparams: `max_depth=12, min_samples_leaf=20`. CV accuracy 0.352 ± 0.021.
+
+**Diagnostic (2026-04-18 post-fix)**:
+
+| Horizon | ML cs_IC | Linear cs_IC | ML hit% | Linear hit% |
+|--------:|---------:|-------------:|--------:|------------:|
+| 1d  | +0.004 | +0.017 | 48.8 | 50.4 |
+| 5d  | +0.024 | +0.027 | 49.5 | 51.2 |
+| 10d | +0.012 | +0.044 | 50.0 | 52.1 |
+| 20d | +0.001 | +0.041 | 49.9 | 53.2 |
+
+**Intraday feature importances**: overnight_gap 5.3%, last_hour_momentum 4.9%, intraday_range_ratio 4.7% (14.8% combined — comparable to top individual features like vix_regime at 10.7%).
+
+**Takeaway**: intraday features recovered the small ML regression observed before the NaN fix but did NOT close the gap to the linear composite. **ML still underperforms the hand-tuned linear composite at every horizon on daily data.** Phase 4 was informative — the intraday features carry real predictive weight in the RF's split decisions — but the ML pipeline's core problem (no 20d edge vs linear) is unresolved.
+
+**Dead features confirmed**: `pcr_score` (1 bar in DB) and `fii_flow_score` (8 bars) both have importance 0.0000. They only dilute RF's `max_features="sqrt"` random selection.
+
+**Open follow-ups after Phase 4**:
+1. Remove dead features (`pcr_score`, `fii_flow_score`) from `FEATURE_COLS` until their source tables are populated
+2. Investigate why ML underperforms linear at 20d — try regression target (predict fwd_ret directly) instead of 3-class
+3. Consider meta-labeling (López de Prado Ch.3): use linear composite as primary direction model, train ML as secondary "should-we-take-this-trade?" model
+4. CPCV still pending
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML
 - [backtesting.md](backtesting.md) — ML signal validated in backtest
+- [intraday_features.md](intraday_features.md) — Phase 4 Angel One intraday features

@@ -36,6 +36,10 @@ FEATURE_COLS = [
     "delivery_score",
     "fii_flow_score",
     "fii_fo_score",
+    "pcr_score",
+    "overnight_gap",
+    "intraday_range_ratio",
+    "last_hour_momentum",
 ]
 
 _model_cache = None   # module-level cache so we only load from disk once
