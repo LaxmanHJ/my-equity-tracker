@@ -5,10 +5,15 @@
  * data; 10y+ returns empty). Chunked in 180-day windows to stay well under Angel's
  * 200-day cap per call.
  *
+ * The script always re-fetches the trailing `--refetch-days` days (default 3). This
+ * prevents a partial fill on the current/most-recent session from being treated as
+ * "done" — the DB UPSERT handles the duplicate writes idempotently.
+ *
  * Usage:
- *   node scripts/backfill_intraday.js              # all portfolio stocks + NIFTY, 8y
+ *   node scripts/backfill_intraday.js              # portfolio + NIFTY, 8y, refetch trailing 3d
  *   node scripts/backfill_intraday.js --years 2    # shorter window
  *   node scripts/backfill_intraday.js --only INFY,NIFTY 50
+ *   node scripts/backfill_intraday.js --refetch-days 5
  */
 import { fetchOHLC } from '../src/services/angelOneHistorical.js';
 import { saveIntradayCandles, getIntradayTsRange } from '../src/database/db.js';
@@ -21,6 +26,7 @@ const getArg = (flag) => {
 };
 const YEARS = Number(getArg('--years') || 8);
 const CHUNK_DAYS = Number(getArg('--chunk') || 180);
+const REFETCH_DAYS = Number(getArg('--refetch-days') ?? 3);
 const ONLY = getArg('--only')?.split(',').map(s => s.trim()).filter(Boolean);
 
 function daysAgo(n) {
@@ -50,17 +56,33 @@ function buildChunks(fromDate, toDate, chunkDays) {
 /**
  * Build the list of missing [from,to] windows given the requested range and
  * whatever is already in the DB. Covers three cases:
- *   - no existing rows                 → one window [fromDate, toDate]
- *   - existing rows inside the window  → up to two windows (older gap + newer gap)
- *   - existing rows fully cover it     → empty list (no-op)
+ *   - no existing rows                  → one window [fromDate, toDate]
+ *   - existing rows inside the window   → up to two windows (older gap + newer gap)
+ *   - existing rows fully cover it      → empty list (no-op)
+ *
+ * `refetchDays` forces re-fetch of the trailing N days even when the DB already
+ * has some data for that range. This prevents a mid-session partial fill from
+ * blocking a later full-day backfill (DB UPSERT makes the rewrite idempotent).
  */
-function computeMissingWindows(existingMin, existingMax, fromDate, toDate) {
+function computeMissingWindows(existingMin, existingMax, fromDate, toDate, refetchDays = 0) {
     if (!existingMin || !existingMax) return [{ from: fromDate, to: toDate }];
 
     const haveFrom = existingMin.slice(0, 10);
-    const haveTo   = existingMax.slice(0, 10);
-    const windows = [];
+    let haveTo    = existingMax.slice(0, 10);
 
+    // Pretend we only have data up to (toDate - refetchDays) so the trailing
+    // window is always considered missing and gets re-fetched.
+    if (refetchDays > 0) {
+        const refetchFrom = addDays(toDate, -refetchDays + 1);
+        if (haveTo >= refetchFrom) {
+            haveTo = addDays(refetchFrom, -1);
+            // Guard: haveTo may now precede haveFrom (thin DB); fall back to
+            // treating the whole requested range as missing.
+            if (haveTo < haveFrom) return [{ from: fromDate, to: toDate }];
+        }
+    }
+
+    const windows = [];
     if (fromDate < haveFrom) {
         windows.push({ from: fromDate, to: addDays(haveFrom, -1) });
     }
@@ -92,7 +114,7 @@ async function fetchAndSaveWindow(symbol, storageKey, window, chunks, label) {
 
 async function backfillSymbol(symbol, storageKey, fromDate, toDate) {
     const { min_ts, max_ts } = await getIntradayTsRange(storageKey);
-    const windows = computeMissingWindows(min_ts, max_ts, fromDate, toDate);
+    const windows = computeMissingWindows(min_ts, max_ts, fromDate, toDate, REFETCH_DAYS);
 
     if (windows.length === 0) {
         console.log(`[${storageKey}] already covers ${fromDate} → ${toDate} (db: ${min_ts?.slice(0,10)} → ${max_ts?.slice(0,10)})`);
