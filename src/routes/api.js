@@ -610,6 +610,26 @@ router.get('/signal-quality', async (req, res) => {
 });
 
 /**
+ * GET /api/signal-quality/series?horizon=20&track=linear&limit=500
+ * Chronological per-date Spearman IC for a (track, horizon) pair.
+ */
+router.get('/signal-quality/series', async (req, res) => {
+  try {
+    const params = new URLSearchParams({
+      horizon: req.query.horizon || 20,
+      track:   req.query.track   || 'linear',
+      limit:   req.query.limit   || 500,
+    });
+    const response = await fetch(`${QUANT_ENGINE_URL}/api/quant/signal-quality/series?${params}`);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('signal-quality series error:', error);
+    res.status(502).json({ error: 'Quant engine unavailable.' });
+  }
+});
+
+/**
  * GET /api/ml/diagnostic — walk-forward purged CV results (cached).
  * POST /api/ml/diagnostic — trigger a re-run in the background.
  * Both proxy to the Python engine so the dashboard can reach ML quality data.

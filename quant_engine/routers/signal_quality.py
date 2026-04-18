@@ -14,7 +14,7 @@ import math
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from scipy.stats import spearmanr
 
 from quant_engine.data.turso_client import connect
@@ -179,6 +179,37 @@ def _horizon_stats(df: pd.DataFrame, fwd_col: str, days: int) -> dict:
     })
 
 
+def _per_date_ic_series(
+    df: pd.DataFrame, score_col: str, fwd_col: str
+) -> tuple[list[str], list[float]]:
+    """Return chronological (dates, ics) for cross-sectional Spearman IC.
+
+    Rows with NaN score or forward return are dropped. Dates with fewer than
+    3 symbols contribute no point (cross-sectional rank correlation needs
+    at least 3). Both returned lists are the same length, sorted asc by date.
+
+    Exposed via GET /api/quant/signal-quality/series so the UI can chart
+    live IC over time and compare against the historical diagnostic baseline
+    (see wiki/concepts/factor_scoring.md → "IC — TRACKED").
+    """
+    settled = df.dropna(subset=[score_col, fwd_col])
+    if len(settled) < 10:
+        return [], []
+
+    per_dates: list[str] = []
+    ics: list[float] = []
+    # groupby sorts by key asc by default → chronological output
+    for date_key, grp in settled.groupby("signal_date"):
+        if len(grp) < 3:
+            continue
+        ic = _safe_spearmanr(grp[score_col], grp[fwd_col])
+        if np.isnan(ic):
+            continue
+        per_dates.append(str(date_key))
+        ics.append(round(float(ic), 4))
+    return per_dates, ics
+
+
 def _engine_horizons(df: pd.DataFrame, score_col: str, signal_col: str) -> list:
     """Compute horizon stats using a specific engine's score and signal columns."""
     df_eng = df.copy()
@@ -193,13 +224,7 @@ def _engine_horizons(df: pd.DataFrame, score_col: str, signal_col: str) -> list:
         if n_obs < 10:
             results.append(base)
             continue
-        ics = []
-        for _, grp in settled.groupby("signal_date"):
-            if len(grp) < 3:
-                continue
-            ic = _safe_spearmanr(grp[score_col], grp[fwd_col])
-            if not np.isnan(ic):
-                ics.append(float(ic))
+        _, ics = _per_date_ic_series(df_eng, score_col, fwd_col)
         if not ics:
             results.append(base)
             continue
@@ -272,4 +297,42 @@ def get_signal_quality(limit: int = 500):
         "linear":         {"summary": _summary(linear_horizons, "fwd_ret_20d", linear_eligible),
                            "horizons": _clean_records(linear_horizons)},
         "recent_signals": _clean_records(recent.to_dict(orient="records")),
+    }
+
+
+_VALID_HORIZONS = {h["days"] for h in _HORIZONS}
+_TRACK_COLS = {
+    "ml":     "signed_confidence",
+    "linear": "signed_linear",
+}
+
+
+@router.get("/signal-quality/series")
+def get_signal_quality_series(horizon: int = 20, track: str = "linear", limit: int = 500):
+    """Chronological per-date Spearman IC for one (track, horizon).
+
+    Response shape is chart-ready parallel arrays; keeps the main
+    /signal-quality payload lean (dashboard fetches it on every panel load).
+    """
+    if horizon not in _VALID_HORIZONS:
+        raise HTTPException(400, f"horizon must be one of {sorted(_VALID_HORIZONS)}")
+    if track not in _TRACK_COLS:
+        raise HTTPException(400, f"track must be one of {sorted(_TRACK_COLS)}")
+
+    try:
+        df = _fetch_signals(limit)
+    except Exception as exc:
+        logger.error("signal_quality series DB error: %s", exc)
+        raise HTTPException(502, f"DB error: {exc}") from exc
+
+    score_col = _TRACK_COLS[track]
+    fwd_col = f"fwd_ret_{horizon}d"
+    dates, ics = _per_date_ic_series(df, score_col, fwd_col)
+
+    return {
+        "horizon": horizon,
+        "track": track,
+        "n_dates": len(dates),
+        "dates": dates,
+        "ics": ics,
     }

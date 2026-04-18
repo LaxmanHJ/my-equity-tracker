@@ -72,7 +72,13 @@ cd quant_engine && python ml/trainer.py
 
 **Historical diagnostic** (`ml/diagnostic.py`): walk-forward purged CV over 10 years — thousands of OOS observations per horizon. Complementary to live tracking: use the historical diagnostic to measure model quality, use live tracking to detect drift from the historical baseline.
 
-**Gap**: No per-feature IC tracking (we only measure composite model output), no DSR calculation.
+**Per-date IC series (2026-04-18)**: both pipelines now retain the chronological per-date Spearman IC, not just aggregates.
+- Historical: `data/ml_diagnostic.json` → `aggregate_pooled.{ml,linear}.{Nd}.{per_date_dates, per_date_ics}`. Fold-level entries stay compact (aggregate is the single source for time-series analysis).
+- Live: `GET /api/quant/signal-quality/series?horizon={1,5,10,20}&track={ml,linear}` (Node proxy `/api/signal-quality/series`).
+
+Why: enables regime-conditional IC analysis, proper two-sample drift tests against the live series, autocorrelation-corrected ICIR, and Deflated Sharpe / PBO work that requires higher-moment or split-series inputs (see `wiki/concepts/factor_scoring.md` → "Per-date IC series" for the full rationale).
+
+**Gap**: No per-feature IC tracking (we only measure composite model output), no DSR calculation — DSR is now unblocked by the new series.
 From López de Prado Ch.14: use Deflated Sharpe Ratio to avoid overfitting when multiple hyperparameter combinations are tested.
 
 ## Sample Weights

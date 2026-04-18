@@ -345,6 +345,7 @@ def _horizon_metrics(
     signed_score: np.ndarray,
     fwd_ret: np.ndarray,
     dates: pd.DatetimeIndex,
+    include_series: bool = False,
 ) -> dict:
     """
     Compute IC metrics for one horizon on one fold (or pooled across folds).
@@ -358,6 +359,16 @@ def _horizon_metrics(
       hit_rate         — % of signed-score directions matching fwd_ret sign
       n_obs            — number of non-NaN test observations
       n_dates          — number of distinct dates contributing to cs-IC
+
+    When include_series=True (pooled aggregate only — skipped per-fold to
+    keep ml_diagnostic.json lean), also returns:
+      per_date_dates   — parallel list of ISO date strings (sorted asc)
+      per_date_ics     — parallel list of cross-sectional Spearman ICs
+
+    The series unlocks regime-conditional IC analysis, structural-break /
+    drift detection against live, honest ICIR autocorrelation checks, and
+    Deflated Sharpe (Lopez de Prado AFML Ch.14). See wiki/concepts/
+    factor_scoring.md → "IC — TRACKED".
     """
     signed_score = np.asarray(signed_score, dtype=float)
     fwd_ret = np.asarray(fwd_ret, dtype=float)
@@ -375,6 +386,9 @@ def _horizon_metrics(
         "n_obs": n_obs,
         "n_dates": 0,
     }
+    if include_series:
+        base["per_date_dates"] = []
+        base["per_date_ics"] = []
     if n_obs < MIN_TEST_OBS:
         return base
 
@@ -386,15 +400,18 @@ def _horizon_metrics(
     pearson_ic = _safe_pearsonr(s, f)
     spearman_ic = _safe_spearmanr(s, f)
 
-    # Cross-sectional Spearman IC per date, averaged
+    # Cross-sectional Spearman IC per date, averaged.
+    # groupby sorts by key asc by default → per_date_* arrays are chronological.
+    per_dates: list[str] = []
     ics: list[float] = []
     df_grp = pd.DataFrame({"score": s, "fwd": f, "date": ds})
-    for _, grp in df_grp.groupby("date"):
+    for date_key, grp in df_grp.groupby("date"):
         if len(grp) < 3:
             continue
         ic = _safe_spearmanr(grp["score"], grp["fwd"])
         if not np.isnan(ic):
             ics.append(float(ic))
+            per_dates.append(str(pd.Timestamp(date_key).date()))
 
     mean_cs_ic = float(np.mean(ics)) if ics else None
     std_cs_ic = float(np.std(ics)) if ics else None
@@ -413,7 +430,7 @@ def _horizon_metrics(
     else:
         hit_rate = None
 
-    return {
+    out = {
         "mean_cs_ic": round(mean_cs_ic, 4) if mean_cs_ic is not None else None,
         "std_cs_ic": round(std_cs_ic, 4) if std_cs_ic is not None else None,
         "icir": round(icir, 3) if icir is not None else None,
@@ -423,6 +440,10 @@ def _horizon_metrics(
         "n_obs": n_obs,
         "n_dates": len(ics),
     }
+    if include_series:
+        out["per_date_dates"] = per_dates
+        out["per_date_ics"] = [round(v, 4) for v in ics]
+    return out
 
 
 # ── Main diagnostic run ──────────────────────────────────────────────────────
@@ -546,6 +567,7 @@ def run_diagnostic() -> dict:
                 np.array(all_scores[track][h]),
                 np.array(all_fwds[track][h]),
                 pd.DatetimeIndex(all_dates[track][h]),
+                include_series=True,
             )
 
     # Mean-of-fold-means (alternative aggregate, useful for fold variance view)
@@ -596,7 +618,12 @@ def run_diagnostic() -> dict:
             "= P(BUY)-P(SELL); (2) Linear — 7-factor Sicilian composite at "
             "production FACTOR_WEIGHTS. Cross-sectional IC is Spearman per "
             "date averaged across dates (Grinold-Kahn). Unlike trainer.py's "
-            "CV, this version purges labels that leak into the test fold."
+            "CV, this version purges labels that leak into the test fold. "
+            "aggregate_pooled.{track}.{Nd} additionally carries per_date_dates "
+            "and per_date_ics — the chronological Spearman-IC series used for "
+            "regime-conditional analysis, drift detection against live, and "
+            "higher-moment / Deflated-Sharpe work. Fold entries omit these "
+            "to keep the JSON compact."
         ),
     }
 

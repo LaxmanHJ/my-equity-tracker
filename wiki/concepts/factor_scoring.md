@@ -77,7 +77,20 @@ Target composite IC: 0.03–0.08 at the target horizon (any above 0.10 is except
 
 See `wiki/concepts/ml_pipeline.md` for the full diagnostic table and the context around the weekly→daily cadence flip.
 
-**Still open**: per-factor IC tracking (we currently measure composite-level IC, not factor-by-factor).
+### Per-date IC series (2026-04-18) — why we persist it
+
+Aggregate `mean_ic` / `icir` summarise a distribution. The distribution itself is load-bearing for four things aggregates can't answer:
+
+1. **Regime-conditional IC.** `RegimeAdaptiveStrategy` switches trend↔mean-reversion on a macro regime score (VIX 35% + Nifty trend 25% + Markov 25% + FII 15%). Validating that switch requires IC conditioned on the regime score *at each signal date* — impossible without the date-indexed series.
+2. **Structural-break / drift detection.** The live "drift detector" card can move from a single-point Δ-vs-baseline to a two-sample test (KS, or z on the paired distribution) once the full baseline series is available.
+3. **Honest ICIR.** Grinold-Kahn ICIR assumes IID per-date IC. Common risk factors induce autocorrelation, so effective N is smaller and ICIR is inflated. Only the series lets us check `acf(per_date_ics)` and apply a Newey-West correction.
+4. **Deflated Sharpe / PBO.** Lopez de Prado AFML Ch.14. DSR needs skew and kurtosis of the IC series; PBO/CSCV need the full series to split. Can't deflate from `{mean, std}` alone.
+
+**Where the data lives now:**
+- Historical: `data/ml_diagnostic.json` → `aggregate_pooled.{ml,linear}.{1d,5d,10d,20d}.{per_date_dates, per_date_ics}` (aggregate only; fold entries stay compact).
+- Live: `GET /api/quant/signal-quality/series?horizon={1,5,10,20}&track={ml,linear}` — Node proxy at `/api/signal-quality/series`.
+
+**Still open**: per-factor IC tracking (we currently measure composite-level IC, not factor-by-factor); regime-conditioned IC analysis using the new series; DSR computation across the shipped strategies.
 
 ## ML Overlay
 
