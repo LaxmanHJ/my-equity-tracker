@@ -8,6 +8,9 @@ node_modules/
 data/*.db
 data/*.db-*
 
+# Secrets — Angel One session JWTs
+data/angel_session.json
+
 # OS
 .DS_Store
 
