@@ -24,7 +24,9 @@ from quant_engine.data.market_regime_loader import (
     build_markov_score_series,
     load_fii_flow_score_today,
     load_fii_fo_score_today,
+    load_pcr_score_today,
 )
+from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.factors import (
     momentum,
     bollinger,
@@ -45,11 +47,13 @@ def _build_ml_sub_scores(
     factors: dict,
 ) -> dict:
     """
-    Build the 14-feature dict that predictor.predict() expects, for the latest bar.
+    Build the 18-feature dict that predictor.predict() expects, for the latest bar.
 
     7 features come directly from already-computed factor modules.
     `trend_ma` is computed inline (no standalone factor module exists for it).
-    The remaining 6 are macro/regime scalars loaded from their respective tables.
+    7 more are macro/regime scalars (VIX, Nifty trend, Markov, delivery, sector,
+    FII flow/F&O, PCR). Final 3 are intraday-derived scalars (overnight_gap,
+    intraday_range_ratio, last_hour_momentum) pulled from build_intraday_features.
 
     Args:
         symbol:       NSE ticker.
@@ -139,6 +143,21 @@ def _build_ml_sub_scores(
     # ── FII flows scalars ────────────────────────────────────────────────────
     sub["fii_flow_score"] = load_fii_flow_score_today()
     sub["fii_fo_score"]   = load_fii_fo_score_today()
+
+    # ── PCR sentiment scalar ─────────────────────────────────────────────────
+    sub["pcr_score"] = load_pcr_score_today()
+
+    # ── Intraday-derived scalars (latest available bar from 15-min candles) ──
+    intraday_feats = build_intraday_features(symbol)
+    if not intraday_feats.empty:
+        last = intraday_feats.iloc[-1]
+        sub["overnight_gap"]        = float(last.get("overnight_gap", 0.0))
+        sub["intraday_range_ratio"] = float(last.get("intraday_range_ratio", 0.0))
+        sub["last_hour_momentum"]   = float(last.get("last_hour_momentum", 0.0))
+    else:
+        sub["overnight_gap"]        = 0.0
+        sub["intraday_range_ratio"] = 0.0
+        sub["last_hour_momentum"]   = 0.0
 
     return sub
 

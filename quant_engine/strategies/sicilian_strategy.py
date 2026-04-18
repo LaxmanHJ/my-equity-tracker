@@ -8,7 +8,7 @@ signals.
 Signal generation follows a two-path priority order:
 
   1. ML path  — if a trained Random Forest model is available and a symbol is
-     provided, the model runs over every bar using the full 15-feature matrix
+     provided, the model runs over every bar using the full 18-feature matrix
      (the same one built by ml/trainer.py).  This is the preferred path.
 
   2. Linear fallback — if no model exists or symbol is unknown, a fixed weighted
@@ -188,10 +188,12 @@ class SicilianStrategy(BaseStrategy):
             load_vix_series, vix_to_score,
             build_markov_score_series,
             load_fii_flow_series, load_fii_fo_series, _flow_to_score,
+            load_pcr_series, pcr_to_score,
         )
         from quant_engine.data.delivery_loader import load_delivery_series
         from quant_engine.data.sector_indices_loader import load_sector_series
         from quant_engine.data.loader import load_industry_map
+        from quant_engine.data.intraday_features import build_intraday_features
         from quant_engine.config import INDUSTRY_TO_NSE_INDEX
 
         close  = df["close"]
@@ -202,6 +204,13 @@ class SicilianStrategy(BaseStrategy):
             if series is None or (hasattr(series, "empty") and series.empty):
                 return pd.Series(0.0, index=df.index)
             return series.reindex(df.index, method="ffill").fillna(0.0)
+
+        def _align_intraday(feats: pd.DataFrame, col: str) -> pd.Series:
+            # Keep NaN so _ml_signals' valid mask drops pre-intraday-coverage bars,
+            # matching trainer behavior (prevents pre-2018 rows from training on zeros).
+            if feats is None or feats.empty or col not in feats.columns:
+                return pd.Series(np.nan, index=df.index)
+            return feats[col].reindex(df.index)
 
         # ── Technical sub-scores ─────────────────────────────────────────────
         rsi_s  = self._rolling_rsi_score(close)
@@ -266,22 +275,35 @@ class SicilianStrategy(BaseStrategy):
             _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
         )
 
+        # ── PCR sentiment (put-call ratio) ──────────────────────────────────
+        raw_pcr   = load_pcr_series(limit=2000)
+        pcr_score = (
+            pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
+        )
+
+        # ── Intraday-derived features (15-min candles, Angel One; ~2018+) ───
+        intraday_feats = build_intraday_features(symbol)
+
         return pd.DataFrame(
             {
-                "rsi":               rsi_s,
-                "macd":              macd_s,
-                "trend_ma":          tma_s,
-                "bollinger":         bol_s,
-                "volume":            vol_s,
-                "volatility":        vola_s,
-                "relative_strength": rs_s,
-                "sector_rotation":   _align(sector_series),
-                "vix_regime":        _align(vix_score),
-                "nifty_trend":       _align(nifty_trend),
-                "markov_regime":     _align(markov_score),
-                "delivery_score":    _align(delivery_score),
-                "fii_flow_score":    _align(fii_flow_score),
-                "fii_fo_score":      _align(fii_fo_score),
+                "rsi":                   rsi_s,
+                "macd":                  macd_s,
+                "trend_ma":              tma_s,
+                "bollinger":             bol_s,
+                "volume":                vol_s,
+                "volatility":            vola_s,
+                "relative_strength":     rs_s,
+                "sector_rotation":       _align(sector_series),
+                "vix_regime":            _align(vix_score),
+                "nifty_trend":           _align(nifty_trend),
+                "markov_regime":         _align(markov_score),
+                "delivery_score":        _align(delivery_score),
+                "fii_flow_score":        _align(fii_flow_score),
+                "fii_fo_score":          _align(fii_fo_score),
+                "pcr_score":             _align(pcr_score),
+                "overnight_gap":         _align_intraday(intraday_feats, "overnight_gap"),
+                "intraday_range_ratio":  _align_intraday(intraday_feats, "intraday_range_ratio"),
+                "last_hour_momentum":    _align_intraday(intraday_feats, "last_hour_momentum"),
             },
             index=df.index,
         )
