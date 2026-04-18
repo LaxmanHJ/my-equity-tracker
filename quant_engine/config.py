@@ -4,11 +4,10 @@ Quant Engine Configuration
 import os
 from pathlib import Path
 
-# The Node.js app's SQLite database path (kept as local fallback)
 PROJECT_ROOT = Path(__file__).parent.parent
-DB_PATH = PROJECT_ROOT / "data" / "portfolio.db"
 
-# Turso cloud database credentials (loaded from .env)
+# Turso cloud database credentials (loaded from .env) — single source of truth.
+# The legacy local SQLite (data/portfolio.db) was retired on 2026-04-18.
 TURSO_URL = os.getenv("TURSO_DATABASE_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "")
 

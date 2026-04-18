@@ -46,11 +46,11 @@ curl http://localhost:5001/health
 ## Architecture
 
 **Dual-engine design:**
-- **Node.js/Express** (port 3000) — web server, API gateway, portfolio management, SQLite writes
+- **Node.js/Express** (port 3000) — web server, API gateway, portfolio management, Turso writes
 - **Python/FastAPI** (port 5001) — heavy quant computation (multi-factor scoring, backtesting, ML)
-- **SQLite** (`data/portfolio.db`, WAL mode) — single source of truth; Node writes, Python reads
+- **Turso (libSQL cloud)** — single source of truth; Node writes, Python reads. Access via `@libsql/client` (Node) or `quant_engine/data/turso_client.py` (Python). Credentials in `.env` (`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`). Legacy `data/portfolio.db` was retired 2026-04-18.
 
-Node proxies quant/ML/backtest requests to Python over HTTP. The Python engine never makes external API calls — it only reads from SQLite.
+Node proxies quant/ML/backtest requests to Python over HTTP. The Python engine never makes external API calls — it only reads from Turso.
 
 ### Node.js backend (`src/`)
 - `server.js` — Express app entry point

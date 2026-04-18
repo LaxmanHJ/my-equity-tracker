@@ -67,7 +67,7 @@ Foreign Institutional Investor net buying/selling in NSE. Positive FII → bulli
 
 ## Data Storage
 
-**Table**: `market_regime` in `data/portfolio.db`
+**Table**: `market_regime` in Turso (cloud libSQL). Access via `quant_engine/data/turso_client.connect()` on the Python side or `@libsql/client` on the Node side.
 
 | Column | Description |
 |--------|-------------|
