@@ -6,8 +6,6 @@
  */
 
 import yahooFinance from 'yahoo-finance2';
-import { getRapidApiChartData } from './rapidApiService.js';
-import { getAlphaVantageChartData } from './alphaVantageService.js';
 import { fetchDailyOHLC as getAngelOneDailyOHLC } from './angelOneHistorical.js';
 import { getPriceHistory, getLatestPriceDate, savePriceHistory, upsertFiiDii, saveBulkDeals, savePCR, saveOIBuildup } from '../database/db.js';
 import { fetchPCR, fetchAllOIBuildup } from './angelOneMarketData.js';
@@ -124,18 +122,8 @@ export async function getAllQuotes(forceRefresh = false) {
 }
 
 /**
- * Get historical data for a symbol intelligently using local cache and RapidAPI
+ * Get historical data for a symbol using Angel One (single source) + local cache.
  */
-// Map index/benchmark symbols to their RapidAPI-compatible names.
-// RapidAPI uses human-readable names for indices (e.g., 'NIFTY 50'), not ticker symbols.
-const INDEX_SYMBOL_MAP = {
-  '^NSEI': 'NIFTY',
-  'NSEI': 'NIFTY',
-  '^NSEBANK': 'NIFTY BANK',
-  '^BSESN': 'BSE SENSEX',
-  'BSESN': 'BSE SENSEX',
-};
-
 // Convert our period codes to a lookback window in days for Angel One.
 const PERIOD_TO_DAYS = {
   '1m': 35, '3m': 100, '6m': 190, '1y': 380,
@@ -173,14 +161,12 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
 
     // For DB storage/lookup, use the clean symbol as-is (e.g., '^NSEI')
     const dbSymbol = cleanSymbol;
-    // For RapidAPI calls, map index symbols to their API-friendly names
-    const apiSymbol = INDEX_SYMBOL_MAP[cleanSymbol] || cleanSymbol;
 
     // 1. Check database for existing data
     const localData = forceRefresh ? [] : await getPriceHistory(dbSymbol);
     const latestDateStr = forceRefresh ? null : await getLatestPriceDate(dbSymbol);
 
-    // Determine what we need to fetch
+    // Determine the Angel One lookback period
     let rapidApiPeriod = period;
 
     if (latestDateStr && !forceRefresh) {
@@ -209,16 +195,21 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
       if (period === '10y') rapidApiPeriod = '10yr';
     }
 
-    // Fetch new data: Angel One (primary) → AlphaVantage → RapidAPI
-    // Angel supports NSE equities AND NSE indices (via AMXIDX scrip-master entries).
-    // NIFTY 50 (^NSEI) resolves through the alias map in angelScripMaster.js.
-    // Other indices (e.g. ^BSESN on BSE) stay on the RapidAPI chain.
+    // Angel One is the single source of historical OHLCV.
+    // On auth failure the Angel client invalidates its session and re-authenticates
+    // (see angelOneHistorical.js::callCandle). No fallback to AlphaVantage/RapidAPI:
+    // flat-bar synthetic OHLC from RapidAPI previously polluted the cache, and AV's
+    // rate limits caused inconsistent coverage.
     let newData = [];
     const isIndex = cleanSymbol.startsWith('^');
-    const ANGEL_INDEX_ALLOWLIST = new Set(['^NSEI']);
+    // Angel One supports NSE indices via AMXIDX and BSE SENSEX via exch_seg=BSE.
+    // The scrip master resolves these through SYMBOL_ALIASES in angelScripMaster.js.
+    const ANGEL_INDEX_ALLOWLIST = new Set(['^NSEI', '^BSESN']);
     const angelEligible = !isIndex || ANGEL_INDEX_ALLOWLIST.has(cleanSymbol);
 
-    if (angelEligible) {
+    if (!angelEligible) {
+      console.warn(`[AngelOne] ⚠️  ${dbSymbol}: not in Angel allowlist (index not supported); skipping fetch`);
+    } else {
       try {
         const lookbackDays = PERIOD_TO_DAYS[rapidApiPeriod] ?? PERIOD_TO_DAYS[period] ?? 35;
         const from = dateNDaysAgo(lookbackDays);
@@ -227,52 +218,7 @@ export async function getHistoricalData(symbol, period = '1y', forceRefresh = fa
         newData = normalizeAngelCandles(angelRows);
         console.log(`[AngelOne] ✅ ${dbSymbol}: ${newData.length} records (real OHLCV)`);
       } catch (angelErr) {
-        console.warn(`[AngelOne] ❌ ${dbSymbol}: ${angelErr.message}`);
-      }
-    }
-
-    if (!isIndex && newData.length === 0) {
-      try {
-        newData = await getAlphaVantageChartData(cleanSymbol);
-        console.log(`[AlphaVantage] ✅ ${dbSymbol}: ${newData.length} records (fallback)`);
-      } catch (avErr) {
-        console.warn(`[AlphaVantage] ❌ ${dbSymbol}: ${avErr.message}`);
-      }
-    }
-
-    // Fall back to RapidAPI if Alpha Vantage failed, returned no data, or is stale
-    const avLatestDate = newData.length > 0 ? newData[newData.length - 1].date : null;
-    const todayStr = new Date().toISOString().split('T')[0];
-    const avIsStale = avLatestDate && (() => {
-      const diffMs = new Date(todayStr) - new Date(avLatestDate);
-      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      return diffDays > 1;
-    })();
-
-    if (newData.length === 0 || avIsStale) {
-      try {
-        const rapidData = await getRapidApiChartData(apiSymbol, rapidApiPeriod);
-        // RapidAPI returns close-only data; open/high/low are synthetic (flat bars)
-        const flatBars = rapidData.filter(d => d.open === d.high && d.high === d.low && d.low === d.close).length;
-        if (flatBars === rapidData.length && rapidData.length > 0) {
-          console.warn(`[RapidAPI] ⚠️  ${dbSymbol}: ${rapidData.length} records — ALL FLAT BARS (synthetic OHLC)`);
-        } else {
-          console.log(`[RapidAPI] ✅ ${dbSymbol}: ${rapidData.length} records${isIndex ? '' : ' (fallback)'}`);
-        }
-
-        if (avIsStale && newData.length > 0 && rapidData.length > 0) {
-          // Merge: keep AV's real OHLCV for dates it covers, add RapidAPI's newer bars
-          const avDates = new Set(newData.map(d => d.date));
-          const freshFromRapid = rapidData.filter(d => !avDates.has(d.date));
-          console.log(`[Merge] ${dbSymbol}: ${newData.length} AV bars + ${freshFromRapid.length} new RapidAPI bars`);
-          newData = [...newData, ...freshFromRapid];
-        } else {
-          newData = rapidData;
-        }
-      } catch (rapidErr) {
-        console.error(`[RapidAPI] ❌ ${dbSymbol}: ${rapidErr.message}`);
-        if (!avIsStale) newData = [];
-        // If AV was stale but had data, keep it — better than nothing
+        console.error(`[AngelOne] ❌ ${dbSymbol}: ${angelErr.message}`);
       }
     }
 

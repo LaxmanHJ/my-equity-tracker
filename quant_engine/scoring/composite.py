@@ -11,22 +11,13 @@ Signal priority:
 import logging
 from typing import Optional, List
 
-import numpy as np
 import pandas as pd
 
-from quant_engine.config import FACTOR_WEIGHTS, LONG_THRESHOLD, SHORT_THRESHOLD, INDUSTRY_TO_NSE_INDEX
+from quant_engine.config import LONG_THRESHOLD, SHORT_THRESHOLD
 from quant_engine.scoring.ic_weights import get_active_weights
-from quant_engine.data.loader import load_price_history, load_all_symbols, load_benchmark, load_industry_map
-from quant_engine.data.delivery_loader import load_circuit_status, load_delivery_series
-from quant_engine.data.sector_indices_loader import load_sector_series
-from quant_engine.data.market_regime_loader import (
-    load_vix_score_today,
-    build_markov_score_series,
-    load_fii_flow_score_today,
-    load_fii_fo_score_today,
-    load_pcr_score_today,
-)
-from quant_engine.data.intraday_features import build_intraday_features
+from quant_engine.data.loader import load_price_history, load_all_symbols, load_benchmark
+from quant_engine.data.delivery_loader import load_circuit_status
+from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 from quant_engine.factors import (
     momentum,
     bollinger,
@@ -44,122 +35,30 @@ def _build_ml_sub_scores(
     symbol: str,
     df: pd.DataFrame,
     benchmark_df: pd.DataFrame,
-    factors: dict,
-) -> dict:
+) -> Optional[dict]:
     """
-    Build the 18-feature dict that predictor.predict() expects, for the latest bar.
+    Build the 18-feature dict for predictor.predict() on the latest bar.
 
-    7 features come directly from already-computed factor modules.
-    `trend_ma` is computed inline (no standalone factor module exists for it).
-    7 more are macro/regime scalars (VIX, Nifty trend, Markov, delivery, sector,
-    FII flow/F&O, PCR). Final 3 are intraday-derived scalars (overnight_gap,
-    intraday_range_ratio, last_hour_momentum) pulled from build_intraday_features.
+    Delegates to SicilianStrategy._build_ml_features — the same builder the
+    backtest uses — then returns the last row as a dict. This guarantees that
+    the ML features behind today's live signal are computed identically to
+    the features driving the backtest, so backtest confidence translates
+    directly into live-trading confidence.
 
-    Args:
-        symbol:       NSE ticker.
-        df:           Price history DataFrame (≥50 rows recommended).
-        benchmark_df: Benchmark (NIFTY) OHLCV DataFrame.
-        factors:      Already-computed factor dict from score_single_stock().
-
-    Returns:
-        dict with one float per FEATURE_COL key.
+    Returns None when features are missing (empty frame) or the latest bar
+    has any NaN feature — matching trainer/backtest which drop such rows.
+    Caller falls back to the linear signal in that case.
     """
-    # ── Technical scores (directly from factor modules) ──────────────────────
-    sub = {
-        "rsi":               factors["rsi"]["score"],
-        "macd":              factors["macd"]["score"],
-        "bollinger":         factors["bollinger"]["score"],
-        "volume":            factors["volume"]["score"],
-        "volatility":        factors["volatility"]["score"],
-        "relative_strength": factors["relative_strength"]["score"],
-    }
-
-    # ── trend_ma — price vs SMA20/50 blend (mirrors trainer._rolling_trend_score) ──
-    close  = df["close"]
-    sma20  = close.rolling(20).mean()
-    sma50  = close.rolling(50).mean()
-    last   = close.iloc[-1]
-    s20    = sma20.iloc[-1]
-    s50    = sma50.iloc[-1]
-    tma    = 0.0
-    tma   += 0.25 if (not np.isnan(s20) and last > s20) else -0.25
-    tma   += 0.25 if (not np.isnan(s50) and last > s50) else -0.25
-    tma   += 0.50 if (not np.isnan(s20) and not np.isnan(s50) and s20 > s50) else -0.50
-    sub["trend_ma"] = float(np.clip(tma, -1.0, 1.0))
-
-    # ── VIX regime scalar ────────────────────────────────────────────────────
-    vix_score = load_vix_score_today()
-    sub["vix_regime"] = float(vix_score) if vix_score is not None else 0.0
-
-    # ── NIFTY trend scalar (price vs SMA50 / SMA200) ─────────────────────────
-    if not benchmark_df.empty and "close" in benchmark_df.columns:
-        bc     = benchmark_df["close"]
-        bsma50  = bc.rolling(50, min_periods=30).mean()
-        bsma200 = bc.rolling(200, min_periods=100).mean()
-        vs50    = ((bc - bsma50)  / bsma50.replace(0, float("nan"))  * 10).clip(-1.0, 1.0)
-        vs200   = ((bc - bsma200) / bsma200.replace(0, float("nan")) * 10).clip(-1.0, 1.0)
-        nifty_trend_series = (0.5 * vs50 + 0.5 * vs200).fillna(0.0)
-        sub["nifty_trend"] = float(nifty_trend_series.iloc[-1])
-    else:
-        sub["nifty_trend"] = 0.0
-
-    # ── Markov regime scalar ─────────────────────────────────────────────────
-    if not benchmark_df.empty:
-        markov_series = build_markov_score_series(benchmark_df)
-        sub["markov_regime"] = float(markov_series.iloc[-1]) if not markov_series.empty else 0.0
-    else:
-        sub["markov_regime"] = 0.0
-
-    # ── Delivery score scalar ────────────────────────────────────────────────
-    delivery_df = load_delivery_series(symbol, limit=200)
-    if not delivery_df.empty and "delivery_pct" in delivery_df.columns:
-        dpct      = delivery_df["delivery_pct"]
-        roll_mean = dpct.rolling(60, min_periods=10).mean()
-        roll_std  = dpct.rolling(60, min_periods=10).std().replace(0, 1)
-        last_dpct = float(dpct.iloc[-1])
-        rm        = float(roll_mean.iloc[-1]) if not np.isnan(roll_mean.iloc[-1]) else last_dpct
-        rs_       = float(roll_std.iloc[-1])  if not np.isnan(roll_std.iloc[-1])  else 1.0
-        sub["delivery_score"] = float(np.clip((last_dpct - rm) / rs_ / 3, -1.0, 1.0))
-    else:
-        sub["delivery_score"] = 0.0
-
-    # ── Sector rotation scalar ───────────────────────────────────────────────
-    industry_map = load_industry_map()
-    industry     = industry_map.get(symbol)
-    nse_index    = INDUSTRY_TO_NSE_INDEX.get(industry, "Nifty 500") if industry else "Nifty 500"
-    idx_close    = load_sector_series(nse_index, limit=60)
-    nifty_close  = load_sector_series("Nifty 50",  limit=60)
-    if not idx_close.empty and len(idx_close) >= 20:
-        sector_20d = float(idx_close.pct_change(20).iloc[-1])
-        if not nifty_close.empty and len(nifty_close) >= 20:
-            bench_20d = float(nifty_close.pct_change(20).iloc[-1])
-            excess    = sector_20d - bench_20d
-        else:
-            excess = sector_20d
-        sub["sector_rotation"] = float(np.clip(excess / 0.20, -1.0, 1.0))
-    else:
-        sub["sector_rotation"] = 0.0
-
-    # ── FII flows scalars ────────────────────────────────────────────────────
-    sub["fii_flow_score"] = load_fii_flow_score_today()
-    sub["fii_fo_score"]   = load_fii_fo_score_today()
-
-    # ── PCR sentiment scalar ─────────────────────────────────────────────────
-    sub["pcr_score"] = load_pcr_score_today()
-
-    # ── Intraday-derived scalars (latest available bar from 15-min candles) ──
-    intraday_feats = build_intraday_features(symbol)
-    if not intraday_feats.empty:
-        last = intraday_feats.iloc[-1]
-        sub["overnight_gap"]        = float(last.get("overnight_gap", 0.0))
-        sub["intraday_range_ratio"] = float(last.get("intraday_range_ratio", 0.0))
-        sub["last_hour_momentum"]   = float(last.get("last_hour_momentum", 0.0))
-    else:
-        sub["overnight_gap"]        = 0.0
-        sub["intraday_range_ratio"] = 0.0
-        sub["last_hour_momentum"]   = 0.0
-
-    return sub
+    strat = SicilianStrategy("_live")
+    feats = strat._build_ml_features(df, benchmark_df, symbol)
+    if feats.empty:
+        return None
+    last_row = feats.iloc[-1]
+    if last_row.isna().any():
+        missing = last_row[last_row.isna()].index.tolist()
+        logger.info("ML skipped for %s: NaN features on latest bar (%s)", symbol, missing)
+        return None
+    return last_row.to_dict()
 
 
 def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict]:
@@ -205,23 +104,37 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
     ml_result  = None
     ml_signal  = None
 
+    ml_unavailable = False  # True means model exists but features incomplete on this bar
     try:
         from quant_engine.ml import predictor as _predictor
         if _predictor.is_model_available():
-            sub_scores = _build_ml_sub_scores(symbol, df, benchmark_df, factors)
-            ml_result  = _predictor.predict(sub_scores)
-            if ml_result is not None:
-                verdict_map = {"BUY": "LONG", "SELL": "SHORT", "HOLD": "HOLD"}
-                ml_signal = verdict_map.get(ml_result["verdict"], "HOLD")
-                logger.debug(
-                    "ML signal for %s: %s (confidence %.1f%%)",
-                    symbol, ml_result["verdict"], ml_result["confidence"],
-                )
+            sub_scores = _build_ml_sub_scores(symbol, df, benchmark_df)
+            if sub_scores is None:
+                # Feature(s) NaN on latest bar — matches backtest which takes no
+                # position on such bars. Emit HOLD instead of linear so live
+                # decisions stay bit-consistent with Sicilian (ML) backtest.
+                ml_unavailable = True
+            else:
+                ml_result = _predictor.predict(sub_scores)
+                if ml_result is not None:
+                    verdict_map = {"BUY": "LONG", "SELL": "SHORT", "HOLD": "HOLD"}
+                    ml_signal = verdict_map.get(ml_result["verdict"], "HOLD")
+                    logger.debug(
+                        "ML signal for %s: %s (confidence %.1f%%)",
+                        symbol, ml_result["verdict"], ml_result["confidence"],
+                    )
     except Exception as exc:
         logger.warning("ML path failed for %s, using linear signal: %s", symbol, exc)
 
-    # Primary signal: ML when available, linear otherwise
-    signal = ml_signal if ml_signal is not None else linear_signal
+    # Primary signal: ML verdict when the model ran; HOLD when model exists but
+    # features were NaN on this bar (matches Sicilian (ML) backtest — no position);
+    # linear signal only when the trained model isn't available at all.
+    if ml_signal is not None:
+        signal = ml_signal
+    elif ml_unavailable:
+        signal = "HOLD"
+    else:
+        signal = linear_signal
 
     # Circuit breaker override (applies to both)
     circuit = load_circuit_status(symbol)

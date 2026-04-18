@@ -20,10 +20,8 @@ function isCacheFresh() {
 function buildTokenMap(rows) {
     const map = {};
     for (const row of rows) {
-        if (row.exch_seg !== 'NSE') continue;
-
-        // NSE-EQ cash equities, keyed by base symbol (e.g. "RELIANCE")
-        if (row.symbol?.endsWith('-EQ')) {
+        // NSE cash equities, keyed by base symbol (e.g. "RELIANCE")
+        if (row.exch_seg === 'NSE' && row.symbol?.endsWith('-EQ')) {
             const baseSymbol = row.symbol.replace(/-EQ$/, '');
             map[baseSymbol] = {
                 token: String(row.token),
@@ -37,9 +35,12 @@ function buildTokenMap(rows) {
             continue;
         }
 
-        // AMXIDX indices (Nifty 50, Bank Nifty, India VIX, etc.), keyed by `name`
-        // e.g. name "NIFTY" → token 99926000 (Nifty 50)
-        if (row.instrumenttype === 'AMXIDX' && row.name) {
+        // AMXIDX indices on either NSE (Nifty 50, Bank Nifty, India VIX)
+        // or BSE (SENSEX, BSE 500, etc.), keyed by `name` upper-cased.
+        // e.g. NSE: name "NIFTY" → token 99926000
+        //      BSE: name "SENSEX" → token 99919000
+        if (row.instrumenttype === 'AMXIDX' && row.name &&
+            (row.exch_seg === 'NSE' || row.exch_seg === 'BSE')) {
             const key = String(row.name).toUpperCase();
             if (!map[key]) {
                 map[key] = {
@@ -67,7 +68,10 @@ const SYMBOL_ALIASES = {
     '^NSEBANK': 'BANKNIFTY',
     'NIFTY BANK': 'BANKNIFTY',
     'INDIA VIX': 'INDIA VIX',
-    'INDIAVIX': 'INDIA VIX'
+    'INDIAVIX': 'INDIA VIX',
+    '^BSESN': 'SENSEX',
+    'BSESN': 'SENSEX',
+    'BSE SENSEX': 'SENSEX'
 };
 
 export async function refreshScripMaster() {
@@ -80,7 +84,7 @@ export async function refreshScripMaster() {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
     fs.writeFileSync(CACHE_FILE, JSON.stringify(map));
     tokenMap = map;
-    console.log(`[scripMaster] Cached ${Object.keys(map).length} NSE-EQ symbols`);
+    console.log(`[scripMaster] Cached ${Object.keys(map).length} NSE-EQ + NSE/BSE index symbols`);
     return map;
 }
 

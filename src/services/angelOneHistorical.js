@@ -1,11 +1,24 @@
 import axios from 'axios';
-import { getSession, getAuthHeaders, refreshSession } from './angelOneAuth.js';
+import { getSession, getAuthHeaders, refreshSession, invalidateSession } from './angelOneAuth.js';
 import { getToken } from './angelScripMaster.js';
 
 const CANDLE_URL = 'https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData';
 
 const MIN_GAP_MS = 350; // ≤3 rps, small safety margin
 let lastCallAt = 0;
+
+// Angel returns these codes/messages when the JWT is invalid or expired.
+// AB1010 / AB1004 / AB8050 are documented session errors; the message text
+// "Invalid Token" / "session expired" is sometimes returned with a different
+// or missing errorcode, so we match both.
+const TOKEN_ERROR_CODES = new Set(['AB1010', 'AB1004', 'AB8050']);
+const TOKEN_ERROR_MESSAGE_RE = /invalid token|token.*(expired|invalid)|session.*(expired|invalid)|unauthori[sz]ed/i;
+
+function isTokenError(code, message) {
+    if (code && TOKEN_ERROR_CODES.has(code)) return true;
+    if (message && TOKEN_ERROR_MESSAGE_RE.test(message)) return true;
+    return false;
+}
 
 async function rateLimit() {
     const wait = lastCallAt + MIN_GAP_MS - Date.now();
@@ -40,16 +53,23 @@ async function callCandle(body, retried = false) {
         });
         if (!res.data?.status) {
             const code = res.data?.errorcode;
-            if (!retried && (code === 'AB1010' || code === 'AB1004' || code === 'AB8050')) {
-                console.warn('[angelHist] Session-ish error, refreshing and retrying:', code);
+            const message = res.data?.message;
+            if (!retried && isTokenError(code, message)) {
+                console.warn(`[angelHist] Token error (code=${code || 'none'}, msg="${message || ''}"), invalidating session and re-authenticating`);
+                await invalidateSession();
                 await refreshSession();
                 return callCandle(body, true);
             }
-            throw new Error(`Angel API error: ${res.data?.message || JSON.stringify(res.data)}`);
+            throw new Error(`Angel API error: ${message || JSON.stringify(res.data)}`);
         }
         return res.data.data || [];
     } catch (err) {
-        if (!retried && err.response?.status === 401) {
+        const httpStatus = err.response?.status;
+        const bodyMsg = err.response?.data?.message;
+        const bodyCode = err.response?.data?.errorcode;
+        if (!retried && (httpStatus === 401 || httpStatus === 403 || isTokenError(bodyCode, bodyMsg))) {
+            console.warn(`[angelHist] Token error on HTTP ${httpStatus || '?'} (code=${bodyCode || 'none'}, msg="${bodyMsg || err.message}"), invalidating session and re-authenticating`);
+            await invalidateSession();
             await refreshSession();
             return callCandle(body, true);
         }
@@ -67,7 +87,7 @@ async function callCandle(body, retried = false) {
 export async function fetchDailyOHLC(symbol, fromDate, toDate) {
     const scrip = await getToken(symbol);
     const body = {
-        exchange: 'NSE',
+        exchange: scrip.exch_seg, // NSE for equities / NSE-AMXIDX, BSE for BSE-AMXIDX (e.g. SENSEX)
         symboltoken: scrip.token,
         interval: 'ONE_DAY',
         fromdate: fmt(fromDate),
@@ -88,7 +108,7 @@ export async function fetchDailyOHLC(symbol, fromDate, toDate) {
 export async function fetchOHLC(symbol, fromDate, toDate, interval = 'ONE_DAY') {
     const scrip = await getToken(symbol);
     const rows = await callCandle({
-        exchange: 'NSE',
+        exchange: scrip.exch_seg,
         symboltoken: scrip.token,
         interval,
         fromdate: fmt(fromDate),
