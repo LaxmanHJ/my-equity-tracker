@@ -70,6 +70,8 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import TimeSeriesSplit
 
+from quant_engine.ml.trainer import _build_pipeline
+
 from quant_engine.config import FACTOR_WEIGHTS, PROJECT_ROOT
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
@@ -510,10 +512,10 @@ def run_diagnostic() -> dict:
         X_test = X.iloc[test_idx]
         test_meta = meta.iloc[test_idx]
 
-        clf = RandomForestClassifier(**RF_PARAMS)
+        clf = _build_pipeline(RF_PARAMS)
         clf.fit(X_train, y_train)
 
-        classes = list(clf.classes_)
+        classes = list(clf.named_steps["rf"].classes_)
         if 1 not in classes or -1 not in classes:
             logger.warning("Fold %d: missing BUY or SELL class in training — skipping", fold)
             continue

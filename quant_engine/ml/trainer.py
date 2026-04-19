@@ -31,7 +31,9 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import Pipeline
 
 from quant_engine.config import ML_MODEL_DIR, INDUSTRY_TO_NSE_INDEX
 from quant_engine.data.loader import (
@@ -78,6 +80,10 @@ FEATURE_COLS = [
     "overnight_gap",          # (today_open - prev_close) / prev_close
     "intraday_range_ratio",   # (day_high - day_low) / ATR14
     "last_hour_momentum",     # (close_15:15 - close_14:15) / close_14:15
+    "vwap_deviation",         # (day_close - vwap) / vwap
+    "opening_drive_vol",      # 9:15+9:30 vol / 20d mean of same, shift(1)
+    "closing_spike_vol",      # 15:15 vol / 20d mean of same, shift(1)
+    "vol_concentration",      # max(15m_vol) / sum(15m_vol)
 ]
 
 # 20-day forward return thresholds for label creation.
@@ -247,6 +253,10 @@ def _build_feature_frame(
             "overnight_gap":         _align_intraday("overnight_gap"),
             "intraday_range_ratio":  _align_intraday("intraday_range_ratio"),
             "last_hour_momentum":    _align_intraday("last_hour_momentum"),
+            "vwap_deviation":        _align_intraday("vwap_deviation"),
+            "opening_drive_vol":     _align_intraday("opening_drive_vol"),
+            "closing_spike_vol":     _align_intraday("closing_spike_vol"),
+            "vol_concentration":     _align_intraday("vol_concentration"),
         },
         index=df.index,
     )
@@ -410,6 +420,21 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     return X, y
 
 
+def _build_pipeline(rf_params: dict) -> Pipeline:
+    """
+    Wrap the RF in an imputer→RF pipeline.
+
+    The imputer's medians are learned from the (NaN-free) training data and
+    persisted with the pickle. At inference time, bars with NaN in soft
+    features (macro regime, sector, intraday) are filled with those medians
+    instead of being silently dropped to HOLD — see SIC-29.
+    """
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("rf", RandomForestClassifier(**rf_params)),
+    ])
+
+
 def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
     """
     Grid search over min_samples_leaf × max_depth using walk-forward CV.
@@ -438,7 +463,7 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
             params = {**RF_PARAMS, "max_depth": max_depth, "min_samples_leaf": min_leaf}
             fold_scores = []
             for train_idx, test_idx in tscv.split(X):
-                clf = RandomForestClassifier(**params)
+                clf = _build_pipeline(params)
                 clf.fit(X.iloc[train_idx], y.iloc[train_idx])
                 fold_scores.append(clf.score(X.iloc[test_idx], y.iloc[test_idx]))
             mean_acc = float(np.mean(fold_scores))
@@ -468,23 +493,33 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
     cv_accuracies: list[float] = []
 
     for fold, (train_idx, test_idx) in enumerate(tscv.split(X), 1):
-        clf_cv = RandomForestClassifier(**final_params)
+        clf_cv = _build_pipeline(final_params)
         clf_cv.fit(X.iloc[train_idx], y.iloc[train_idx])
         acc = clf_cv.score(X.iloc[test_idx], y.iloc[test_idx])
         cv_accuracies.append(acc)
         logger.info("CV fold %d accuracy: %.3f", fold, acc)
 
     # ── Step 3: final model trained on the full dataset ──────────
-    clf = RandomForestClassifier(**final_params)
+    clf = _build_pipeline(final_params)
     clf.fit(X, y)
 
-    # Persist
+    # Persist (pipeline: imputer + RF — imputer's learned medians are baked in
+    # so inference can fill NaN for soft features without silently dropping bars)
     joblib.dump(clf, ML_MODEL_DIR / "sicilian_rf.pkl")
 
+    rf_step = clf.named_steps["rf"]
     class_dist = y.value_counts().to_dict()
     feature_importances = {
         col: round(float(imp), 6)
-        for col, imp in zip(FEATURE_COLS, clf.feature_importances_)
+        for col, imp in zip(FEATURE_COLS, rf_step.feature_importances_)
+    }
+
+    # Expose the imputer's learned medians so inference-time NaN fills are
+    # auditable (and so we can detect drift between training and live medians).
+    imputer = clf.named_steps["imputer"]
+    imputer_medians = {
+        col: round(float(val), 6)
+        for col, val in zip(FEATURE_COLS, imputer.statistics_)
     }
 
     metadata = {
@@ -494,7 +529,9 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
         "cv_accuracy_folds": [round(a, 4) for a in cv_accuracies],
         "class_distribution": {str(k): int(v) for k, v in class_dist.items()},
         "feature_importances": feature_importances,
-        "classes": clf.classes_.tolist(),
+        "feature_cols": FEATURE_COLS,
+        "imputer_medians": imputer_medians,
+        "classes": rf_step.classes_.tolist(),
         "rf_params": final_params,
     }
 

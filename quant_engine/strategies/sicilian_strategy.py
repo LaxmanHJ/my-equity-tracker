@@ -134,7 +134,11 @@ class SicilianStrategy(BaseStrategy):
         unavailable or feature construction fails.
         """
         try:
-            from quant_engine.ml.predictor import _load_model, FEATURE_COLS as ML_FEATURES
+            from quant_engine.ml.predictor import (
+                _load_model,
+                FEATURE_COLS as ML_FEATURES,
+                HARD_GATE_FEATURES,
+            )
 
             model = _load_model()
             if model is None:
@@ -144,22 +148,42 @@ class SicilianStrategy(BaseStrategy):
             if features is None or features.empty:
                 return None
 
-            # Only predict on rows where every required feature is present.
-            available_features = [c for c in ML_FEATURES if c in features.columns]
-            if not available_features:
-                return None
+            # Fail loudly if trainer/strategy FEATURE_COLS drift apart — SIC-29
+            # was masked for a week by this silent divergence (see commit a8263e0).
+            missing = [c for c in ML_FEATURES if c not in features.columns]
+            if missing:
+                raise RuntimeError(
+                    f"_build_ml_features missing required columns: {missing}. "
+                    "trainer.FEATURE_COLS and SicilianStrategy._build_ml_features "
+                    "must stay in sync."
+                )
 
-            valid = features[available_features].notna().all(axis=1)
-            X = features.loc[valid, available_features].fillna(0.0)
+            # Hard gate: only bars where every price-derived feature is present
+            # are predictable. Soft features (macro / sector / intraday) are
+            # imputed by the pipeline's SimpleImputer from training medians.
+            hard_cols = [c for c in HARD_GATE_FEATURES if c in features.columns]
+            valid = features[hard_cols].notna().all(axis=1)
+            X = features.loc[valid, list(ML_FEATURES)]
             if X.empty:
                 return None
+
+            n_imputed = int(X.isna().any(axis=1).sum())
+            if n_imputed:
+                logger.info(
+                    "ML predict %s: %d/%d bars required soft-feature imputation",
+                    symbol, n_imputed, len(X),
+                )
 
             preds = model.predict(X).astype(float)
             signals = pd.Series(0.0, index=df.index)
             signals.loc[X.index] = preds
             return signals
 
-        except Exception as exc:
+        except (ValueError, AttributeError) as exc:
+            # Narrow catch: sklearn raises ValueError for predict-time shape
+            # or dtype issues, AttributeError if the pickle is corrupt. A
+            # RuntimeError from _verify_feature_alignment (SIC-29) is a
+            # deployment bug and MUST propagate — never silently fall back.
             logger.warning("ML prediction failed, falling back to linear: %s", exc)
             return None
 
@@ -304,6 +328,10 @@ class SicilianStrategy(BaseStrategy):
                 "overnight_gap":         _align_intraday(intraday_feats, "overnight_gap"),
                 "intraday_range_ratio":  _align_intraday(intraday_feats, "intraday_range_ratio"),
                 "last_hour_momentum":    _align_intraday(intraday_feats, "last_hour_momentum"),
+                "vwap_deviation":        _align_intraday(intraday_feats, "vwap_deviation"),
+                "opening_drive_vol":     _align_intraday(intraday_feats, "opening_drive_vol"),
+                "closing_spike_vol":     _align_intraday(intraday_feats, "closing_spike_vol"),
+                "vol_concentration":     _align_intraday(intraday_feats, "vol_concentration"),
             },
             index=df.index,
         )
