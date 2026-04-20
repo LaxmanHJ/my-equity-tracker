@@ -3,55 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StockAnalyzer | Risk &amp; Trade Triggers</title>
+  <title>StockAnalyzer | Trade Triggers</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
   <style>
-    .risk-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-    .risk-card {
-      padding: 1.5rem;
+    .global-status {
+      display: flex;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+      padding: 1rem 1.5rem;
+      margin-bottom: 1.5rem;
       border-radius: 12px;
+      align-items: center;
     }
-    .risk-card h3 {
-      margin: 0 0 0.5rem 0;
-      font-size: 1.1rem;
-    }
-    .risk-card p.desc {
-      color: var(--text-muted);
-      font-size: 0.85rem;
-      margin: 0 0 1rem 0;
-      min-height: 2.5rem;
-    }
-    .risk-card .endpoint {
-      display: inline-block;
-      font-family: monospace;
-      font-size: 0.75rem;
-      background: rgba(255,255,255,0.05);
-      padding: 2px 8px;
-      border-radius: 4px;
-      color: var(--text-secondary);
-      margin-bottom: 0.75rem;
-    }
-    .result-box {
-      margin-top: 1rem;
-      padding: 1rem;
-      background: rgba(0,0,0,0.3);
-      border-radius: 8px;
-      font-family: monospace;
-      font-size: 0.75rem;
-      max-height: 300px;
-      overflow: auto;
-      white-space: pre-wrap;
-      word-break: break-all;
-      color: var(--text-secondary);
-    }
+    .global-status .kv { font-size: 0.85rem; color: var(--text-muted); }
+    .global-status .kv strong { color: var(--text-primary); font-size: 1rem; margin-left: 0.25rem; }
+
     .status-pill {
       display: inline-block;
       padding: 2px 10px;
@@ -63,239 +32,241 @@
     .status-ok    { background: rgba(34,197,94,0.15); color: #22c55e; }
     .status-warn  { background: rgba(234,179,8,0.15);  color: #eab308; }
     .status-crit  { background: rgba(239,68,68,0.15);  color: #ef4444; }
-    .status-idle  { background: rgba(148,163,184,0.15); color: #94a3b8; }
-    .alert-row {
-      padding: 0.5rem 0.75rem;
-      border-left: 3px solid var(--border-color);
-      background: rgba(255,255,255,0.02);
-      margin-bottom: 0.5rem;
-      border-radius: 4px;
-      font-size: 0.8rem;
-    }
-    .alert-row.critical { border-left-color: #ef4444; }
-    .alert-row.warning  { border-left-color: #eab308; }
-    .global-status {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      padding: 1rem 1.5rem;
-      margin-bottom: 1.5rem;
-      border-radius: 12px;
-    }
-    .global-status .kv {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-    }
-    .global-status .kv strong {
-      color: var(--text-primary);
-      font-size: 1rem;
-    }
-    /* Tab navigation */
-    .tab-nav { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); }
-    .tab-nav button {
-      padding: 0.75rem 1.5rem;
-      background: none;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--text-muted);
-      font-size: 0.95rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .tab-nav button.active { color: var(--text-primary); border-bottom-color: #3b82f6; }
-    .tab-nav button:hover { color: var(--text-secondary); }
-    .tab-pane { display: none; }
-    .tab-pane.active { display: block; }
-    /* Queue table */
-    .queue-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-    .queue-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border-color); }
-    .queue-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .status-info  { background: rgba(59,130,246,0.15); color: #3b82f6; }
+
+    .queue-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .queue-table th { text-align: left; padding: 0.6rem 0.85rem; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border-color); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .queue-table td { padding: 0.65rem 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
     .queue-table tr:hover td { background: rgba(255,255,255,0.02); }
-    .btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border-radius: 4px; cursor: pointer; border: none; font-weight: 600; }
-    .btn-buy { background: rgba(34,197,94,0.15); color: #22c55e; }
-    .btn-buy:hover { background: rgba(34,197,94,0.25); }
+
+    .btn-sm { padding: 0.35rem 0.9rem; font-size: 0.78rem; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; transition: background 0.15s; }
+    .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-evaluate { background: rgba(139,92,246,0.15); color: #a78bfa; }
+    .btn-evaluate:hover:not(:disabled) { background: rgba(139,92,246,0.28); }
     .btn-skip { background: rgba(239,68,68,0.1); color: #ef4444; }
-    .btn-skip:hover { background: rgba(239,68,68,0.2); }
+    .btn-skip:hover:not(:disabled) { background: rgba(239,68,68,0.22); }
     .btn-gen { background: rgba(59,130,246,0.15); color: #3b82f6; }
-    .btn-gen:hover { background: rgba(59,130,246,0.25); }
-    .queue-status { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
-    .qs-pending { background: rgba(234,179,8,0.15); color: #eab308; }
+    .btn-gen:hover:not(:disabled) { background: rgba(59,130,246,0.28); }
+    .btn-ghost { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+    .btn-confirm { background: rgba(34,197,94,0.18); color: #22c55e; padding: 0.55rem 1.25rem; font-size: 0.85rem; }
+    .btn-confirm:hover:not(:disabled) { background: rgba(34,197,94,0.28); }
+    .btn-cancel { background: rgba(255,255,255,0.06); color: var(--text-secondary); padding: 0.55rem 1.25rem; font-size: 0.85rem; }
+
+    .queue-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    .qs-pending  { background: rgba(234,179,8,0.15); color: #eab308; }
     .qs-executed, .qs-executed_paper { background: rgba(34,197,94,0.15); color: #22c55e; }
     .qs-rejected_gap, .qs-rejected_risk, .qs-rejected_user { background: rgba(239,68,68,0.1); color: #ef4444; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 4rem 1rem 2rem;
+      z-index: 100;
+      overflow-y: auto;
+    }
+    .modal-backdrop.open { display: flex; }
+    .claude-modal {
+      background: #1a1f2e;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 2rem;
+      max-width: 720px;
+      width: 100%;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+    }
+    .claude-modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; gap: 1rem; }
+    .claude-modal-header h3 { margin: 0; font-size: 1.25rem; }
+    .claude-modal-header p { margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.85rem; }
+    .decision-badge {
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      letter-spacing: 0.05em;
+    }
+    .decision-GO    { background: rgba(34,197,94,0.18); color: #22c55e; }
+    .decision-NO_GO { background: rgba(239,68,68,0.18); color: #ef4444; }
+
+    .plan-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+      margin: 1.25rem 0;
+    }
+    .plan-cell {
+      padding: 0.75rem 0.9rem;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .plan-cell .label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.25rem; }
+    .plan-cell .value { font-size: 1.05rem; font-weight: 600; color: var(--text-primary); }
+    .plan-cell.accent { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.2); }
+    .plan-cell.danger { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.2); }
+
+    .section-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 1.25rem 0 0.5rem; font-weight: 600; }
+    .rationale {
+      background: rgba(255,255,255,0.02);
+      border-left: 3px solid #8b5cf6;
+      padding: 0.85rem 1rem;
+      border-radius: 4px;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+    .bullet-list { margin: 0; padding-left: 1.2rem; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; }
+    .bullet-list li { margin-bottom: 0.25rem; }
+
+    .factor-strip {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      font-size: 0.72rem;
+    }
+    .factor-chip {
+      padding: 0.2rem 0.55rem;
+      background: rgba(255,255,255,0.04);
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+    .factor-chip strong { color: var(--text-primary); margin-left: 0.25rem; }
+    .factor-chip.pos strong { color: #22c55e; }
+    .factor-chip.neg strong { color: #ef4444; }
+
+    .modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.06); }
+
+    .modal-loading {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+    .spinner {
+      display: inline-block;
+      width: 32px; height: 32px;
+      border: 3px solid rgba(139,92,246,0.2);
+      border-top-color: #8b5cf6;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-bottom: 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    details.executed { margin-top: 2rem; }
+    details.executed summary {
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      padding: 0.5rem 0;
+      user-select: none;
+    }
+    details.executed summary:hover { color: var(--text-secondary); }
+    details.executed[open] summary { color: var(--text-primary); }
   </style>
 </head>
 <body style="padding-top: 2rem;">
-  <main class="main-content" style="padding: 2rem; max-width: 1400px; margin: 0 auto;">
+  <main class="main-content" style="padding: 2rem; max-width: 1200px; margin: 0 auto;">
     <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <h2 style="margin:0;">Risk &amp; Trade Triggers</h2>
+        <h2 style="margin:0;">Trade Triggers</h2>
         <p style="color: var(--text-muted); margin: 0.25rem 0 0 0; font-size: 0.9rem;">
-          On-demand checks — you control every trade
+          Claude reviews every signal before it becomes an order.
         </p>
       </div>
       <a href="/" class="btn btn-secondary" style="text-decoration: none;">&larr; Back to Dashboard</a>
     </div>
 
+    <!-- Global status strip -->
     <div class="global-status glass" id="globalStatus">
-      <div class="kv">Paper trading: <strong id="gsPaper">—</strong></div>
-      <div class="kv">Trading halted: <strong id="gsHalt">—</strong></div>
+      <div class="kv">Paper: <strong id="gsPaper">—</strong></div>
+      <div class="kv">Trading: <strong id="gsHalt">—</strong></div>
       <div class="kv">Open alerts: <strong id="gsAlerts">—</strong></div>
-      <div class="kv">Last check: <strong id="gsChecked">—</strong></div>
+      <div class="kv">Claude: <strong id="gsClaude">—</strong></div>
+      <div class="kv" style="margin-left: auto;">Last check: <strong id="gsChecked">—</strong></div>
     </div>
 
-    <!-- ═══════════ Tab Navigation ═══════════ -->
-    <div class="tab-nav">
-      <button class="active" data-tab="triggers">Buy Triggers</button>
-      <button data-tab="risk">Risk Checks</button>
-      <button data-tab="history">Queue History</button>
-    </div>
-
-    <!-- ═══════════ TAB 1: Buy Triggers ═══════════ -->
-    <div class="tab-pane active" id="tab-triggers">
-      <div class="glass" style="padding: 1.5rem; margin-bottom: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
-          <div>
-            <h3 style="margin: 0;">Next Session Queue</h3>
-            <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0.25rem 0 0 0;">
-              EOD LONG signals queued for your review. Click Execute to place the order (paper mode), or Skip to ignore.
-            </p>
-          </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <button class="btn-sm btn-gen" id="btnGenerate">Generate EOD Queue</button>
-            <button class="btn-sm" style="background: rgba(255,255,255,0.05); color: var(--text-secondary);" id="btnRefreshQueue">Refresh</button>
-          </div>
-        </div>
-        <div id="queueSummary" style="margin-bottom: 1rem; display: none;">
-          <div style="display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-muted);">
-            <span>Signal date: <strong id="qsDate">—</strong></span>
-            <span>Execute on: <strong id="qsExecOn">—</strong></span>
-            <span>Pending: <strong id="qsPending">0</strong></span>
-          </div>
-        </div>
-        <div id="queueTableWrap" style="overflow-x: auto;">
-          <p id="queueEmpty" style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem 0;">
-            No pending signals. Click "Generate EOD Queue" to run the scoring engine.
+    <!-- Pending queue -->
+    <div class="glass" style="padding: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <h3 style="margin: 0;">Pending Signals</h3>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin: 0.25rem 0 0 0;">
+            Only threshold-passing stocks appear here. Click <strong>Evaluate</strong> to send to Claude.
           </p>
-          <table class="queue-table" id="queueTable" style="display: none;">
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn-sm btn-gen" id="btnGenerate">Generate EOD Queue</button>
+          <button class="btn-sm btn-ghost" id="btnRefreshQueue">Refresh</button>
+        </div>
+      </div>
+
+      <div id="queueSummary" style="margin-bottom: 1rem; display: none;">
+        <div style="display: flex; gap: 1.25rem; font-size: 0.8rem; color: var(--text-muted);">
+          <span>Signal date: <strong id="qsDate">—</strong></span>
+          <span>Execute on: <strong id="qsExecOn">—</strong></span>
+          <span>Pending: <strong id="qsPending">0</strong></span>
+          <span id="qsSkipped" style="display: none;">Skipped: <strong id="qsSkippedCount">0</strong></span>
+        </div>
+      </div>
+
+      <div id="queueTableWrap" style="overflow-x: auto;">
+        <p id="queueEmpty" style="color: var(--text-muted); font-size: 0.88rem; text-align: center; padding: 2.5rem 0;">
+          No pending signals. Click "Generate EOD Queue" to run the scoring engine.
+        </p>
+        <table class="queue-table" id="queueTable" style="display: none;">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Source</th>
+              <th>Score</th>
+              <th>ML Conf</th>
+              <th>Signal Price</th>
+              <th>Execute On</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="queueBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Today's activity (collapsed by default) -->
+    <details class="executed">
+      <summary id="executedSummary">Today's activity ▾</summary>
+      <div class="glass" style="padding: 1.25rem; margin-top: 0.5rem;">
+        <div style="overflow-x: auto;">
+          <table class="queue-table" id="executedTable">
             <thead>
               <tr>
                 <th>Symbol</th>
-                <th>Source</th>
-                <th>Score</th>
-                <th>ML Conf.</th>
-                <th>Signal Price</th>
-                <th>Execute On</th>
                 <th>Status</th>
-                <th style="text-align: right;">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="queueBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="result-box" id="out-queue" style="display:none;"></div>
-    </div>
-
-    <!-- ═══════════ TAB 2: Risk Checks ═══════════ -->
-    <div class="tab-pane" id="tab-risk">
-      <div class="risk-grid">
-        <div class="risk-card glass">
-          <h3>Risk Status</h3>
-          <span class="endpoint">GET /api/risk/status</span>
-          <p class="desc">Full on-demand check — stop-loss, circuit breaker, sector concentration. Does not persist.</p>
-          <button class="btn btn-primary" data-action="status">Run Status Check</button>
-          <div class="result-box" id="out-status" style="display:none;"></div>
-        </div>
-
-        <div class="risk-card glass">
-          <h3>Persist Check</h3>
-          <span class="endpoint">POST /api/risk/check</span>
-          <p class="desc">Runs the full check AND writes every alert to the risk_alerts table for later review.</p>
-          <button class="btn btn-primary" data-action="check">Run &amp; Save</button>
-          <div class="result-box" id="out-check" style="display:none;"></div>
-        </div>
-
-        <div class="risk-card glass">
-          <h3>Alerts Feed</h3>
-          <span class="endpoint">GET /api/risk/alerts</span>
-          <p class="desc">Persisted alerts from past runs. Toggle between all and unacknowledged.</p>
-          <button class="btn btn-primary" data-action="alerts">Fetch All</button>
-          <button class="btn btn-secondary" data-action="alerts-unack">Unacknowledged</button>
-          <div class="result-box" id="out-alerts" style="display:none;"></div>
-        </div>
-
-        <div class="risk-card glass">
-          <h3>Position Sizes</h3>
-          <span class="endpoint">GET /api/risk/position-sizes</span>
-          <p class="desc">Inverse-volatility weighted target positions for a given AUM (capped at 5%).</p>
-          <div style="display:flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-            <input id="aumInput" type="number" value="1000000" min="10000"
-              style="flex:1; padding: 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" />
-            <button class="btn btn-primary" data-action="sizes">Compute</button>
-          </div>
-          <div class="result-box" id="out-sizes" style="display:none;"></div>
-        </div>
-      </div>
-
-      <div class="glass" style="padding: 1.5rem; margin-bottom: 2rem;">
-        <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin:0;">Latest Alerts (from last status check)</h3>
-          <span style="font-size: 0.75rem; color: var(--text-muted);">Click "Run Status Check" to refresh</span>
-        </div>
-        <div id="alertsList">
-          <p style="color: var(--text-muted); font-size: 0.85rem;">No alerts loaded yet.</p>
-        </div>
-      </div>
-
-      <div class="glass" style="padding: 1.5rem;">
-        <h3 style="margin: 0 0 1rem 0;">Sector Exposures</h3>
-        <div id="sectorList">
-          <p style="color: var(--text-muted); font-size: 0.85rem;">Run a status check to populate.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══════════ TAB 3: Queue History ═══════════ -->
-    <div class="tab-pane" id="tab-history">
-      <div class="glass" style="padding: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="margin: 0;">Signal Queue History</h3>
-          <button class="btn-sm" style="background: rgba(255,255,255,0.05); color: var(--text-secondary);" id="btnRefreshHistory">Refresh</button>
-        </div>
-        <div id="historyTableWrap" style="overflow-x: auto;">
-          <p id="historyEmpty" style="color: var(--text-muted); font-size: 0.85rem; text-align: center; padding: 2rem 0;">
-            Loading history...
-          </p>
-          <table class="queue-table" id="historyTable" style="display: none;">
-            <thead>
-              <tr>
-                <th>Signal Date</th>
-                <th>Symbol</th>
-                <th>Source</th>
-                <th>Score</th>
                 <th>Signal Price</th>
                 <th>Exec Price</th>
-                <th>Status</th>
-                <th>Reason</th>
+                <th>Notes</th>
               </tr>
             </thead>
-            <tbody id="historyBody"></tbody>
+            <tbody id="executedBody">
+              <tr><td colspan="5" style="color: var(--text-muted); text-align: center; padding: 1rem;">—</td></tr>
+            </tbody>
           </table>
         </div>
       </div>
-    </div>
-
+    </details>
   </main>
 
-  <script>
-    // ── Helpers ──────────────────────────────────────────
-    const out = (id, data) => {
-      const el = document.getElementById(id);
-      el.style.display = 'block';
-      el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-    };
+  <!-- ══════════════════ Claude Evaluation Modal ══════════════════ -->
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="claude-modal" id="modalContent">
+      <!-- content injected at runtime -->
+    </div>
+  </div>
 
+  <script>
+    // ─── Global status ──────────────────────────────────────
     const setGlobal = (r) => {
       document.getElementById('gsPaper').textContent = r.paperTrading ? 'ON (safe)' : 'OFF (LIVE)';
       const haltEl = document.getElementById('gsHalt');
@@ -307,255 +278,303 @@
         ? new Date(r.checkedAt).toLocaleString() : '—';
     };
 
-    const statusClass = (s) => {
-      if (s === 'pending') return 'qs-pending';
-      if (s === 'executed' || s === 'executed_paper') return 'qs-executed';
-      return 'qs-rejected_gap';
-    };
+    async function checkClaudeConfig() {
+      // Lightweight probe — the /evaluate endpoint returns 503 cleanly when the
+      // key is missing, so we just wait for first click. Mark as "ready" until
+      // proven otherwise.
+      document.getElementById('gsClaude').innerHTML = '<span class="status-pill status-info">opus-4-7</span>';
+    }
 
-    // ── Tab switching ────────────────────────────────────
-    document.querySelectorAll('.tab-nav button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-nav button').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-        if (btn.dataset.tab === 'history') loadHistory();
-      });
-    });
-
-    // ── Queue rendering ──────────────────────────────────
+    // ─── Queue loader ───────────────────────────────────────
     async function loadQueue() {
-      try {
-        const r = await fetch('/api/signal-queue?status=pending').then(x => x.json());
-        const signals = r.signals || [];
-        const table = document.getElementById('queueTable');
-        const empty = document.getElementById('queueEmpty');
-        const summary = document.getElementById('queueSummary');
+      const r = await fetch('/api/signal-queue?status=pending').then(x => x.json());
+      const signals = r.signals || [];
+      const table = document.getElementById('queueTable');
+      const empty = document.getElementById('queueEmpty');
+      const summary = document.getElementById('queueSummary');
 
-        if (signals.length === 0) {
-          table.style.display = 'none';
-          empty.style.display = 'block';
-          summary.style.display = 'none';
-          return;
-        }
+      if (signals.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        summary.style.display = 'none';
+        return;
+      }
 
-        empty.style.display = 'none';
-        table.style.display = 'table';
-        summary.style.display = 'block';
+      empty.style.display = 'none';
+      table.style.display = 'table';
+      summary.style.display = 'block';
+      document.getElementById('qsDate').textContent = signals[0].signal_date || '—';
+      document.getElementById('qsExecOn').textContent = signals[0].execute_on || '—';
+      document.getElementById('qsPending').textContent = signals.length;
 
-        document.getElementById('qsDate').textContent = signals[0].signal_date || '—';
-        document.getElementById('qsExecOn').textContent = signals[0].execute_on || '—';
-        document.getElementById('qsPending').textContent = signals.length;
-
-        const tbody = document.getElementById('queueBody');
-        tbody.innerHTML = signals.map(s => {
-          const src = s.signal_source || '—';
-          const srcColor = src === 'ML' ? '#22c55e' : '#eab308';
-          const conf = s.ml_confidence != null ? s.ml_confidence.toFixed(1) + '%' : '—';
-          return `
+      document.getElementById('queueBody').innerHTML = signals.map(s => {
+        const src = s.signal_source || '—';
+        const srcColor = src === 'ML' ? '#22c55e' : '#eab308';
+        const conf = s.ml_confidence != null ? Number(s.ml_confidence).toFixed(1) + '%' : '—';
+        const score = s.composite_score != null ? Number(s.composite_score).toFixed(1) : '—';
+        const price = s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—';
+        return `
           <tr id="qrow-${s.id}">
             <td><strong>${s.symbol}</strong></td>
             <td><span style="color: ${srcColor}; font-weight: 600; font-size: 0.75rem;">${src}</span></td>
-            <td>${s.composite_score != null ? s.composite_score.toFixed(1) : '—'}</td>
+            <td>${score}</td>
             <td>${conf}</td>
-            <td>${s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—'}</td>
+            <td>${price}</td>
             <td>${s.execute_on || '—'}</td>
-            <td><span class="queue-status ${statusClass(s.status)}">${s.status}</span></td>
             <td style="text-align: right;">
-              ${s.status === 'pending' ? `
-                <button class="btn-sm btn-buy" onclick="doExecute(${s.id}, this)">Execute</button>
-                <button class="btn-sm btn-skip" onclick="doSkip(${s.id}, this)">Skip</button>
-              ` : '—'}
+              <button class="btn-sm btn-evaluate" onclick="doEvaluate(${s.id}, this)">Evaluate</button>
+              <button class="btn-sm btn-skip" onclick="doSkip(${s.id}, this)">Skip</button>
             </td>
-          </tr>
-        `}).join('');
-      } catch (err) {
-        out('out-queue', 'ERROR: ' + err.message);
-      }
+          </tr>`;
+      }).join('');
     }
 
-    async function doExecute(id, btn) {
-      if (!confirm('Execute this trade? (Gap check + risk gate will run automatically)')) return;
+    // ─── Today's activity (executed + rejected) ────────────
+    async function loadExecuted() {
+      const r = await fetch('/api/signal-queue?status=all&limit=50').then(x => x.json());
+      const today = new Date().toISOString().slice(0, 10);
+      const rows = (r.signals || []).filter(s =>
+        s.status !== 'pending' && (s.signal_date === today || (s.executed_at || '').startsWith(today)),
+      );
+      const body = document.getElementById('executedBody');
+      const summary = document.getElementById('executedSummary');
+      summary.textContent = `Today's activity (${rows.length}) ▾`;
+      if (rows.length === 0) {
+        body.innerHTML = `<tr><td colspan="5" style="color: var(--text-muted); text-align: center; padding: 1rem;">No activity yet today.</td></tr>`;
+        return;
+      }
+      body.innerHTML = rows.map(s => `
+        <tr>
+          <td><strong>${s.symbol}</strong></td>
+          <td><span class="queue-status qs-${s.status}">${s.status}</span></td>
+          <td>${s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—'}</td>
+          <td>${s.exec_price != null ? '₹' + Number(s.exec_price).toFixed(2) : '—'}</td>
+          <td style="font-size: 0.78rem; color: var(--text-muted);">${s.reject_reason || s.order_id || '—'}</td>
+        </tr>`).join('');
+    }
+
+    // ─── Modal helpers ──────────────────────────────────────
+    const modal = document.getElementById('modalBackdrop');
+    const modalBody = document.getElementById('modalContent');
+
+    function openModal(html) {
+      modalBody.innerHTML = html;
+      modal.classList.add('open');
+    }
+    function closeModal() {
+      modal.classList.remove('open');
+      modalBody.innerHTML = '';
+    }
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    function renderLoading(symbol) {
+      return `
+        <div class="modal-loading">
+          <div class="spinner"></div>
+          <div style="font-size: 1rem; color: var(--text-primary);">Claude is analyzing ${symbol}…</div>
+          <div style="font-size: 0.8rem; margin-top: 0.5rem;">Checking factor coherence, computing entry, sizing position, setting stop.</div>
+        </div>`;
+    }
+
+    function renderError(msg, detail) {
+      return `
+        <div class="claude-modal-header">
+          <div><h3 style="color: #ef4444;">Evaluation failed</h3></div>
+        </div>
+        <div class="rationale" style="border-left-color: #ef4444; color: #fecaca;">
+          ${msg}${detail ? `<br><span style="font-size: 0.8rem; opacity: 0.7;">${detail}</span>` : ''}
+        </div>
+        <div class="modal-actions">
+          <button class="btn-sm btn-cancel" onclick="closeModal()">Close</button>
+        </div>`;
+    }
+
+    function factorChips(factors) {
+      if (!factors) return '';
+      const order = ['momentum', 'volatility', 'rsi', 'bollinger', 'macd', 'relative_strength', 'volume'];
+      return order.filter(k => factors[k]).map(k => {
+        const score = factors[k].score;
+        const cls = score > 0.1 ? 'pos' : score < -0.1 ? 'neg' : '';
+        const label = k === 'relative_strength' ? 'RS' : k.charAt(0).toUpperCase() + k.slice(1);
+        return `<span class="factor-chip ${cls}">${label}<strong>${Number(score).toFixed(2)}</strong></span>`;
+      }).join('');
+    }
+
+    function renderPlan(resp) {
+      const { plan, context } = resp;
+      const isGo = plan.decision === 'GO';
+      const concerns = (plan.concerns || []).filter(Boolean);
+      const failed = (plan.failed_checks || []).filter(Boolean);
+
+      const planCells = isGo ? `
+        <div class="plan-grid">
+          <div class="plan-cell accent"><div class="label">Qty</div><div class="value">${plan.qty}</div></div>
+          <div class="plan-cell accent"><div class="label">Limit</div><div class="value">₹${Number(plan.limit_price).toFixed(2)}</div></div>
+          <div class="plan-cell danger"><div class="label">Stop</div><div class="value">₹${Number(plan.stop_price).toFixed(2)}</div></div>
+          <div class="plan-cell"><div class="label">Target</div><div class="value">₹${Number(plan.target_price).toFixed(2)}</div></div>
+          <div class="plan-cell"><div class="label">Size %</div><div class="value">${Number(plan.size_pct_of_portfolio).toFixed(2)}%</div></div>
+          <div class="plan-cell"><div class="label">R:R</div><div class="value">${Number(plan.reward_to_risk).toFixed(2)}</div></div>
+        </div>` : '';
+
+      const failedBlock = failed.length ? `
+        <div class="section-label">Why Claude rejected</div>
+        <ul class="bullet-list" style="color: #fecaca;">${failed.map(f => `<li>${f}</li>`).join('')}</ul>` : '';
+
+      const concernsBlock = concerns.length ? `
+        <div class="section-label">Caveats</div>
+        <ul class="bullet-list">${concerns.map(c => `<li>${c}</li>`).join('')}</ul>` : '';
+
+      const actions = isGo ? `
+        <button class="btn-sm btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-sm btn-confirm" id="btnConfirm" onclick="doConfirm(${context._signalId}, this)">Confirm &amp; Execute</button>
+      ` : `
+        <button class="btn-sm btn-cancel" onclick="closeModal()">Close</button>
+        <button class="btn-sm btn-skip" onclick="doSkipFromModal(${context._signalId}, this)">Skip this signal</button>
+      `;
+
+      return `
+        <div class="claude-modal-header">
+          <div>
+            <h3>${plan.symbol || context.symbol}</h3>
+            <p>Composite ${Number(context.compositeScore).toFixed(1)} • ${context.signalSource} source${context.mlConfidencePct != null ? ` • ML conf ${Number(context.mlConfidencePct).toFixed(1)}%` : ''} • Gap ${Number(plan.gap_pct ?? context.gapPctFromSignal).toFixed(2)}%</p>
+          </div>
+          <div class="decision-badge decision-${plan.decision}">${plan.decision}</div>
+        </div>
+
+        ${planCells}
+
+        <div class="section-label">Claude's rationale</div>
+        <div class="rationale">${plan.rationale || '(no rationale returned)'}</div>
+
+        ${failedBlock}
+        ${concernsBlock}
+
+        <div class="section-label">Factor breakdown</div>
+        <div class="factor-strip">${factorChips(context.factors)}</div>
+
+        <div class="modal-actions">${actions}</div>`;
+    }
+
+    // ─── Actions ────────────────────────────────────────────
+    window.doEvaluate = async function (id, btn) {
+      const symbol = btn.closest('tr').querySelector('td strong').textContent;
       btn.disabled = true;
-      btn.textContent = '...';
+      btn.textContent = '…';
+      openModal(renderLoading(symbol));
+      try {
+        const r = await fetch(`/api/signal-queue/${id}/evaluate`, { method: 'POST' }).then(x => x.json());
+        if (r.error) {
+          const detailMap = {
+            claude_not_configured: 'Add ANTHROPIC_API_KEY to .env and restart the server.',
+            scoring_engine_unreachable: 'Python quant engine (port 5001) is not responding.',
+            symbol_not_in_scores: 'The scoring engine did not return this symbol.',
+            no_current_price: 'No cached price bars for this symbol.',
+          };
+          openModal(renderError(r.error, detailMap[r.error] || r.detail || ''));
+          return;
+        }
+        r.context._signalId = id;
+        openModal(renderPlan(r));
+      } catch (err) {
+        openModal(renderError('Network error', err.message));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Evaluate';
+      }
+    };
+
+    window.doConfirm = async function (id, btn) {
+      btn.disabled = true;
+      btn.textContent = 'Placing order…';
       try {
         const r = await fetch(`/api/signal-queue/${id}/execute`, { method: 'POST' }).then(x => x.json());
         if (r.error) {
-          alert('Error: ' + (r.error));
+          alert('Execute error: ' + r.error);
         } else if (r.status === 'rejected_gap') {
-          alert(`Rejected: price gap ${r.gapPct}% exceeds limit.\nSignal: ₹${r.signalPrice} → Current: ₹${r.currentPrice}`);
+          alert(`Rejected: gap ${r.gapPct}% exceeds limit.\nSignal ₹${r.signalPrice} → Current ₹${r.currentPrice}`);
         } else if (r.status === 'rejected_risk') {
           alert('Rejected: ' + r.reason);
         } else {
-          alert(`${r.status === 'executed_paper' ? 'PAPER ' : ''}Order placed!\n${r.symbol} @ ₹${r.execPrice}\nOrder ID: ${r.orderId}`);
+          alert(`${r.status === 'executed_paper' ? 'PAPER ' : ''}Order placed.\n${r.symbol} @ ₹${r.execPrice}\nOrder ID: ${r.orderId}`);
         }
-        await loadQueue();
+        closeModal();
+        await Promise.all([loadQueue(), loadExecuted()]);
       } catch (err) {
         alert('Execute failed: ' + err.message);
         btn.disabled = false;
-        btn.textContent = 'Execute';
+        btn.textContent = 'Confirm & Execute';
       }
-    }
+    };
 
-    async function doSkip(id, btn) {
+    window.doSkip = async function (id, btn) {
       btn.disabled = true;
-      btn.textContent = '...';
+      btn.textContent = '…';
       try {
-        await fetch(`/api/signal-queue/${id}/reject`, { method: 'POST' }).then(x => x.json());
-        await loadQueue();
+        await fetch(`/api/signal-queue/${id}/reject`, { method: 'POST' });
+        await Promise.all([loadQueue(), loadExecuted()]);
       } catch (err) {
         alert('Skip failed: ' + err.message);
         btn.disabled = false;
         btn.textContent = 'Skip';
       }
-    }
+    };
 
-    // ── Generate queue ───────────────────────────────────
+    window.doSkipFromModal = async function (id, btn) {
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        await fetch(`/api/signal-queue/${id}/reject`, { method: 'POST' });
+        closeModal();
+        await Promise.all([loadQueue(), loadExecuted()]);
+      } catch (err) {
+        alert('Skip failed: ' + err.message);
+      }
+    };
+
+    window.closeModal = closeModal;
+
+    // ─── Generate & refresh ─────────────────────────────────
     document.getElementById('btnGenerate').addEventListener('click', async function () {
       const btn = this;
       btn.disabled = true;
-      btn.textContent = 'Scoring...';
+      btn.textContent = 'Scoring…';
       try {
         const r = await fetch('/api/signal-queue/generate', { method: 'POST' }).then(x => x.json());
-        out('out-queue', r);
-        const msg = `Scored ${r.totalScored} stocks. ${r.longSignals} LONG signal(s) queued for ${r.executeOn}.`;
+        const skipped = r.skipped?.length || 0;
+        if (skipped) {
+          document.getElementById('qsSkipped').style.display = 'inline';
+          document.getElementById('qsSkippedCount').textContent = skipped;
+        }
         if (r.longSignals === 0) {
-          alert(msg + '\nNo actionable buy signals today.');
+          alert(`Scored ${r.totalScored} stocks. 0 passed conviction gates today.\n${skipped ? skipped + ' signal(s) skipped — mainly below composite/ML/liquidity thresholds.' : ''}`);
         }
         await loadQueue();
       } catch (err) {
-        out('out-queue', 'ERROR: ' + err.message);
+        alert('Generate failed: ' + err.message);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Generate EOD Queue';
       }
     });
-    document.getElementById('btnRefreshQueue').addEventListener('click', loadQueue);
 
-    // ── History tab ──────────────────────────────────────
-    async function loadHistory() {
-      try {
-        const r = await fetch('/api/signal-queue?status=all&limit=100').then(x => x.json());
-        const signals = r.signals || [];
-        const table = document.getElementById('historyTable');
-        const empty = document.getElementById('historyEmpty');
-
-        if (signals.length === 0) {
-          table.style.display = 'none';
-          empty.textContent = 'No signals in history.';
-          empty.style.display = 'block';
-          return;
-        }
-
-        empty.style.display = 'none';
-        table.style.display = 'table';
-
-        document.getElementById('historyBody').innerHTML = signals.map(s => {
-          const src = s.signal_source || '—';
-          const srcColor = src === 'ML' ? '#22c55e' : '#eab308';
-          return `
-          <tr>
-            <td>${s.signal_date || '—'}</td>
-            <td><strong>${s.symbol}</strong></td>
-            <td><span style="color: ${srcColor}; font-weight: 600; font-size: 0.75rem;">${src}</span></td>
-            <td>${s.composite_score != null ? Number(s.composite_score).toFixed(1) : '—'}</td>
-            <td>${s.signal_price != null ? '₹' + Number(s.signal_price).toFixed(2) : '—'}</td>
-            <td>${s.exec_price != null ? '₹' + Number(s.exec_price).toFixed(2) : '—'}</td>
-            <td><span class="queue-status ${statusClass(s.status)}">${s.status}</span></td>
-            <td style="font-size: 0.75rem; color: var(--text-muted);">${s.reject_reason || s.order_id || '—'}</td>
-          </tr>
-        `}).join('');
-      } catch (err) {
-        document.getElementById('historyEmpty').textContent = 'ERROR: ' + err.message;
-      }
-    }
-    document.getElementById('btnRefreshHistory').addEventListener('click', loadHistory);
-
-    // ── Risk tab: alerts + sectors ───────────────────────
-    const renderAlerts = (alerts) => {
-      const el = document.getElementById('alertsList');
-      if (!alerts || alerts.length === 0) {
-        el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No alerts — all checks pass.</p>';
-        return;
-      }
-      el.innerHTML = alerts.map(a => `
-        <div class="alert-row ${a.severity}">
-          <span class="status-pill status-${a.severity === 'critical' ? 'crit' : 'warn'}">${a.severity}</span>
-          <strong style="margin-left: 0.5rem;">${a.type}</strong>
-          <div style="margin-top: 0.25rem;">${a.message}</div>
-        </div>
-      `).join('');
-    };
-
-    const renderSectors = (exposures, breaches) => {
-      const el = document.getElementById('sectorList');
-      if (!exposures || exposures.length === 0) {
-        el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No sector data.</p>';
-        return;
-      }
-      const breachSet = new Set((breaches || []).map(b => b.sector));
-      el.innerHTML = exposures.map(e => {
-        const breached = breachSet.has(e.sector);
-        const barWidth = Math.min(e.valuePct * 2, 100);
-        return `
-          <div style="margin-bottom: 0.5rem;">
-            <div style="display:flex; justify-content:space-between; font-size: 0.85rem; margin-bottom: 2px;">
-              <span>${e.sector}${breached ? ' <span class="status-pill status-warn">breach</span>' : ''}</span>
-              <span>${e.valuePct}%</span>
-            </div>
-            <div style="height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px;">
-              <div style="height: 100%; width: ${barWidth}%; background: ${breached ? '#eab308' : '#3b82f6'}; border-radius: 3px;"></div>
-            </div>
-          </div>
-        `;
-      }).join('');
-    };
-
-    // ── Risk card actions ────────────────────────────────
-    const actions = {
-      status: async () => {
-        const r = await fetch('/api/risk/status').then(x => x.json());
-        out('out-status', r);
-        setGlobal(r);
-        renderAlerts(r.alerts);
-        renderSectors(r.sectorExposures, r.sectorBreaches);
-      },
-      check: async () => {
-        const r = await fetch('/api/risk/check', { method: 'POST' }).then(x => x.json());
-        out('out-check', r);
-        setGlobal(r);
-      },
-      alerts: async () => {
-        const r = await fetch('/api/risk/alerts?limit=50').then(x => x.json());
-        out('out-alerts', r);
-      },
-      'alerts-unack': async () => {
-        const r = await fetch('/api/risk/alerts?limit=50&unack=true').then(x => x.json());
-        out('out-alerts', r);
-      },
-      sizes: async () => {
-        const aum = document.getElementById('aumInput').value;
-        const r = await fetch(`/api/risk/position-sizes?portfolioValue=${aum}`).then(x => x.json());
-        out('out-sizes', r);
-      },
-    };
-
-    document.querySelectorAll('button[data-action]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const action = btn.dataset.action;
-        const label = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Running...';
-        try { await actions[action](); }
-        catch (err) { out('out-' + action.split('-')[0], 'ERROR: ' + err.message); }
-        finally { btn.disabled = false; btn.textContent = label; }
-      });
+    document.getElementById('btnRefreshQueue').addEventListener('click', async () => {
+      await Promise.all([loadQueue(), loadExecuted(), loadStatus()]);
     });
 
-    // ── Init ─────────────────────────────────────────────
-    loadQueue();
-    actions.status().catch(() => {});
+    async function loadStatus() {
+      try {
+        const r = await fetch('/api/risk/status').then(x => x.json());
+        setGlobal(r);
+      } catch {
+        // swallow — status strip keeps previous values
+      }
+    }
+
+    // ─── Init ───────────────────────────────────────────────
+    checkClaudeConfig();
+    loadStatus().catch(() => {});
+    loadQueue().catch(err => { document.getElementById('queueEmpty').textContent = 'ERROR: ' + err.message; });
+    loadExecuted().catch(() => {});
   </script>
 </body>
 </html>

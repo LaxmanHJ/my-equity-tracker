@@ -40,27 +40,29 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
 ---
 
 ### C3. No Position-Level Risk Management
-- [ ] Implement per-stock stop-loss: exit if position loses >10% from entry
-- [ ] Implement daily portfolio circuit breaker: halt all trading if portfolio loses >2% in one day
-- [ ] Implement max sector concentration: no single sector >25% of portfolio
-- [ ] Add `max_position_size = min(5% of portfolio, 3% of daily volume)` cap
-- [ ] Add `config/risk_limits.js` (or `settings.js`) with all limits in one place
+- [x] **2026-04-11**: Centralized risk limits in `src/config/riskLimits.js` (stop-loss, circuit breaker, sector cap, position cap, ADV cap)
+- [x] **2026-04-11**: Hybrid stop-loss (volatility + chandelier trailing) in `src/risk/stopLoss.js` — López de Prado AFML Ch.3 vol-scaled initial + trend-following chandelier
+- [x] **2026-04-11**: Daily portfolio circuit breaker in `src/risk/circuitBreaker.js` — halts new orders if portfolio down > 2% intraday
+- [x] **2026-04-11**: Max sector concentration (25%) check in `src/risk/sectorConcentration.js`
+- [x] **2026-04-11**: Inverse-vol position sizing in `src/risk/positionSizing.js` — Kakushadze (R ~ V^0.76), 5% hard cap, 3% ADV cap, 15% target portfolio vol
+- [x] **2026-04-21**: Claude final gate (SIC-31) — every signal must pass Claude's GO/NO_GO review before an order is placed; Claude re-derives qty/stop/target using the same risk limits (see `wiki/concepts/claude_final_gate.md`)
 
 **Why it matters**: Portfolio can lose 40-50% with no protective mechanism during correlated crash.  
-**Files**: New file `src/risk/risk_manager.js` (to be created), `config/settings.js`
+**Files**: `src/config/riskLimits.js`, `src/risk/*.js`, `src/services/claudeEvaluator.js`, `src/services/signalQueueService.js`
 
 ---
 
 ### C4. No Broker Integration (Signals Never Executed)
-- [ ] Implement Zerodha Kite API connection (best documented for NSE India)
-- [ ] Implement order placement: market orders on signal
-- [ ] Implement position reconciliation: compare current holdings to signal state
-- [ ] Implement trade logging: timestamp, price, quantity, cost to DB
-- [ ] Paper trade for minimum 2 weeks before live capital
-- [ ] Add account cash balance check before placing order
+- [x] **2026-04-21**: Trade-trigger queue + user-driven execution flow in place (`src/services/signalQueueService.js`, `public/risk.html`) — paper mode works, broker call is the one remaining stub
+- [x] **2026-04-21**: Claude (`opus-4-7`) evaluates every signal before execution — returns limit price, qty, stop, target, rationale (SIC-31). See [claude_final_gate.md](concepts/claude_final_gate.md)
+- [x] **2026-04-21**: Trade logging: `signal_queue` table records signal_date, exec_price, order_id, reject_reason, executed_at
+- [ ] Switch broker from Zerodha plan to **Angel One** (already integrated for market data — `src/services/angelOne*.js`). Implement `placeOrder(symbol, qty, side, type, limit)` using SmartAPI
+- [ ] Implement position reconciliation: compare current holdings to broker holdings
+- [ ] Paper trade for minimum 2 weeks before flipping `PAPER_TRADING=false`
+- [ ] Add account cash balance check before placing order (Angel One `/funds` endpoint)
 
 **Why it matters**: System is a research tool — signals are generated but never executed.  
-**Files**: New `src/brokers/zerodha.js` (to be created)
+**Files**: `src/services/signalQueueService.js`, `src/services/claudeEvaluator.js`, `src/services/angelOneAuth.js`, future `src/services/angelOneOrders.js`
 
 ---
 
@@ -215,9 +217,9 @@ If you want to test with real money before all items above are complete:
 
 ## Progress Summary
 
-**Critical items completed**: 1 / 5 (C2 done — Alpha Vantage primary, RapidAPI fallback with flat-bar warning)  
-**Data bottleneck items completed**: 0 / 4  
-**Moderate items completed**: 0 / 4  
-**Validation items completed**: 0 / 3  
+**Critical items completed**: 3 / 5 (C2 done, C3 done 2026-04-11, C4 mostly done 2026-04-21 — only Angel One order placement + reconciliation + cash check remain)
+**Data bottleneck items completed**: 0 / 4
+**Moderate items completed**: 0 / 4
+**Validation items completed**: 0 / 3
 
 _Update this section as items are checked off._

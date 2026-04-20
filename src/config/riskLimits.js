@@ -63,6 +63,30 @@ export const riskLimits = {
     defaultProductType: 'DELIVERY',
   },
 
+  // Conviction gates — signals must clear all of these before they enter the
+  // queue for Claude-assisted execution. Rationale in wiki/concepts/factor_scoring.md
+  // and wiki/papers/grinold_kahn_active_portfolio.md (IC/ICIR framework).
+  conviction: {
+    // Composite score threshold (project default; sicilian_strategy.py BUY_THRESHOLD = 0.40)
+    minCompositeScore: 40,
+
+    // Linear composite must agree — ML has ~0 OOS IC (ml_pipeline.md 2026-04-17),
+    // so the hand-tuned linear composite is the authoritative direction signal.
+    requireLinearAgreement: true,
+
+    // ML confidence floor — applied only when ml_path is active. Used as
+    // confirmation, not as the driver (ML IC is near zero on daily data, so
+    // the bar is "BUY probability above random for a 3-class softmax" ~33%).
+    minMlConfidencePct: 40,
+
+    // Minimum 20-day average daily volume (liquidity gate, checklist M2)
+    minAvgDailyVolume: 500_000,
+
+    // Minimum price-history bars — below this, factor windows (momentum 126,
+    // volatility 20, MACD 26) don't have enough data to be reliable.
+    minDataPoints: 200,
+  },
+
   // Paper trading mode — log orders but don't send to broker
   // Must be explicitly set to 'false' in .env to enable real orders
   paperTrading: process.env.PAPER_TRADING !== 'false',

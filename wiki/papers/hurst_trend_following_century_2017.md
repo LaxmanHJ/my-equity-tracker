@@ -82,6 +82,6 @@ Correlation between the two: ~0.5 — related but distinct.
 
 - **`quant_engine/strategies/sicilian_strategy.py`**: Implements trend-following logic (the strategy name "Sicilian" emphasizes trend). The composite score with momentum at 25% is a cross-sectional approach, not pure time-series.
 - **`quant_engine/factors/momentum.py`**: Uses 12-month lookback (1 of the 3 signals here). Missing: 1-month and 3-month signals.
-- **Gap — volatility scaling**: Not implemented. Position sizes don't scale with realized volatility. This paper says vol-scaling is essential for consistent risk. Would improve signal quality.
+- **Volatility scaling (2026-04-21)**: Now applied at the Claude final gate — the prompt explicitly asks for inverse-vol sizing using 20-day realized vol. See [claude_final_gate.md](../concepts/claude_final_gate.md). Still **not** applied inside the backtest engine, so backtest vs live sizing diverges.
 - **Gap — multi-signal trend**: Only 12-month signal used. Adding 1-month and 3-month lookbacks and averaging would smooth the momentum factor.
 - **"Smile" = regime protection**: Our regime_adaptive strategy aims for similar crisis protection. The VIX-based regime switch is consistent with the "smile" pattern (bear market = reduce trend, increase mean-reversion).

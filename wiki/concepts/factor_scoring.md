@@ -108,8 +108,13 @@ Aggregate `mean_ic` / `icir` summarise a distribution. The distribution itself i
 | Bollinger at 0% weight | Internal | Low |
 | No volatility-scaled positions | Hurst (2017) | Medium |
 
+## Downstream: Claude Final Gate (2026-04-21)
+
+Once a composite passes ≥ 40 and the other hard conviction gates (linear agreement, ML confidence ≥ 40%, ADV ≥ 500k, data_points ≥ 200), the signal is enqueued for **Claude review** before any order is placed. Claude receives the full factor vector and checks for **coherence** — a LONG with strong momentum but collapsing relative strength gets flagged even if the composite is > 60. See [claude_final_gate.md](claude_final_gate.md) for the full flow, prompt structure, and output schema.
+
 ## Related Concepts
 - [momentum.md](momentum.md)
 - [mean_reversion.md](mean_reversion.md)
 - [regime_detection.md](regime_detection.md)
 - [ml_pipeline.md](ml_pipeline.md)
+- [claude_final_gate.md](claude_final_gate.md)

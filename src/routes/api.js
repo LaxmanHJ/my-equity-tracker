@@ -47,7 +47,7 @@ import { runRiskChecks } from '../risk/riskManager.js';
 import { createEodPriceProvider } from '../risk/priceProvider.js';
 import { computePositionSizes } from '../risk/positionSizing.js';
 import { riskLimits } from '../config/riskLimits.js';
-import { generateQueue, executeSignal, rejectSignal } from '../services/signalQueueService.js';
+import { generateQueue, executeSignal, rejectSignal, evaluateSignal } from '../services/signalQueueService.js';
 
 const router = express.Router();
 
@@ -1076,6 +1076,30 @@ router.get('/signal-queue', async (req, res) => {
   } catch (err) {
     console.error('Signal queue fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch signal queue', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/signal-queue/:id/evaluate
+ * Ask Claude (opus-4-7) for a GO/NO_GO execution plan — entry price, qty,
+ * stop, target, rationale. Separate from /execute so the UI can show the
+ * plan and let the user confirm before any order is placed.
+ */
+router.post('/signal-queue/:id/evaluate', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const result = await evaluateSignal(id);
+    if (result.error) return res.status(400).json(result);
+    res.json(result);
+  } catch (err) {
+    console.error('Signal evaluate error:', err);
+    if (err.code === 'MISSING_ANTHROPIC_KEY') {
+      return res.status(503).json({ error: 'claude_not_configured', detail: err.message });
+    }
+    if (err.code === 'CLAUDE_PARSE_FAILED') {
+      return res.status(502).json({ error: 'claude_parse_failed', detail: err.message, rawText: err.rawText });
+    }
+    res.status(500).json({ error: 'Failed to evaluate signal', detail: err.message });
   }
 });
 

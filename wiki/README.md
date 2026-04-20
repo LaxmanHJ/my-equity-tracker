@@ -28,6 +28,7 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [intraday_features.md](concepts/intraday_features.md) | Angel One 15-min candle features (Phase 4) |
 | [backtesting.md](concepts/backtesting.md) | Backtesting methodology, pitfalls, CPCV |
 | [covariance_estimation.md](concepts/covariance_estimation.md) | Portfolio risk — shrinkage, HRP |
+| [claude_final_gate.md](concepts/claude_final_gate.md) | Claude (opus-4-7) as final execution-plan gate before broker (SIC-31) |
 
 ## Live Trading
 

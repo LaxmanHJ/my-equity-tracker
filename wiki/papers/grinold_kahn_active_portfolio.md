@@ -59,13 +59,16 @@ Given alpha vector α and covariance matrix Σ:
 
 ## Project Usage
 
-**NOT YET IMPLEMENTED** in this project.
+### Partially Implemented
 
-### Where It Applies
+- **IC tracking (2026-04-17)**: Pooled walk-forward IC is computed at `quant_engine/ml/diagnostic.py` and surfaced via `GET /api/quant/signal-quality/series`. Headline: **linear composite IC +0.040 at 20d, RF ML IC ≈ 0 on daily data**. See `wiki/concepts/ml_pipeline.md` for the full diagnostic context.
+- **IC as Claude calibration (2026-04-21)**: The `claude_final_gate` system prompt encodes this IC result as a calibration note so Claude weights ML confidence as confirmation (not driver) and expects ~53% hit-rate — which is why it emphasizes asymmetric R:R ≥ 1.5 as the edge. See [claude_final_gate.md](../concepts/claude_final_gate.md).
 
-- **IC tracking**: We don't currently measure IC of our factors. Adding an IC tracker (compare signal rank to next-week return rank) would measure signal quality.
+### Where It Still Applies
+
 - **Fundamental Law**: Our current 15-stock universe with 8 factors has limited breadth (BR ≈ 15). Expanding the universe increases BR.
-- **Risk model**: Factor risk model would improve position sizing beyond equal-weight.
+- **Per-factor IC**: We track composite-level IC, not per-factor. Per-factor IC would let us re-weight the composite by factor quality (dynamic weights).
+- **Risk model**: Factor risk model would improve position sizing beyond the inverse-vol sizer in the Claude gate.
 - **Portfolio optimizer**: Required if we move from fixed-weight signals to optimal portfolio construction.
 
 ### Implementation Path

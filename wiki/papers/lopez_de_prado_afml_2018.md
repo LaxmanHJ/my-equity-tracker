@@ -166,12 +166,14 @@ Convert binary signal → position size using:
 ### Already Implemented
 - **Triple-barrier concept**: Our `LONG/HOLD/SHORT` labels with ≥40/≤−40 thresholds are a simplified version (no stop-loss barrier, time is implicit).
 - **ML classifier** (`ml/trainer.py`): Trains on factor scores → Buy/Hold/Sell. The framework is correct; labels need upgrading to triple-barrier.
+- **Ch.3 vol-scaled stop (2026-04-21)**: `riskLimits.stopLoss.volMultiplier = 2.5` applied at two points — (1) live stop-loss detector (`src/risk/stopLoss.js` hybrid vol + chandelier) and (2) the Claude final gate prompt (`stop = entry × (1 − 2.5 × σ_20d)`). See [claude_final_gate.md](../concepts/claude_final_gate.md).
+- **Ch.17 bet sizing + Ch.3 meta-labeling (2026-04-21)**: Hard conviction gates act as the primary classifier ("should I trade"); Claude (`opus-4-7`) is the second-stage sizer that discretizes the bet into `{qty, limit_price, stop, target, size_pct}`. NO_GO verdicts are the meta-label saying "primary signal unreliable on this setup."
 
 ### Gaps / Roadmap
-- **Triple-barrier labeling**: Replace current score-threshold labels with proper volatility-scaled triple-barrier labels.
+- **Triple-barrier labeling (training)**: The live stop uses vol-scaled barriers, but ML training labels are still score-threshold. Replace with proper volatility-scaled triple-barrier labels.
 - **Purged k-fold CV**: `trainer.py` uses `TimeSeriesSplit` (fixed after bug). Upgrade to Purged K-Fold for clean validation.
 - **Fracdiff features**: Current features are raw scores. Add fracdiff(close) as an ML feature.
-- **Meta-labeling**: Add a second-stage classifier to predict when the primary signal is reliable.
+- **Formal meta-labeling classifier**: Claude-as-meta-label is an LLM approximation. A trained binary meta-label model (per Ch.3) would be more auditable and backtestable.
 - **HRP**: If/when we add portfolio optimization, use HRP instead of MVO.
 - **DSR**: After adding more strategies, use DSR to deflate Sharpe ratios.
 

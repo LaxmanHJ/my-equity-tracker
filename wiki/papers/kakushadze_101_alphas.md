@@ -67,5 +67,6 @@ Roughly split between **mean-reversion** (majority, using `rank`, reversal patte
 ## Project Usage
 
 - **`quant_engine/factors/`**: Each factor module computes a signal conceptually equivalent to one or more alphas. The `rank()`-based normalization in `scores.py` mirrors the cross-sectional ranking here.
-- **Roadmap**: The `indneutralize` operator maps to sector-neutralization, not yet implemented. `adv{d}` liquidity filtering not yet applied.
+- **Roadmap**: The `indneutralize` operator maps to sector-neutralization, not yet implemented. `adv{d}` liquidity filtering applied at the conviction-gate layer (`minAvgDailyVolume: 500_000`).
+- **Inverse-vol sizing (R ~ V^0.76)**: Baked into the Claude final gate prompt — position size = `(targetVol / stockVol) × portfolio_value / entry_price`, capped by 5% position and 3% of 20d ADV. See [claude_final_gate.md](../concepts/claude_final_gate.md).
 - **Key gap**: Our factors don't use VWAP or intraday OHLC data — we use only daily OHLCV.
