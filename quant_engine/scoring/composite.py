@@ -37,7 +37,7 @@ def _build_ml_sub_scores(
     benchmark_df: pd.DataFrame,
 ) -> Optional[dict]:
     """
-    Build the 18-feature dict for predictor.predict() on the latest bar.
+    Build the feature dict for predictor.predict() on the latest bar.
 
     Delegates to SicilianStrategy._build_ml_features — the same builder the
     backtest uses — then returns the last row as a dict. This guarantees that
@@ -45,19 +45,37 @@ def _build_ml_sub_scores(
     the features driving the backtest, so backtest confidence translates
     directly into live-trading confidence.
 
-    Returns None when features are missing (empty frame) or the latest bar
-    has any NaN feature — matching trainer/backtest which drop such rows.
-    Caller falls back to the linear signal in that case.
+    SIC-29 contract: only returns None when the builder yields nothing or a
+    HARD_GATE (price-derived) feature is NaN. Soft NaN (macro / sector /
+    intraday) is passed through — the pipeline's SimpleImputer fills them
+    with training medians downstream.
     """
+    from quant_engine.ml.predictor import HARD_GATE_FEATURES
+
     strat = SicilianStrategy("_live")
     feats = strat._build_ml_features(df, benchmark_df, symbol)
     if feats.empty:
         return None
     last_row = feats.iloc[-1]
-    if last_row.isna().any():
-        missing = last_row[last_row.isna()].index.tolist()
-        logger.info("ML skipped for %s: NaN features on latest bar (%s)", symbol, missing)
+
+    hard_missing = [
+        c for c in HARD_GATE_FEATURES
+        if c not in last_row.index or pd.isna(last_row.get(c))
+    ]
+    if hard_missing:
+        logger.info(
+            "ML skipped for %s: hard-gate features NaN on latest bar (%s)",
+            symbol, hard_missing,
+        )
         return None
+
+    soft_missing = last_row[last_row.isna()].index.tolist()
+    if soft_missing:
+        logger.info(
+            "ML imputing for %s: %d soft features NaN on latest bar (%s)",
+            symbol, len(soft_missing), soft_missing,
+        )
+
     return last_row.to_dict()
 
 
@@ -123,7 +141,10 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
                         "ML signal for %s: %s (confidence %.1f%%)",
                         symbol, ml_result["verdict"], ml_result["confidence"],
                     )
-    except Exception as exc:
+    except (ValueError, AttributeError) as exc:
+        # Narrow catch for transient sklearn issues (shape/dtype). A RuntimeError
+        # from _verify_feature_alignment (SIC-29) is a deployment bug and MUST
+        # propagate so we notice immediately instead of silently running linear.
         logger.warning("ML path failed for %s, using linear signal: %s", symbol, exc)
 
     # Primary signal: ML verdict when the model ran; HOLD when model exists but
