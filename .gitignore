@@ -25,3 +25,5 @@ quant_engine/**/__pycache__/
 docs/ml_data_quality.md
 data/angel_scrip_master.json
 src/claudeBuy.json
+claudeBuy.json
+data/angel_scrip_master.json
