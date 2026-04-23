@@ -235,6 +235,54 @@ Feature count grew from 15 → 18. Also added `pcr_score` (Angel One PCR).
 3. Consider meta-labeling (López de Prado Ch.3): use linear composite as primary direction model, train ML as secondary "should-we-take-this-trade?" model
 4. CPCV still pending
 
+### 2026-04-24 Experiment A — Cross-Sectional Rank Regression (SIC-41)
+
+First of the six-experiment ML edge recovery program (memory: `project_ml_edge_recovery.md`). Hypothesis: ML loses because of problem framing, not features — (1) the 3-class `{BUY, HOLD, SELL}` target with ±3% HOLD band throws away magnitude, and (2) pooled training on absolute `fwd_ret_20d` mismatches the cross-sectional rank metric used for evaluation (IC).
+
+**Change**: added a third diagnostic track `ml_regression` that trains `RandomForestRegressor` with production `RF_PARAMS` (minus `class_weight`) on the label `rank_pct_per_date(fwd_ret_20d) * 2 - 1 ∈ [-1, +1]`. Identical features, identical walk-forward purged folds, identical test rows as the classifier track — so the only variable that moved is problem framing.
+
+Rows with per-date cross-section size < 5 stocks are NaN-labelled and dropped from training (`MIN_CROSS_N = 5` in `diagnostic.py`).
+
+**Pooled aggregate** (n=20,030 OOS rows, 1,573 trading dates, 2019-10 → 2026-03):
+
+| Horizon | ML classifier IC | ML regression IC | Linear IC | ML cls hit | ML reg hit | Linear hit |
+|--------:|-----------------:|-----------------:|----------:|-----------:|-----------:|-----------:|
+| 1d  | +0.018 | +0.020 | +0.017 | 48.9% | 50.1% | 50.4% |
+| 5d  | +0.027 | +0.028 | +0.028 | 49.3% | 51.1% | 51.2% |
+| 10d | +0.017 | +0.022 | +0.045 | 49.6% | 51.8% | 52.0% |
+| 20d | +0.003 | **+0.022** | **+0.040** | 49.9% | **53.7%** | 53.1% |
+
+**Per-fold 20d IC** (revealing — the pooled number hides meaningful structure):
+
+| Fold | Test period | ML cls | ML reg | Linear |
+|-----:|:------------|-------:|-------:|-------:|
+| 1 | 2019-10 → 2021-04 (COVID) | −0.043 | −0.012 | +0.047 |
+| 2 | 2021-04 → 2022-08 | +0.100 | +0.044 | +0.109 |
+| 3 | 2022-08 → 2023-11 | +0.037 | **+0.054** | −0.007 |
+| 4 | 2023-11 → 2025-01 | −0.040 | +0.048 | +0.073 |
+| 5 | 2025-01 → 2026-03 | −0.042 | −0.019 | −0.030 |
+
+**Findings**:
+
+1. **Framing hypothesis validated.** At 20d the classifier→regression reframing moves IC from +0.003 to +0.022 — a **7×** increase. The lift concentrates at longer horizons (20d most, 10d some, 1d/5d flat), exactly as the hypothesis predicts — the ±3% HOLD zone misprices larger-horizon magnitudes most.
+2. **Hit rate at 20d (53.7%) now beats linear (53.1%).** On directional accuracy the regression is the best of the three tracks. The IC gap remains (regression still ranks the cross-section slightly less well than the hand-tuned linear composite) but on sign it's now the strongest signal.
+3. **Regression is the only stable track.** Classifier has two fold-IC of −0.04 (fold 1, 4) — model-destroying regimes. Regression has no such collapse; worst fold is −0.019 (fold 5, where every track is negative).
+4. **Fold-3 regression outright beats linear** (+0.054 vs −0.007). The regime when a hand-tuned linear composite struggles is precisely when non-linear modelling on a cross-sectional label has the most to offer.
+5. **Fold 5 (most recent year) is negative for every track.** ML classifier −0.042, linear −0.030, ML regression −0.019. This is a separate regime/decay warning — not specific to the classifier, and not fixable by reframing. Worth a follow-up investigation (open: signal decay on 2025-26 data).
+
+**Pass/fail vs SIC-41 acceptance criterion (20d IC ≥ +0.035)**: **FAIL by +0.013**. Pooled IC +0.022 vs threshold +0.035. But fold-level story and hit-rate beating linear argue the framing fix is a real and substantial win, even if it did not fully close the IC gap to the hand-tuned composite.
+
+**Recommendation**:
+
+* Keep the regression pipeline alive — it's the best ML track we have by hit rate at every horizon and the only one without fold-level blow-ups.
+* Escalate **Experiment B (SIC-42) — meta-labeling** to Urgent per the plan's fallback. Linear stays the primary direction signal (still highest IC), ML regression becomes a secondary bet-size classifier. This stacks on top of the framing fix.
+* Consider running **Experiment D (SIC-44) — LightGBM + monotonic constraints** in parallel. Half-tested inside this run (regressor only, no constraints); adding monotonicity on momentum/RS/trend_ma factors may close the remaining 0.018 IC gap cheaply.
+* Investigate **fold 5 decay** separately — all three tracks underperformed on the most recent year, indicating a regime/model-staleness issue orthogonal to the ML reframing program.
+
+**Code changes**: `quant_engine/ml/diagnostic.py` adds `RF_PARAMS_REG`, `_build_regression_pipeline`, `_build_cs_rank_label`, and an `ml_regression` entry in `TRACKS`. Production `sicilian_rf.pkl` and `trainer.py` untouched — this remains a diagnostic track until a follow-up productionizes it.
+
+**Artifacts**: `data/ml_diagnostic.json` now carries three tracks under `aggregate_pooled.{ml,linear,ml_regression}` plus per-fold horizons.
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML

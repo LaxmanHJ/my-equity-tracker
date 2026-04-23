@@ -67,8 +67,10 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.pipeline import Pipeline
 
 from quant_engine.ml.trainer import _build_pipeline
 
@@ -125,8 +127,48 @@ LABEL_HORIZON_DAYS = 20         # must match trainer.py label horizon
 N_SPLITS = 5                    # walk-forward folds
 MIN_TEST_OBS = 50               # skip horizon if fewer settled obs in a fold
 MIN_TRAIN_AFTER_PURGE = 200     # skip fold if purged training set too small
+MIN_CROSS_N = 5                 # skip per-date group if cross-section is tiny (ml_regression)
+
+# Regression RF params: same as the classifier's RF_PARAMS minus class_weight
+# (not applicable to regression). max_features="sqrt" is retained so the RF's
+# feature sub-sampling matches the classifier — apples-to-apples comparison
+# isolates the change in problem framing (rank-regression vs 3-class).
+RF_PARAMS_REG = {k: v for k, v in RF_PARAMS.items() if k != "class_weight"}
 
 DIAG_OUTPUT_PATH = PROJECT_ROOT / "data" / "ml_diagnostic.json"
+
+
+def _build_regression_pipeline(params: dict) -> Pipeline:
+    """SimpleImputer → RandomForestRegressor. Imputer medians baked into the
+    pipeline so NaN soft features at inference are filled, matching the
+    classifier path (SIC-29)."""
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("rfr", RandomForestRegressor(**params)),
+    ])
+
+
+def _build_cs_rank_label(meta: pd.DataFrame) -> pd.Series:
+    """
+    Cross-sectional rank label for the ml_regression track (SIC-41).
+
+    label = rank_pct_per_date(fwd_ret_20d) * 2 - 1  ∈ [-1, +1]
+
+    rank_pct bins each date's cross-section into percentiles (handles ties),
+    the affine rescale lands the label squarely in [-1, +1] — matching the
+    natural output range of the RF regressor and of the 7-factor linear
+    composite, so the three tracks' signed scores are directly comparable.
+
+    Returns NaN for rows whose per-date cross-section has fewer than
+    MIN_CROSS_N stocks — rank is not meaningful on small cross-sections.
+    """
+    fwd20 = meta["fwd_ret_20d"]
+    by_date = fwd20.groupby(fwd20.index)
+    counts = by_date.transform("count")
+    rank_pct = by_date.rank(pct=True)
+    label = rank_pct * 2 - 1
+    label[counts < MIN_CROSS_N] = np.nan
+    return label
 
 
 # ── Dataset build ────────────────────────────────────────────────────────────
@@ -470,11 +512,20 @@ def run_diagnostic() -> dict:
         LABEL_HORIZON_DAYS,
     )
 
+    # Cross-sectional rank label for the ml_regression track (SIC-41).
+    # Computed once — it's a deterministic function of meta, independent of
+    # train/test split.
+    cs_rank_label = _build_cs_rank_label(meta)
+
     tscv = TimeSeriesSplit(n_splits=N_SPLITS)
     fold_details: list[dict] = []
 
-    # Pooled accumulators — one set per engine track (ML vs linear).
-    TRACKS = ("ml", "linear")
+    # Pooled accumulators — one set per engine track.
+    # ml            — production 3-class RandomForestClassifier, signed_score=P(BUY)-P(SELL)
+    # linear        — 7-factor hand-weighted composite (production FACTOR_WEIGHTS)
+    # ml_regression — SIC-41 Experiment A: RandomForestRegressor trained on
+    #                 cross-sectional rank label; signed_score = predicted rank in [-1,+1]
+    TRACKS = ("ml", "linear", "ml_regression")
     all_scores: dict[str, dict[int, list[float]]] = {
         t: {h: [] for h in FWD_HORIZONS} for t in TRACKS
     }
@@ -532,6 +583,27 @@ def run_diagnostic() -> dict:
         # build_dataset_with_horizons).
         linear_score = test_meta["linear_score"].astype(float).values
 
+        # ── ml_regression track: train regressor on cross-sectional rank label ──
+        # Uses identical training rows (after purging), but drops any rows
+        # whose per-date cross-section had < MIN_CROSS_N stocks (label NaN).
+        y_reg_train = cs_rank_label.iloc[train_idx_purged].values
+        reg_mask = ~np.isnan(y_reg_train)
+        if reg_mask.sum() >= MIN_TRAIN_AFTER_PURGE:
+            reg = _build_regression_pipeline(RF_PARAMS_REG)
+            reg.fit(X_train.iloc[reg_mask], y_reg_train[reg_mask])
+            reg_score = reg.predict(X_test)
+            # The regressor output is already in [-1, +1] by training-label
+            # construction, but individual trees can extrapolate marginally;
+            # clip for safety so signed-score sign-rule matches the other tracks.
+            reg_score = np.clip(reg_score, -1.0, 1.0)
+        else:
+            logger.warning(
+                "Fold %d: ml_regression track training set too small after "
+                "cs-rank NaN filter (%d < %d) — emitting NaN scores",
+                fold, int(reg_mask.sum()), MIN_TRAIN_AFTER_PURGE,
+            )
+            reg_score = np.full(len(test_idx), np.nan)
+
         fold_entry: dict = {
             "fold": fold,
             "train_size": int(len(train_idx_purged)),
@@ -540,10 +612,14 @@ def run_diagnostic() -> dict:
             "train_end": str(pd.Timestamp(dates[train_idx_purged[-1]]).date()),
             "test_start": str(pd.Timestamp(test_dates[0]).date()),
             "test_end": str(pd.Timestamp(test_dates[-1]).date()),
-            "horizons": {"ml": {}, "linear": {}},
+            "horizons": {t: {} for t in TRACKS},
         }
 
-        track_scores = {"ml": signed_score, "linear": linear_score}
+        track_scores = {
+            "ml": signed_score,
+            "linear": linear_score,
+            "ml_regression": reg_score,
+        }
 
         for track, score_arr in track_scores.items():
             for h in FWD_HORIZONS:
@@ -613,12 +689,17 @@ def run_diagnostic() -> dict:
         "aggregate_pooled": aggregate,
         "aggregate_fold_means": fold_means,
         "factor_weights": FACTOR_WEIGHTS,
+        "rf_params_reg": RF_PARAMS_REG,
+        "cs_rank_min_n": MIN_CROSS_N,
         "notes": (
             "Walk-forward TimeSeriesSplit with label-horizon purging "
-            "(Lopez de Prado AFML Ch.10). Two tracks evaluated on identical "
-            "test rows: (1) ML — RF at production RF_PARAMS, signed score "
-            "= P(BUY)-P(SELL); (2) Linear — 7-factor Sicilian composite at "
-            "production FACTOR_WEIGHTS. Cross-sectional IC is Spearman per "
+            "(Lopez de Prado AFML Ch.10). Three tracks evaluated on identical "
+            "test rows: (1) ml — RF classifier at production RF_PARAMS, signed "
+            "score = P(BUY)-P(SELL); (2) linear — 7-factor Sicilian composite "
+            "at production FACTOR_WEIGHTS; (3) ml_regression — SIC-41 "
+            "Experiment A: RandomForestRegressor trained on cross-sectional "
+            "rank label = rank_pct_per_date(fwd_ret_20d)*2-1, signed score = "
+            "predicted rank in [-1,+1]. Cross-sectional IC is Spearman per "
             "date averaged across dates (Grinold-Kahn). Unlike trainer.py's "
             "CV, this version purges labels that leak into the test fold. "
             "aggregate_pooled.{track}.{Nd} additionally carries per_date_dates "
@@ -658,7 +739,7 @@ if __name__ == "__main__":
 
     print("\n=== Sicilian Diagnostic — Pooled Aggregate ===")
     print(f"samples={result['n_samples_total']}  folds={result['n_folds_completed']}")
-    for track in ("ml", "linear"):
+    for track in ("ml", "linear", "ml_regression"):
         print(f"\n  [{track.upper()}]")
         for h, metrics in result["aggregate_pooled"][track].items():
             if metrics is None:
