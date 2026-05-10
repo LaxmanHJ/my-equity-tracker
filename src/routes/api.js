@@ -567,6 +567,8 @@ router.get('/quant/scores', async (req, res) => {
         linear_signal:   s.linear_signal ?? null,
         composite_score: s.composite_score,
         ml_confidence:   s.ml_confidence ?? null,
+        meta_prob:       s.meta_prob ?? null,
+        meta_pass:       s.meta_pass ?? null,
       }))).catch(err => console.error('signals_log write failed:', err));
     }
   } catch (error) {
