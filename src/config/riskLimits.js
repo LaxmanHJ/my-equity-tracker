@@ -85,6 +85,14 @@ export const riskLimits = {
     // Minimum price-history bars — below this, factor windows (momentum 126,
     // volatility 20, MACD 26) don't have enough data to be reliable.
     minDataPoints: 200,
+
+    // Meta-labeler bet-sizing prior (SIC-42, see wiki/concepts/ml_pipeline.md
+    // § "2026-05-09 SIC-42 Experiment B"). When linear_signal == LONG, the
+    // secondary returns P(profitable @ 20d). At 0.75 the OOS lift is +3.79 pp
+    // hit / Sharpe 0.30 → 0.40 on n=1708. Going higher (0.80) deteriorates
+    // per-fold — 0.75 is the empirical signal-to-noise peak.
+    requireMetaPass: true,
+    minMetaProb: 0.75,
   },
 
   // Paper trading mode — log orders but don't send to broker

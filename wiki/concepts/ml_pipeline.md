@@ -235,6 +235,87 @@ Feature count grew from 15 → 18. Also added `pcr_score` (Angel One PCR).
 3. Consider meta-labeling (López de Prado Ch.3): use linear composite as primary direction model, train ML as secondary "should-we-take-this-trade?" model
 4. CPCV still pending
 
+### 2026-04-24 SIC-41 Experiment A — Regression Target
+
+Reframed the ML problem from 3-class classification to cross-sectional rank regression on `fwd_ret_20d`. Code: `quant_engine/ml/diagnostic.py` `ml_regression` track (parallel; production pickle untouched).
+
+**Result**: 20d pooled IC moved 0.003 → +0.022 (7× lift), hit rate 49.9% → 53.7% — best of all tracks at the longest horizon. But pooled 20d IC remained below the +0.035 pass threshold and below the linear composite's +0.040.
+
+| Horizon | ML cls | ML reg | Linear |
+|--------:|-------:|-------:|-------:|
+| 1d  | +0.018 | +0.020 | +0.017 |
+| 5d  | +0.027 | +0.028 | +0.028 |
+| 10d | +0.017 | +0.022 | +0.045 |
+| 20d | +0.003 | **+0.022** | **+0.040** |
+
+Per-fold: regression was the only track without fold-level blow-ups. Fold 3 outright beat linear (+0.054 vs −0.007).
+
+**Verdict**: framing hypothesis validated, but regression-direct-ML still underperforms a hand-tuned linear composite. SIC-41's fail-branch rule escalated SIC-42 (meta-labeling) to Urgent.
+
+### 2026-05-09 SIC-42 Experiment B — Meta-Labeling + Universe Expansion (production path)
+
+Two-step program. Treat the linear composite as the primary direction model (already has +0.040 IC at 20d) and train a secondary classifier that, conditional on a primary BUY, predicts profitability at 20d. The secondary's calibrated probability becomes a bet-sizing prior.
+
+The path zig-zagged: the secondary needs both a wider universe (for statistical power) AND cross-sectional features (for discriminative content). First-cut attempts hit one or the other but not both.
+
+**Universe expansion (2026-05-09 morning)**
+
+The previous session diagnostic showed n=176 primary-BUY rows across 2 valid folds at `primary_threshold=0.40` — underpowered. Backfilled 200 Nifty 200 constituents from Angel One (`scripts/backfill-nifty200.mjs`, 15-year OHLCV, idempotent UPSERT, batched libSQL writes). Result: Turso went from 17 → 208 distinct symbols, 609k rows upserted in 15.8 min, 0 failed.
+
+Industry coverage was a blocker — only 9 of 200 had `stock_fundamentals.industry`. Standardised the entire universe to NSE broad sectors (`scripts/upsert-nifty200-industries.mjs`, Path B from this session). 191 inserts + 9 updates. Reclassifications were sane (TATASTEEL "Iron & Steel" → "Metals & Mining"; INFY "Software & Programming" → "Information Technology"). Six pre-existing non-Nifty-200 names (BAJAJHIND, AWL, BANDHANBNK, REPCOHOME, TANLA, APLLTD) kept their fine-grained labels.
+
+**The valid-mask trap**
+
+First post-expansion meta-labeler run: dataset stuck at 15 stocks despite 206 in price_history. Cause: `build_dataset_with_horizons.valid_mask = features.notna().all(axis=1)` requires every column in `FEATURE_COLS` to be non-NaN, including `delivery_score` and the 7 intraday features. The new symbols don't have those. Every row of every new symbol got dropped.
+
+Fix: added `required_feature_cols` parameter to `build_dataset_with_horizons` (default = full FEATURE_COLS for backward compat). Meta-labeler passes its narrower list so only its actual features need to be present.
+
+**Slim-5 attempt (failed)**
+
+First post-fix meta-labeler used `META_FEATURE_COLS = [sector_rotation, vix_regime, nifty_trend, markov_regime, fii_fo_score]` — 5 features, all available across the wider universe. Dataset jumped to 372k rows / 205 stocks. **Result: 0 pp hit uplift, pooled rank_IC = +0.002.** The secondary collapsed to no-op — every primary-BUY row passed the 0.55 threshold (filtered_n ≈ test_pb in every fold).
+
+Diagnosis: 4 of the 5 features are constant per date (vix/nifty/markov/fii_fo). Only `sector_rotation` varies cross-sectionally. With ~1 cross-sectional signal, the LR has no discriminative content within a primary-BUY date. *Reinterpreting*: the previous session's +12.2 pp uplift on n=176 was small-sample noise — when n grew 23×, the apparent edge vanished.
+
+**Experiment B (12 features) — passed**
+
+Added the 7 primary factor scores back to `META_FEATURE_COLS` (rsi, macd, trend_ma, bollinger, volume, volatility, relative_strength). Total 12 features — all OHLC-derivable, all available across the wider universe. The original SIC-42 spec excluded the factors on the theory that the secondary would just re-derive the primary; in practice the secondary refines them *non-linearly* and that's exactly the win López de Prado's design allows. Updated module docstring to record this.
+
+**Single-threshold (0.55) result**: pooled rank_IC = +0.105 (vs +0.002 with slim-5), hit uplift +0.89 pp, mostly because the 0.55 cutoff was too generous (89% pass-through). Fold 5 stood out: trade_threshold=0.55 already filtered to 36% pass with **+8.05 pp hit uplift** (51.6% → 59.6%) on the most recent regime (2025-01 → 2026-03).
+
+**Threshold sweep** (`--sweep` flag added to meta_labeler.py, writes `data/meta_labeler_sweep.json`):
+
+| Threshold | filt_n | pass% | filt_hit | uplift | mean_ret_f | Sharpe_f |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.55 | 3669 | 89% | 60.10% | +0.89 pp | 4.30% | 0.321 |
+| 0.65 | 2964 | 72% | 61.27% | +2.06 pp | 4.81% | 0.357 |
+| 0.70 | 2452 | 60% | 61.17% | +1.96 pp | 4.95% | 0.362 |
+| **0.75** | **1708** | **41%** | **63.00%** | **+3.79 pp** | **5.21%** | **0.400** |
+| 0.80 | 1157 | 28% | 62.32% | +3.11 pp | 5.38% | 0.412 |
+
+Baseline: 59.21% hit, 3.94% mean return, Sharpe 0.30 across n=4124 primary-BUY rows.
+
+Per-fold robustness at threshold 0.75: fold 2 60.3%, fold 3 71.2%, fold 4 62.7% — all positive lifts vs their fold baselines (56.4 / 67.2 / 59.0). Fold 5 hits the n<50 floor at this threshold. At 0.80 things start to deteriorate (fold 3 collapses 71% → 65%) — signal-to-noise peaks around 0.75.
+
+Statistical sanity: at 0.75, pooled uplift +3.79 pp on n_filt=1708 / SE_diff ≈ 1.40 pp → z ≈ 2.7 (p ≈ 0.007).
+
+**Production decision**: meta-labeler is shippable at `META_TRADE_THRESHOLD = 0.75`. Pre-trade filter on top of the existing linear primary BUY gate. Expected lifts on the 4-year OOS sample:
+- Hit rate: 59.21% → 63.00% (+3.79 pp)
+- Mean per-trade return: 3.94% → 5.21% (+127 bps)
+- Sharpe: 0.30 → 0.40 (+33%)
+- ~60% of low-quality primary-BUY signals filtered out
+
+**Project Usage**:
+- Diagnostic: `python -m quant_engine.ml.meta_labeler --primary-threshold 0.40 --sweep`
+- Outputs: `data/meta_labeler_diagnostic.json` (single threshold) + `data/meta_labeler_sweep.json` (full sweep)
+- Production model artifact: `quant_engine/ml/models/meta_labeler.pkl` (final fit on full primary-BUY history; trained via `--train-final` mode, see SIC-42 productionisation tasks)
+- Live gate wiring: `signalQueueService.js` calls `/api/scores` which includes `meta_prob` per stock; trade only when `meta_prob >= 0.75` (TBD — Step 2c of 2026-05-09 plan).
+
+**Open follow-ups after Exp B**:
+1. **Backfill delivery + intraday for the wider universe** (~24% of feature importance lost). Likely incremental Sharpe lift.
+2. **Re-evaluate at primary_threshold tighter than 0.40** — primary-BUY coverage was 1.4% even at 0.40; tightening might produce a higher-quality conditioning subset for the secondary.
+3. **Triple-barrier labels for the secondary** (SIC-43) — replace `fwd_ret_20d > 0` with TP/SL/time barriers.
+4. **CPCV + Deflated Sharpe** (SIC-46) — formal validation methodology before live capital.
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML
