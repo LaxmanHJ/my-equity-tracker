@@ -60,6 +60,8 @@ _FETCH_SQL = """
         sl.linear_signal,
         sl.ml_confidence,
         sl.composite_score,
+        sl.meta_prob,
+        sl.meta_pass,
         entry.close   AS entry_price,
         entry.date    AS entry_bar_date,
         exit1.close   AS exit_price_1d,
@@ -129,6 +131,16 @@ def _fetch_signals(limit: int) -> pd.DataFrame:
     # column always reflects the linear direction for hit-rate computation.
     df["signed_linear"] = df["composite_score"].fillna(0.0)
     df["effective_linear_signal"] = df["linear_signal"].fillna(df["signal"])
+
+    # Meta-labeler track (SIC-42) — meta_prob is only populated when the linear
+    # primary said LONG (the secondary's training distribution). Score is the
+    # raw probability; "signal" for hit-rate uses meta_pass: 1 → LONG (gate
+    # would have taken the trade), 0 → no position (gate would have rejected).
+    # Persisting on EVERY primary-BUY row, regardless of meta_pass, is what
+    # avoids the selection bias that would inflate the meta IC if we only
+    # logged trades the gate kept.
+    df["signed_meta"] = df["meta_prob"]
+    df["effective_meta_signal"] = df["meta_pass"].map({1: "LONG", 0: "HOLD"})
 
     return df
 
@@ -263,9 +275,11 @@ def get_signal_quality(limit: int = 500):
     # Per-engine horizon stats
     ml_horizons     = _engine_horizons(df, "signed_confidence", "signal")
     linear_horizons = _engine_horizons(df, "signed_linear",     "effective_linear_signal")
+    meta_horizons   = _engine_horizons(df, "signed_meta",       "effective_meta_signal")
 
     ml_eligible     = int(df["ml_confidence"].notna().sum())
     linear_eligible = int(df["composite_score"].notna().sum())
+    meta_eligible   = int(df["meta_prob"].notna().sum())
 
     def _summary(horizons, fwd_col, eligible):
         h20 = next((h for h in horizons if h["days"] == 20), {})
@@ -279,11 +293,12 @@ def get_signal_quality(limit: int = 500):
             "eligible_rows": eligible,
         })
 
-    # Most recent 40 signals — both engines side by side
+    # Most recent 40 signals — all three engines side by side
     journal_cols = [
         "signal_date", "symbol",
         "signal", "ml_confidence",       # ML engine
         "linear_signal", "composite_score",  # Linear engine
+        "meta_prob", "meta_pass",        # Meta-labeler (SIC-42)
         "entry_price", "entry_bar_date",
         "fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_20d",
     ]
@@ -296,6 +311,8 @@ def get_signal_quality(limit: int = 500):
                            "horizons": _clean_records(ml_horizons)},
         "linear":         {"summary": _summary(linear_horizons, "fwd_ret_20d", linear_eligible),
                            "horizons": _clean_records(linear_horizons)},
+        "meta":           {"summary": _summary(meta_horizons,   "fwd_ret_20d", meta_eligible),
+                           "horizons": _clean_records(meta_horizons)},
         "recent_signals": _clean_records(recent.to_dict(orient="records")),
     }
 
@@ -304,6 +321,7 @@ _VALID_HORIZONS = {h["days"] for h in _HORIZONS}
 _TRACK_COLS = {
     "ml":     "signed_confidence",
     "linear": "signed_linear",
+    "meta":   "signed_meta",
 }
 
 
