@@ -1,0 +1,26 @@
+{
+  "trained_at": "2026-05-08T21:39:13.709048+00:00",
+  "primary_threshold": 0.4,
+  "trade_threshold": 0.75,
+  "feature_cols": [
+    "rsi",
+    "macd",
+    "trend_ma",
+    "bollinger",
+    "volume",
+    "volatility",
+    "relative_strength",
+    "sector_rotation",
+    "vix_regime",
+    "nifty_trend",
+    "markov_regime",
+    "fii_fo_score"
+  ],
+  "n_train_rows": 5027,
+  "train_pos_rate": 0.6195,
+  "n_total_rows_in_dataset": 372133,
+  "n_stocks": 205,
+  "label_def": "1 if fwd_ret_20d > 0 else 0",
+  "model_path": "/Users/elj/Desktop/Proyectos/PersonalStockAnalyser/quant_engine/ml/models/meta_labeler.pkl",
+  "notes": "Final-fit meta-labeler. Predicts P(profitable @ 20d | primary BUY) for live scoring. Walk-forward OOS validation lives in data/meta_labeler_sweep.json \u2014 re-run --sweep before each retrain."
+}

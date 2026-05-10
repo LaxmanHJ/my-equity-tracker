@@ -155,7 +155,9 @@ def _compute_linear_composite(df: pd.DataFrame,
     ).clip(-1.0, 1.0)
 
 
-def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_dataset_with_horizons(
+    required_feature_cols: Optional[list[str]] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build (X, meta) where:
       X    — FEATURE_COLS feature matrix, date-sorted (same as trainer.py).
@@ -171,7 +173,16 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
       BUY  ( 1): 20d fwd ret >  BUY_RETURN_THRESHOLD
       SELL (-1): 20d fwd ret <  SELL_RETURN_THRESHOLD
       HOLD ( 0): otherwise
+
+    `required_feature_cols` controls which columns must be non-NaN for a
+    row to survive `valid_mask`. Defaults to FEATURE_COLS (full ML matrix
+    — preserves diagnostic.py's existing behaviour). The meta-labeler
+    passes its own narrower list so symbols missing the cohort-only
+    features (delivery, intraday) aren't dropped wholesale from the
+    expanded NSE-wide universe.
     """
+    if required_feature_cols is None:
+        required_feature_cols = FEATURE_COLS
     symbols = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
     industry_map = load_industry_map()
@@ -263,7 +274,7 @@ def build_dataset_with_horizons() -> tuple[pd.DataFrame, pd.DataFrame]:
             # 20d label to be non-null. 20d is the longest horizon, so the
             # shorter horizons are automatically non-null for these rows.
             label_fwd = fwd_rets["fwd_ret_20d"]
-            valid_mask = features.notna().all(axis=1) & label_fwd.notna()
+            valid_mask = features[required_feature_cols].notna().all(axis=1) & label_fwd.notna()
             features = features[valid_mask]
             fwd_rets = fwd_rets[valid_mask]
             linear_score = linear_score.reindex(features.index)

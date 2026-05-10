@@ -121,6 +121,7 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
     # ── ML signal — primary when model is available ───────────────────────────
     ml_result  = None
     ml_signal  = None
+    sub_scores = None  # populated below when ML path runs; reused by meta-labeler
 
     ml_unavailable = False  # True means model exists but features incomplete on this bar
     try:
@@ -178,6 +179,27 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
         result["ml_verdict"]       = ml_result["verdict"]
         result["ml_confidence"]    = ml_result["confidence"]
         result["ml_probabilities"] = ml_result["probabilities"]
+
+    # ── Meta-labeler prior — bet-sizing on top of linear primary BUY ────────
+    # Only meaningful when the linear primary said LONG; below that threshold
+    # the secondary's training distribution doesn't apply. Builds sub_scores
+    # locally if the existing ML path didn't (e.g., when sicilian_rf.pkl is
+    # absent). Failures abstain — meta_prob = None lets Node fall back to the
+    # linear gate alone.
+    if linear_signal == "LONG":
+        try:
+            from quant_engine.ml import meta_labeler as _meta
+            if _meta.is_model_available():
+                meta_features = sub_scores if sub_scores is not None else \
+                    _build_ml_sub_scores(symbol, df, benchmark_df)
+                if meta_features is not None:
+                    p = _meta.predict_proba(meta_features)
+                    if p is not None:
+                        result["meta_prob"] = p
+                        result["meta_pass"] = p >= _meta.META_TRADE_THRESHOLD
+                        result["meta_threshold"] = _meta.META_TRADE_THRESHOLD
+        except Exception as exc:
+            logger.warning("meta-labeler scoring failed for %s: %s", symbol, exc)
 
     return result
 
