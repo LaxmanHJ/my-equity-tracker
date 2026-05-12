@@ -16,7 +16,13 @@ from unittest.mock import patch
 
 from quant_engine.sentiment.aggregator import aggregate_articles, _date_key
 from quant_engine.sentiment.features import _log_scale_count, SentimentFeatures
-from quant_engine.sentiment.sources import Article
+from quant_engine.sentiment.scorer import _extract_score_from_claude_text, score_text
+from quant_engine.sentiment.sources import (
+    Article,
+    _parse_stock_news_date,
+    fetch_all_sources,
+    DEFAULT_SOURCES,
+)
 
 
 def _mk(symbol, dt, title, body="", source="test", url="") -> Article:
@@ -131,6 +137,137 @@ class _DummyInfo:
     """Stand-in for ScorerInfo so we can avoid importing it in fixtures."""
     def __init__(self, version):
         self.version = version
+
+
+# ── Claude scorer parsing ────────────────────────────────────────────────────
+
+class TestClaudeReplyExtraction(unittest.TestCase):
+    def test_plain_json(self):
+        self.assertEqual(_extract_score_from_claude_text('{"score": 0.6}'), 0.6)
+
+    def test_json_with_whitespace(self):
+        self.assertEqual(_extract_score_from_claude_text('  {"score":-0.3}  '), -0.3)
+
+    def test_extracts_from_fenced_reply(self):
+        # Claude sometimes wraps JSON with prose despite the instruction.
+        out = _extract_score_from_claude_text(
+            "Here is the analysis: {\"score\": 0.42, \"reason\": \"upgrade\"}"
+        )
+        self.assertEqual(out, 0.42)
+
+    def test_falls_back_to_first_number_in_range(self):
+        # If JSON parsing fails entirely, regex picks up the first signed
+        # decimal that's within [-1, 1].
+        self.assertEqual(_extract_score_from_claude_text("sentiment score: 0.75"), 0.75)
+
+    def test_rejects_out_of_range(self):
+        self.assertIsNone(_extract_score_from_claude_text('{"score": 5.0}'))
+        self.assertIsNone(_extract_score_from_claude_text('{"score": -2.0}'))
+
+    def test_returns_none_for_garbage(self):
+        self.assertIsNone(_extract_score_from_claude_text("no numbers here"))
+
+
+class TestScoreTextChain(unittest.TestCase):
+    def test_chain_falls_through_when_first_abstains(self):
+        # First scorer returns None — chain should try the next.
+        with patch.dict(
+            "quant_engine.sentiment.scorer._SCORERS",
+            {
+                "claude_v1":   lambda _t: None,
+                "textblob_v1": lambda _t: 0.25,
+            },
+            clear=False,
+        ):
+            score, info = score_text(
+                "INFY beats Q4 guidance",
+                prefer=("claude_v1", "textblob_v1"),
+            )
+        self.assertEqual(score, 0.25)
+        self.assertEqual(info.version, "textblob_v1")
+
+    def test_chain_returns_none_when_all_abstain(self):
+        with patch.dict(
+            "quant_engine.sentiment.scorer._SCORERS",
+            {
+                "claude_v1":   lambda _t: None,
+                "textblob_v1": lambda _t: None,
+            },
+            clear=False,
+        ):
+            score, info = score_text("x", prefer=("claude_v1", "textblob_v1"))
+        self.assertIsNone(score)
+        self.assertIsNone(info)
+
+    def test_clips_to_declared_range(self):
+        # If a scorer returns out-of-range, score_text must clip to range.
+        with patch.dict(
+            "quant_engine.sentiment.scorer._SCORERS",
+            {"textblob_v1": lambda _t: 1.5},
+            clear=False,
+        ):
+            score, _ = score_text("x", prefer=("textblob_v1",))
+        self.assertEqual(score, 1.0)
+
+
+# ── stock_news source ────────────────────────────────────────────────────────
+
+class TestStockNewsDateParser(unittest.TestCase):
+    def test_iso_zulu(self):
+        dt = _parse_stock_news_date("2026-05-12T14:30:00Z")
+        self.assertEqual(dt.year, 2026)
+        self.assertEqual(dt.month, 5)
+        self.assertEqual(dt.day, 12)
+        self.assertIsNotNone(dt.tzinfo)
+
+    def test_plain_date(self):
+        dt = _parse_stock_news_date("2026-05-12")
+        self.assertEqual((dt.year, dt.month, dt.day), (2026, 5, 12))
+
+    def test_indian_press_format(self):
+        # `12 May 2026` style sometimes appears in RapidAPI replies.
+        dt = _parse_stock_news_date("12 May 2026")
+        self.assertEqual((dt.year, dt.month, dt.day), (2026, 5, 12))
+
+    def test_unknown_format_defaults_to_now(self):
+        # Better to over-include than to silently drop the row.
+        dt = _parse_stock_news_date("garbage format")
+        # Should be within a minute of "now"
+        self.assertLess(abs((datetime.now(timezone.utc) - dt).total_seconds()), 60)
+
+
+class TestFetchAllSourcesDefaultChain(unittest.TestCase):
+    def test_default_is_stock_news_then_newsapi(self):
+        # Document the production default chain — guards against silent
+        # config drift if someone reorders DEFAULT_SOURCES.
+        self.assertEqual(DEFAULT_SOURCES, ("stock_news", "newsapi"))
+
+    def test_dedup_by_url(self):
+        # Two sources return overlapping URLs — only the first should survive.
+        fake_stock_news = lambda _s, _d: [
+            Article("INFY", datetime(2026, 5, 12, tzinfo=timezone.utc),
+                    "INFY upgrade", source="stock_news", url="https://x/1"),
+        ]
+        fake_newsapi = lambda _s, _c, _d: [
+            Article("INFY", datetime(2026, 5, 12, tzinfo=timezone.utc),
+                    "INFY upgrade (dup)", source="newsapi", url="https://x/1"),
+            Article("INFY", datetime(2026, 5, 12, tzinfo=timezone.utc),
+                    "INFY new article", source="newsapi", url="https://x/2"),
+        ]
+        with patch.dict(
+            "quant_engine.sentiment.sources._SOURCE_FETCHERS",
+            {
+                "stock_news": (fake_stock_news, False),
+                "newsapi":    (fake_newsapi, True),
+            },
+            clear=False,
+        ):
+            out = fetch_all_sources("INFY", "Infosys", days_back=1,
+                                    enabled=("stock_news", "newsapi"))
+        urls = [a.url for a in out]
+        # Two distinct URLs, with stock_news winning the duplicate.
+        self.assertEqual(urls, ["https://x/1", "https://x/2"])
+        self.assertEqual(out[0].title, "INFY upgrade")
 
 
 if __name__ == "__main__":

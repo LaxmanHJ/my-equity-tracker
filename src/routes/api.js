@@ -475,6 +475,29 @@ router.post('/portfolio/sync', async (req, res) => {
       console.warn('[ForceSync] ⚠️ VIX sync skipped (quant engine unavailable):', e.message);
     }
 
+    // Score today's sentiment from stock_news (and NewsAPI if configured)
+    // and upsert into sentiment_daily. Runs after stock_news is populated by
+    // getAllQuotes above, so the same force-sync picks up news → score in
+    // one pass. Idempotent: UPSERT on (symbol, date).
+    try {
+      const sentRes = await fetch(
+        `${QUANT_ENGINE_URL}/api/sync/sentiment?days=1`,
+        { method: 'POST' },
+      );
+      const sentData = await sentRes.json();
+      if (sentData.success) {
+        console.log(
+          `[ForceSync] ✅ Sentiment synced: ${sentData.symbols} symbols, ` +
+          `${sentData.articles} articles, ${sentData.rows_written} rows ` +
+          `(scorers: ${(sentData.available_scorers || []).join(',') || 'none'})`,
+        );
+      } else {
+        console.warn(`[ForceSync] ⚠️ Sentiment sync failed: ${sentData.error}`);
+      }
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ Sentiment sync skipped (quant engine unavailable):', e.message);
+    }
+
     res.json({
       success: true,
       synced: quotes.length,

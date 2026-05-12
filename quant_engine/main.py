@@ -9,7 +9,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from quant_engine.config import HOST, PORT
-from quant_engine.routers import scores, index_analysis, backtest, sicilian, ml, signal_quality
+from quant_engine.routers import scores, index_analysis, backtest, sicilian, ml, signal_quality, sentiment
 
 app = FastAPI(
     title="Stock Quant Engine",
@@ -32,6 +32,7 @@ app.include_router(backtest.router)
 app.include_router(sicilian.router)
 app.include_router(ml.router)
 app.include_router(signal_quality.router)
+app.include_router(sentiment.router)
 
 
 @app.get("/health")

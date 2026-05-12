@@ -17,6 +17,7 @@ from quant_engine.sentiment.features import (
     SentimentFeatures,
     build_sentiment_features,
 )
+from quant_engine.sentiment.backfill import run_pipeline
 
 __all__ = [
     "score_text",
@@ -24,4 +25,5 @@ __all__ = [
     "available_scorers",
     "SentimentFeatures",
     "build_sentiment_features",
+    "run_pipeline",
 ]

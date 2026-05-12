@@ -26,23 +26,27 @@ quant_engine/sentiment/
 
 | Source | Status | Notes |
 |---|---|---|
-| `newsapi` | live | NEWS_API_KEY in `.env`. Single endpoint; absent key → empty list, pipeline still runs. |
+| `stock_news` | **live, primary** | Reads from the Turso `stock_news` table that Node's `POST /api/portfolio/sync` populates from the RapidAPI Indian Stock Exchange `recentNews` field. Already stock-tagged at the source — no entity-linking false positives. No extra API spend. |
+| `newsapi` | live, supplementary | NewsAPI `/v2/everything` per-stock query. Needs `NEWS_API_KEY`. Naive name match has false-positive risk ("Tata Power" can hit Tata Steel articles). Boosts recall when `stock_news` is sparse. |
 | `moneycontrol` | stub | Company-news RSS — parser TBD. |
 | `economic_times` | stub | Markets/stocks RSS — parser TBD. |
 | `nse_disclosures` | stub | NSE corporate-announcements API — needs session cookie handling. |
 
-Enable via `SENTIMENT_SOURCES=newsapi,moneycontrol` (env) or `--source` CLI flag.
+Default chain (`DEFAULT_SOURCES`): `("stock_news", "newsapi")`. The aggregator dedupes by URL so an article appearing in both sources is counted once, with `stock_news` winning (first in the chain). Override via `SENTIMENT_SOURCES=stock_news` (env) or `--source` CLI flag.
 
 ### Scorers
 
 | Scorer | Status | Range | Notes |
 |---|---|---|---|
-| `textblob_v1` | available | [-1, +1] | Baseline. Already in `requirements.txt`. Coarse; misclassifies finance jargon. |
-| `finbert_v1`  | optional dep | [-1, +1] as `P(pos) − P(neg)` | Lazy-imports `transformers`. Set `FINBERT_MODEL` env to override default `yiyanghkust/finbert-tone`. Target production scorer. |
+| `claude_v1` | **live, primary** | [-1, +1] (`sentiment_score`) | Calls `claude-haiku-4-5-20251001` via the `anthropic` SDK. ~$0.0003 per headline ≈ $0.50/month at portfolio scale. Requires `ANTHROPIC_API_KEY`. Abstains cleanly when key/SDK missing so the chain falls through. |
+| `textblob_v1` | available, fallback | [-1, +1] (polarity) | Already in `requirements.txt`. Coarse; misclassifies finance jargon. Catches everything when Claude is unavailable. |
+| `finbert_v1` | optional dep | [-1, +1] as `P(pos) − P(neg)` | Lazy-imports `transformers` (~1.5 GB install). Local inference alternative to Claude when you don't want API spend. Not in the default chain. |
 
-Default chain (`DEFAULT_SCORER_CHAIN`): `("finbert_v1", "textblob_v1")` — FinBERT preferred when available, falls back to TextBlob automatically. Override per-call via `prefer=(...)` or globally via `SENTIMENT_SCORER`.
+Default chain (`DEFAULT_SCORER_CHAIN`): `("claude_v1", "textblob_v1")` — Claude when key is set, TextBlob otherwise. Override per-call via `prefer=(...)` or globally via `SENTIMENT_SCORER`. The aggregator stores `scorer_version` (including the Claude model ID) per row so re-running with a different scorer doesn't silently mix label-set semantics.
 
-The aggregator stores `scorer_version` per row so re-running with a different scorer doesn't silently mix label-set semantics.
+**Cost envelope** (Claude haiku, 60 articles/day, 30 days/month):
+- ~1,800 API calls/month × ~$0.0003 each = **~$0.54/month**
+- Negligible relative to live capital; cheaper than NewsAPI's paid tier.
 
 ### Storage — `sentiment_daily`
 
@@ -79,7 +83,8 @@ Missing days return NaN — downstream callers should treat sentiment as a **sof
 ### Phase 1 — Data collection (2026-05-12, shipped)
 - Module scaffolding live in `quant_engine/sentiment/`.
 - `sentiment_daily` schema auto-created on first write.
-- Nightly cron candidate: `python -m quant_engine.sentiment.backfill --portfolio --days 1`.
+- **Force-sync integration**: `POST /api/sync/sentiment` Python endpoint invoked by Node's `POST /api/portfolio/sync` flow alongside VIX / FII / PCR. Runs after `getAllQuotes` populates `stock_news`, so news → score happens in a single force-sync pass.
+- Manual CLI: `python -m quant_engine.sentiment.backfill --portfolio --days 1` (still supported; useful for backfilling >1 day history).
 - Scoring engine (`scoring/composite.py`) attaches `sentiment` to every score payload (observational only — no gating).
 - Weight in linear composite: **0%**. Reason: no live IC measurement yet.
 
@@ -98,11 +103,23 @@ Missing days return NaN — downstream callers should treat sentiment as a **sof
 
 ## Project Usage
 
-- **CLI**: `python -m quant_engine.sentiment.backfill --portfolio --days 1` (nightly cron).
-- **Manual**: `python -m quant_engine.sentiment.backfill --symbols INFY,TANLA --days 30 --dry-run`.
-- **Scorer override**: `--scorer textblob_v1` (default chain prefers FinBERT when installed).
-- **Programmatic**: `from quant_engine.sentiment import build_sentiment_features; sf = build_sentiment_features("INFY")`.
+- **Force sync**: `POST /api/portfolio/sync` (Node) automatically calls `POST /api/sync/sentiment?days=1` (Python) after refreshing prices + `stock_news`. No extra step needed.
+- **Manual API call**: `curl -X POST 'http://localhost:5001/api/sync/sentiment?days=30&symbols=INFY,TANLA'` — useful for backfilling history or scoring an ad-hoc subset.
+- **Manual CLI**: `python -m quant_engine.sentiment.backfill --portfolio --days 30 --dry-run` (same code path as the route).
+- **Scorer override**: `--scorer textblob_v1` (default chain prefers Claude when `ANTHROPIC_API_KEY` is set).
+- **Programmatic**: `from quant_engine.sentiment import run_pipeline, build_sentiment_features`.
 - **Live exposure**: every `/api/scores` payload now includes a `sentiment` dict (24h / 5d / momentum / n_5d / n_articles_24h / last_date) — empty `{...}` while `sentiment_daily` is unpopulated.
+
+## Environment variables
+
+| Var | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | unset | Enables `claude_v1` scorer. Already used by Node's claude_final_gate. |
+| `CLAUDE_SENTIMENT_MODEL` | `claude-haiku-4-5-20251001` | Override scorer model. Haiku is cheapest; opus is overkill for headlines. |
+| `NEWS_API_KEY` | unset | Enables NewsAPI source. Optional — pipeline runs from `stock_news` alone if unset. |
+| `SENTIMENT_SOURCES` | `stock_news,newsapi` | Comma-separated override of default chain. |
+| `SENTIMENT_SCORER` | unset | If set, forces a single scorer (e.g. `textblob_v1`); skips the chain. |
+| `FINBERT_MODEL` | `yiyanghkust/finbert-tone` | Override FinBERT checkpoint if using the local-inference path. |
 
 ## Tests
 

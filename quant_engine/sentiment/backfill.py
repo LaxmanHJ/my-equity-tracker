@@ -1,32 +1,38 @@
 """
-Backfill / nightly-refresh CLI for the sentiment_daily table.
+Backfill / refresh entry point for the sentiment_daily table.
 
-Modes:
-  --portfolio          Use the Node portfolio's company list (default)
-  --symbols SYMS       Comma-separated list of NSE symbols to process
-  --days N             Lookback days (default 1 — meant for nightly cron)
-  --source SRC[,SRC]   Comma-separated source list; default `newsapi`
-                       (env SENTIMENT_SOURCES wins if set)
-  --scorer NAME        Force a specific scorer (textblob_v1 / finbert_v1)
+Two callable surfaces:
+
+  CLI         — `python -m quant_engine.sentiment.backfill --portfolio --days 1`
+                Used for ad-hoc seeding and historical backfills.
+
+  Function    — `run_pipeline(symbols=..., days_back=..., ...)`
+                Used by the FastAPI `POST /api/sync/sentiment` endpoint
+                which the Node force-sync flow invokes. Same code path
+                as the CLI; returns a dict suitable for the HTTP response.
+
+Flags:
+  --portfolio          Use the production portfolio (default)
+  --symbols SYMS       Comma-separated list of NSE symbols
+  --days N             Lookback window (default 1)
+  --source SRC[,SRC]   Override sources (env SENTIMENT_SOURCES wins otherwise)
+  --scorer NAME        Force a specific scorer
   --dry-run            Score articles, print rollup, skip Turso write
 
 Examples:
-  # nightly cron entry (1d window, NewsAPI)
   python -m quant_engine.sentiment.backfill --portfolio --days 1
+  python -m quant_engine.sentiment.backfill --symbols INFY --days 30 --dry-run
 
-  # one-off historical seed
-  python -m quant_engine.sentiment.backfill --symbols INFY,TANLA --days 30
-
-The company-name map lives in `quant_engine/sentiment/_companies.py` (not
-the Node portfolio.js so this stays Python-pure). For symbols not in the
-map the symbol itself is used as the query — typically still finds
-results because Indian financial press uses tickers freely.
+Symbol → company-name map lives in this file (no cross-language coupling
+to portfolio.js). Unknown symbols fall through to using the symbol itself
+as the NewsAPI query — Indian financial press uses tickers freely.
 """
 from __future__ import annotations
 
 import argparse
 import logging
 from pathlib import Path
+from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 
@@ -64,6 +70,99 @@ def _resolve_company(symbol: str) -> str:
     return SYMBOL_TO_COMPANY.get(symbol.upper(), symbol)
 
 
+def run_pipeline(
+    symbols: Optional[Iterable[str]] = None,
+    days_back: int = 1,
+    sources: Optional[Iterable[str]] = None,
+    scorer: Optional[str] = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    End-to-end fetch → score → aggregate → upsert.
+
+    Used by both the CLI and the `/api/sync/sentiment` FastAPI route. Safe
+    to call repeatedly (UPSERT on the sentiment_daily PRIMARY KEY makes
+    re-runs idempotent within a day).
+
+    Args:
+        symbols:  iterable of NSE symbols. None → full SYMBOL_TO_COMPANY map.
+        days_back: lookback window in calendar days.
+        sources:  iterable of source names. None → DEFAULT_SOURCES (or env).
+        scorer:   force one scorer; None → default chain.
+        dry_run:  fetch + score + log, but skip Turso writes.
+
+    Returns:
+        Summary dict shaped for HTTP responses:
+        {
+            "symbols": int, "articles": int, "rows_written": int,
+            "per_symbol": [{"symbol", "n_articles", "rows"} ...],
+            "dry_run": bool,
+        }
+    """
+    sym_list = (
+        [s.strip().upper() for s in symbols if s and s.strip()]
+        if symbols is not None
+        else list(SYMBOL_TO_COMPANY.keys())
+    )
+    enabled_sources = list(sources) if sources else None
+    prefer_scorer = (scorer,) if scorer else None
+
+    if not dry_run:
+        ensure_schema()
+
+    total_articles = 0
+    total_rows = 0
+    per_symbol: list[dict] = []
+
+    for sym in sym_list:
+        company = _resolve_company(sym)
+        articles = fetch_all_sources(
+            sym, company,
+            days_back=days_back,
+            enabled=enabled_sources,
+        )
+        total_articles += len(articles)
+        if not articles:
+            per_symbol.append({"symbol": sym, "n_articles": 0, "rows": 0})
+            continue
+
+        rows = aggregate_articles(articles, prefer_scorer=prefer_scorer)
+        if not rows:
+            logger.info("No scorable articles for %s — every scorer abstained", sym)
+            per_symbol.append({"symbol": sym, "n_articles": len(articles), "rows": 0})
+            continue
+
+        if dry_run:
+            for r in rows:
+                logger.info(
+                    "[dry-run] %s %s  score=%s n=%d sources=%s scorer=%s",
+                    r["symbol"], r["date"], r["sent_score"],
+                    r["n_articles"], r["sources"], r["scorer_version"],
+                )
+            written = 0
+        else:
+            written = upsert_rows(rows)
+
+        total_rows += written
+        per_symbol.append({
+            "symbol": sym, "n_articles": len(articles), "rows": len(rows),
+        })
+
+    summary = {
+        "symbols":      len(sym_list),
+        "articles":     total_articles,
+        "rows_written": total_rows,
+        "per_symbol":   per_symbol,
+        "dry_run":      dry_run,
+    }
+    logger.info(
+        "Sentiment pipeline done: %d symbols, %d articles, %d rows %s",
+        len(sym_list), total_articles, total_rows,
+        "(dry-run)" if dry_run else "upserted",
+    )
+    return summary
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group()
@@ -89,52 +188,23 @@ def main() -> int:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
 
-    if args.symbols:
-        symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    else:
-        symbols = list(SYMBOL_TO_COMPANY.keys())
+    symbols = (
+        [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+        if args.symbols
+        else None
+    )
+    sources = (
+        [s.strip() for s in args.source.split(",") if s.strip()]
+        if args.source
+        else None
+    )
 
-    enabled_sources = None
-    if args.source:
-        enabled_sources = [s.strip() for s in args.source.split(",") if s.strip()]
-
-    prefer_scorer = (args.scorer,) if args.scorer else None
-
-    if not args.dry_run:
-        ensure_schema()
-
-    total_articles = 0
-    total_rows = 0
-    for sym in symbols:
-        company = _resolve_company(sym)
-        articles = fetch_all_sources(
-            sym, company,
-            days_back=args.days,
-            enabled=enabled_sources,
-        )
-        total_articles += len(articles)
-        if not articles:
-            continue
-
-        rows = aggregate_articles(articles, prefer_scorer=prefer_scorer)
-        if not rows:
-            logger.info("No scorable articles for %s — every scorer abstained", sym)
-            continue
-
-        if args.dry_run:
-            for r in rows:
-                logger.info(
-                    "[dry-run] %s %s  score=%s n=%d sources=%s scorer=%s",
-                    r["symbol"], r["date"], r["sent_score"],
-                    r["n_articles"], r["sources"], r["scorer_version"],
-                )
-        else:
-            total_rows += upsert_rows(rows)
-
-    logger.info(
-        "Done: %d symbols processed, %d articles fetched, %d rows %s",
-        len(symbols), total_articles, total_rows,
-        "(dry-run, nothing written)" if args.dry_run else "upserted",
+    run_pipeline(
+        symbols=symbols,
+        days_back=args.days,
+        sources=sources,
+        scorer=args.scorer,
+        dry_run=args.dry_run,
     )
     return 0
 

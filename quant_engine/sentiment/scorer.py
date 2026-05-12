@@ -5,39 +5,51 @@ A scorer takes a string (headline + short body) and returns a float in
 [-1.0, +1.0] together with a label-set ID so downstream code can record
 which model produced the score.
 
-Two scorers ship today:
+Three scorers ship today:
 
-  textblob_v1   — TextBlob polarity. Works out of the box (already in
-                  requirements.txt). Coarse; misclassifies a lot of
-                  finance-specific language ("beat estimates by 5%" can
-                  read neutral; "downgrade" is correctly negative). Used
-                  as the baseline so the pipeline produces signal even on
-                  hosts without ML deps installed.
+  claude_v1    — Calls claude-haiku-4-5 via the anthropic SDK. PRIMARY
+                 production scorer. Best quality on finance text;
+                 ~$0.0003 per headline (≈ $0.50/month at portfolio scale).
+                 Requires ANTHROPIC_API_KEY in .env; abstains cleanly if
+                 missing so the chain falls through.
 
-  finbert_v1    — FinBERT (yiyanghkust/finbert-tone or kdave/FineTuned_Finbert).
-                  Lazy-imports transformers + torch; raises a clear error
-                  if those aren't installed so the install step is obvious.
-                  Target scorer for production — Indian-finance fine-tuned
-                  variants beat vanilla FinBERT by ~15% F1 (see wiki).
+  textblob_v1  — TextBlob polarity. Works out of the box (already in
+                 requirements.txt). Coarse; misclassifies a lot of
+                 finance-specific language ("beat estimates by 5%" can
+                 read neutral). Baseline fallback so the pipeline
+                 produces signal even without API access.
+
+  finbert_v1   — FinBERT (yiyanghkust/finbert-tone or kdave/FineTuned_Finbert).
+                 Lazy-imports transformers + torch (~1.5 GB install).
+                 Optional alternative to Claude when you want local
+                 inference; not in the default chain to keep the install
+                 footprint small.
 
 Selection priority is settable per-call (`prefer=...`) or via the
-SENTIMENT_SCORER env var. Default chain: ["finbert_v1", "textblob_v1"]
-— FinBERT wins when available, falls back automatically.
+SENTIMENT_SCORER env var. Default chain: ["claude_v1", "textblob_v1"]
+— Claude wins when ANTHROPIC_API_KEY is set, falls back automatically
+to TextBlob otherwise.
 
-Why an interface rather than two functions: the aggregator needs to write
-`scorer_version` to Turso, and the swap from TextBlob → FinBERT shouldn't
-require touching backfill / feature code.
+Why an interface rather than three functions: the aggregator needs to
+write `scorer_version` to Turso, and swapping scorers shouldn't require
+touching backfill / feature code.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCORER_CHAIN = ("finbert_v1", "textblob_v1")
+DEFAULT_SCORER_CHAIN = ("claude_v1", "textblob_v1")
+
+# Use the cheapest current Claude model for sentiment. Opus is overkill for
+# headline classification and would cost ~30x more per call.
+CLAUDE_MODEL = os.getenv("CLAUDE_SENTIMENT_MODEL", "claude-haiku-4-5-20251001")
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,11 @@ class ScorerInfo:
 
 
 SCORER_INFO = {
+    "claude_v1": ScorerInfo(
+        version=f"claude_v1:{CLAUDE_MODEL}",
+        label_set="sentiment_score",
+        range=(-1.0, 1.0),
+    ),
     "textblob_v1": ScorerInfo(
         version="textblob_v1",
         label_set="polarity",
@@ -120,17 +137,135 @@ def _score_finbert(text: str) -> Optional[float]:
         return None
 
 
+_CLAUDE_CLIENT = None  # lazy-loaded singleton
+
+_CLAUDE_PROMPT = (
+    "You are a financial-news sentiment classifier for Indian equities. "
+    "Read the headline and return ONLY a JSON object of the form "
+    '{"score": <number between -1 and 1>} where -1 = strongly negative '
+    "for the stock price, +1 = strongly positive, 0 = neutral or "
+    "non-price-relevant. Consider: earnings beats/misses, guidance, "
+    "regulatory action, management change, M&A, downgrades, fraud, "
+    "macro-level company impact. Do not include any other text."
+)
+
+
+def _score_claude(text: str) -> Optional[float]:
+    """
+    Score a headline via claude-haiku-4-5. Returns None when:
+      * ANTHROPIC_API_KEY is missing (chain falls through to TextBlob)
+      * the anthropic SDK isn't installed
+      * the model returned an unparseable response (logged warning)
+      * any transport-level failure (logged warning, chain falls through)
+
+    Cost: ≈ 200 input + 15 output tokens per call → ≈ $0.0003 per headline
+    on Haiku 4.5 pricing as of 2026-05.
+    """
+    if not text or not text.strip():
+        return None
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None
+
+    global _CLAUDE_CLIENT
+    if _CLAUDE_CLIENT is None:
+        try:
+            import anthropic  # type: ignore[import-not-found]
+        except ImportError:
+            logger.info("anthropic SDK not installed; claude_v1 scorer unavailable")
+            return None
+        try:
+            _CLAUDE_CLIENT = anthropic.Anthropic()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("anthropic client init failed: %s", exc)
+            return None
+
+    try:
+        resp = _CLAUDE_CLIENT.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=30,
+            system=_CLAUDE_PROMPT,
+            messages=[{"role": "user", "content": text[:600]}],
+        )
+    except Exception as exc:  # noqa: BLE001 — third-party transport
+        logger.warning("Claude scorer transport failed: %s", exc)
+        return None
+
+    # Concatenate any text blocks in the reply (Claude can return >1 block)
+    raw = "".join(
+        getattr(b, "text", "") for b in (resp.content or [])
+    ).strip()
+    if not raw:
+        return None
+    return _extract_score_from_claude_text(raw)
+
+
+def _extract_score_from_claude_text(raw: str) -> Optional[float]:
+    """
+    Pull a numeric score out of Claude's reply.
+
+    Preferred path: parse as JSON `{"score": <num>}`. Fallback: regex for
+    the first signed decimal in [-1, 1]. Returns None if neither yields a
+    valid number in range — caller treats as abstain.
+    """
+    # JSON path
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict) and "score" in obj:
+            v = float(obj["score"])
+            if -1.0 <= v <= 1.0:
+                return v
+    except (ValueError, TypeError):
+        pass
+
+    # Fenced JSON block (sometimes the model wraps it)
+    m = re.search(r'\{[^{}]*"score"\s*:\s*(-?\d*\.?\d+)[^{}]*\}', raw)
+    if m:
+        try:
+            v = float(m.group(1))
+            if -1.0 <= v <= 1.0:
+                return v
+        except ValueError:
+            pass
+
+    # Last resort: first signed decimal in the reply
+    m = re.search(r'-?\d*\.?\d+', raw)
+    if m:
+        try:
+            v = float(m.group(0))
+            if -1.0 <= v <= 1.0:
+                return v
+        except ValueError:
+            pass
+
+    logger.warning("Claude returned unparseable sentiment reply: %r", raw[:200])
+    return None
+
+
 _SCORERS = {
+    "claude_v1":   _score_claude,
     "textblob_v1": _score_textblob,
     "finbert_v1":  _score_finbert,
 }
 
 
 def available_scorers() -> list[str]:
-    """Names of scorers whose dependencies are installed. Useful for diagnostics."""
+    """Names of scorers whose dependencies AND credentials are available.
+
+    A scorer is "available" only if a call would *plausibly* produce a
+    score — for Claude this means both the SDK is installed and the API
+    key is set. Useful for diagnostics / dashboard health checks.
+    """
     avail = []
     for name in _SCORERS:
-        if name == "textblob_v1":
+        if name == "claude_v1":
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                continue
+            try:
+                import anthropic  # noqa: F401
+                avail.append(name)
+            except ImportError:
+                pass
+        elif name == "textblob_v1":
             try:
                 import textblob  # noqa: F401
                 avail.append(name)
