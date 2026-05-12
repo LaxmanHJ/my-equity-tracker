@@ -9,6 +9,7 @@ Signal priority:
   2. Linear fallback — weighted sum of the 7 factor scores when ML is unavailable.
 """
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List
 
@@ -278,8 +279,14 @@ def score_all_stocks(symbols: Optional[List[str]] = None) -> List[dict]:
     """
     if symbols is None:
         symbols = load_all_symbols()
+    t0 = time.perf_counter()
     benchmark_df = load_benchmark()
     market_ctx = _build_market_context(benchmark_df)
+    # Pre-warm the IC cache before fanout so worker threads don't all serialize
+    # on _cache["lock"] inside get_active_weights() the first time around.
+    # No-op on a warm cache (already populated by FastAPI startup hook).
+    get_active_weights()
+    t_ctx = time.perf_counter()
 
     results = []
     max_workers = min(len(symbols), 10)
@@ -299,4 +306,10 @@ def score_all_stocks(symbols: Optional[List[str]] = None) -> List[dict]:
                 results.append(result)
 
     results.sort(key=lambda x: x["composite_score"], reverse=True)
+    t_end = time.perf_counter()
+    n = max(len(symbols), 1)
+    logger.info(
+        "score_all_stocks: %d symbols in %.2fs (ctx %.2fs, pool %.2fs, avg %.2fs/sym)",
+        len(symbols), t_end - t0, t_ctx - t0, t_end - t_ctx, (t_end - t_ctx) / n,
+    )
     return results

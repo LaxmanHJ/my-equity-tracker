@@ -32,23 +32,40 @@ FEATURE_COLUMNS = [
 ]
 
 
-def load_intraday(symbol: str) -> pd.DataFrame:
+def load_intraday(symbol: str, from_date: str | None = None) -> pd.DataFrame:
     """
     Read raw intraday_candles for a symbol.
     Returns a tz-aware DataFrame indexed by IST timestamp.
+
+    `from_date` is an optional `YYYY-MM-DD` lower bound applied in SQL. The
+    `ts` column is ISO-8601 with `+05:30` offset, so a date-prefix string
+    compares lexicographically against everything `>= YYYY-MM-DDT00:00…`.
+    Trainer/diagnostic call without `from_date` and get full history.
     """
     conn = connect()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT ts, open, high, low, close, volume
-            FROM intraday_candles
-            WHERE symbol = ?
-            ORDER BY ts ASC
-            """,
-            conn,
-            params=(symbol,),
-        )
+        if from_date:
+            df = pd.read_sql_query(
+                """
+                SELECT ts, open, high, low, close, volume
+                FROM intraday_candles
+                WHERE symbol = ? AND ts >= ?
+                ORDER BY ts ASC
+                """,
+                conn,
+                params=(symbol, from_date),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT ts, open, high, low, close, volume
+                FROM intraday_candles
+                WHERE symbol = ?
+                ORDER BY ts ASC
+                """,
+                conn,
+                params=(symbol,),
+            )
     finally:
         conn.close()
 
@@ -104,20 +121,40 @@ def _aggregate_daily_bars(intraday: pd.DataFrame) -> pd.DataFrame:
     return daily
 
 
-def _atr14_from_daily(symbol: str) -> pd.Series:
-    """Wilder-style ATR14 from daily price_history, indexed by date."""
+def _atr14_from_daily(symbol: str, limit: int | None = None) -> pd.Series:
+    """
+    Wilder-style ATR14 from daily price_history, indexed by date.
+
+    `limit` (optional): cap rows fetched from Turso to the most recent N.
+    Callers should pad for warmup (ATR14 needs 14 bars), e.g. `len(df) + 30`.
+    """
     conn = connect()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT date, high, low, close
-            FROM price_history
-            WHERE symbol = ?
-            ORDER BY date ASC
-            """,
-            conn,
-            params=(symbol,),
-        )
+        if limit:
+            df = pd.read_sql_query(
+                """
+                SELECT date, high, low, close FROM (
+                    SELECT date, high, low, close
+                    FROM price_history
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                ) ORDER BY date ASC
+                """,
+                conn,
+                params=(symbol, limit),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT date, high, low, close
+                FROM price_history
+                WHERE symbol = ?
+                ORDER BY date ASC
+                """,
+                conn,
+                params=(symbol,),
+            )
     finally:
         conn.close()
 
@@ -201,18 +238,27 @@ def _per_day_volume_features(intraday: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_intraday_features(symbol: str) -> pd.DataFrame:
+def build_intraday_features(
+    symbol: str,
+    from_date: str | None = None,
+    daily_limit: int | None = None,
+) -> pd.DataFrame:
     """
     Return a DataFrame with columns FEATURE_COLUMNS indexed by date for a symbol.
 
     Rows where any component is unavailable are dropped.
+
+    `from_date` filters intraday candles to `ts >= from_date`.
+    `daily_limit` caps the daily-OHLC rows used for ATR14.
+    Both default to None so trainer/diagnostic get full history; the live
+    scoring path passes both based on its 365-bar window.
     """
-    intraday = load_intraday(symbol)
+    intraday = load_intraday(symbol, from_date=from_date)
     if intraday.empty:
         return pd.DataFrame(columns=FEATURE_COLUMNS)
 
     daily = _aggregate_daily_bars(intraday)
-    atr = _atr14_from_daily(symbol)
+    atr = _atr14_from_daily(symbol, limit=daily_limit)
     if atr.empty:
         return pd.DataFrame(columns=FEATURE_COLUMNS)
 

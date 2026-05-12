@@ -14,22 +14,35 @@ def load_sector_series(index_name: str, limit: int = 500) -> pd.Series:
     """
     conn = connect()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT date, close
-            FROM sector_indices
-            WHERE index_name = ?
-            ORDER BY date ASC
-            """,
-            conn,
-            params=(index_name,),
-        )
+        if limit:
+            df = pd.read_sql_query(
+                """
+                SELECT date, close FROM (
+                    SELECT date, close
+                    FROM sector_indices
+                    WHERE index_name = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                ) ORDER BY date ASC
+                """,
+                conn,
+                params=(index_name, limit),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT date, close
+                FROM sector_indices
+                WHERE index_name = ?
+                ORDER BY date ASC
+                """,
+                conn,
+                params=(index_name,),
+            )
         if df.empty:
             return pd.Series(dtype=float, name=index_name)
         df["date"] = pd.to_datetime(df["date"])
         series = df.set_index("date")["close"].sort_index()
-        if limit:
-            series = series.tail(limit)
         return series
     finally:
         conn.close()
