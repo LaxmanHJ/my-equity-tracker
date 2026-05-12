@@ -223,10 +223,32 @@ class SicilianStrategy(BaseStrategy):
         close  = df["close"]
         volume = df["volume"]
 
-        def _align(series: pd.Series) -> pd.Series:
+        def _ensure_unique(obj, label: str):
+            """
+            Collapse duplicate index labels so downstream reindex calls don't
+            raise ValueError("cannot reindex on an axis with duplicate labels").
+
+            Logs a warning when dedup actually happens so the data source can
+            be tracked down — silent-fix masking would let real upstream
+            corruption persist undetected.
+            """
+            if obj is None or (hasattr(obj, "empty") and obj.empty):
+                return obj
+            if not obj.index.is_unique:
+                n_dupes = int(obj.index.duplicated().sum())
+                logger.warning(
+                    "_build_ml_features(%s): %s had %d duplicate-index row(s); "
+                    "keeping last occurrence",
+                    symbol, label, n_dupes,
+                )
+                obj = obj[~obj.index.duplicated(keep="last")]
+            return obj
+
+        def _align(series: pd.Series, label: str = "market_series") -> pd.Series:
             """Reindex a market-level series to df's date index; fill gaps with 0."""
             if series is None or (hasattr(series, "empty") and series.empty):
                 return pd.Series(0.0, index=df.index)
+            series = _ensure_unique(series, label)
             return series.reindex(df.index, method="ffill").fillna(0.0)
 
         def _align_intraday(feats: pd.DataFrame, col: str) -> pd.Series:
@@ -234,7 +256,7 @@ class SicilianStrategy(BaseStrategy):
             # matching trainer behavior (prevents pre-2018 rows from training on zeros).
             if feats is None or feats.empty or col not in feats.columns:
                 return pd.Series(np.nan, index=df.index)
-            return feats[col].reindex(df.index)
+            return _ensure_unique(feats[col], f"intraday.{col}").reindex(df.index)
 
         # ── Technical sub-scores ─────────────────────────────────────────────
         rsi_s  = self._rolling_rsi_score(close)
@@ -256,7 +278,8 @@ class SicilianStrategy(BaseStrategy):
         # ── Delivery score ───────────────────────────────────────────────────
         delivery_df = load_delivery_series(symbol, limit=2000)
         if not delivery_df.empty and "delivery_pct" in delivery_df.columns:
-            dpct      = delivery_df["delivery_pct"].reindex(df.index)
+            delivery_pct = _ensure_unique(delivery_df["delivery_pct"], "delivery_pct")
+            dpct      = delivery_pct.reindex(df.index)
             roll_mean = dpct.rolling(60, min_periods=10).mean()
             roll_std  = dpct.rolling(60, min_periods=10).std().replace(0, 1)
             delivery_score = ((dpct - roll_mean) / roll_std).clip(-3, 3) / 3
@@ -271,8 +294,8 @@ class SicilianStrategy(BaseStrategy):
             if industry
             else "Nifty 500"
         )
-        idx_close   = load_sector_series(nse_index, limit=2000)
-        nifty_close = load_sector_series("Nifty 50",  limit=2000)
+        idx_close   = _ensure_unique(load_sector_series(nse_index, limit=2000), f"sector.{nse_index}")
+        nifty_close = _ensure_unique(load_sector_series("Nifty 50",  limit=2000), "sector.Nifty 50")
         if not idx_close.empty:
             sector_20d = idx_close.pct_change(20)
             if not nifty_close.empty:
@@ -317,14 +340,14 @@ class SicilianStrategy(BaseStrategy):
                 "volume":                vol_s,
                 "volatility":            vola_s,
                 "relative_strength":     rs_s,
-                "sector_rotation":       _align(sector_series),
-                "vix_regime":            _align(vix_score),
-                "nifty_trend":           _align(nifty_trend),
-                "markov_regime":         _align(markov_score),
-                "delivery_score":        _align(delivery_score),
-                "fii_flow_score":        _align(fii_flow_score),
-                "fii_fo_score":          _align(fii_fo_score),
-                "pcr_score":             _align(pcr_score),
+                "sector_rotation":       _align(sector_series,  "sector_series"),
+                "vix_regime":            _align(vix_score,      "vix_score"),
+                "nifty_trend":           _align(nifty_trend,    "nifty_trend"),
+                "markov_regime":         _align(markov_score,   "markov_score"),
+                "delivery_score":        _align(delivery_score, "delivery_score"),
+                "fii_flow_score":        _align(fii_flow_score, "fii_flow_score"),
+                "fii_fo_score":          _align(fii_fo_score,   "fii_fo_score"),
+                "pcr_score":             _align(pcr_score,      "pcr_score"),
                 "overnight_gap":         _align_intraday(intraday_feats, "overnight_gap"),
                 "intraday_range_ratio":  _align_intraday(intraday_feats, "intraday_range_ratio"),
                 "last_hour_momentum":    _align_intraday(intraday_feats, "last_hour_momentum"),
