@@ -1,7 +1,9 @@
 """
 The Sicilian Router — API endpoints for the unified decision engine.
 """
-from fastapi import APIRouter
+from typing import Optional
+
+from fastapi import APIRouter, Query
 from quant_engine.sicilian.engine import run_sicilian
 from quant_engine.data.loader import load_all_symbols
 
@@ -19,12 +21,17 @@ def get_sicilian_verdict(symbol: str):
 
 
 @router.get("/sicilian")
-def get_all_sicilian_verdicts():
+def get_all_sicilian_verdicts(symbols: Optional[str] = Query(None)):
     """
-    Run The Sicilian on all portfolio stocks.
-    Returns sorted list (strongest BUY first, then HOLD, then SELL).
+    Run The Sicilian on the requested universe (comma-separated `symbols`
+    query param). Falls back to every symbol in price_history if omitted —
+    Node's proxy passes the portfolio displaySymbols so live runs stay
+    bounded after the Nifty 200 training-universe backfill.
     """
-    symbols = load_all_symbols()
+    if symbols:
+        symbols = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    else:
+        symbols = load_all_symbols()
     results = []
     for sym in symbols:
         result = run_sicilian(sym)

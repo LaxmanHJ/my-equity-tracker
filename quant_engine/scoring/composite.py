@@ -204,11 +204,19 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
     return result
 
 
-def score_all_stocks() -> List[dict]:
+def score_all_stocks(symbols: Optional[List[str]] = None) -> List[dict]:
     """
-    Score every stock in the database and return sorted by composite score.
+    Score the requested universe and return sorted by composite score.
+
+    `symbols` lets the caller (Node `/api/scores`) restrict the universe to
+    the user's actual portfolio. When omitted, falls back to every symbol in
+    price_history — used by tests / ad-hoc scripts. The DB now holds the
+    Nifty 200 backfill (training universe), so iterating all symbols at live-
+    scoring time blows past Node's fetch headersTimeout; the route is
+    expected to pass the portfolio list explicitly.
     """
-    symbols = load_all_symbols()
+    if symbols is None:
+        symbols = load_all_symbols()
     benchmark_df = load_benchmark()
 
     results = []

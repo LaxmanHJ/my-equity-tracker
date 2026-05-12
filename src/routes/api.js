@@ -530,7 +530,10 @@ router.get('/sicilian/:symbol', async (req, res) => {
 
 router.get('/sicilian', async (req, res) => {
   try {
-    const response = await fetch(`${QUANT_ENGINE_URL}/api/sicilian`);
+    const universe = portfolio.map(p => p.displaySymbol).join(',');
+    const response = await fetch(
+      `${QUANT_ENGINE_URL}/api/sicilian?symbols=${encodeURIComponent(universe)}`
+    );
     const data = await response.json();
     res.json(data);
   } catch (error) {
@@ -555,7 +558,13 @@ router.get('/ic-weights', async (req, res) => {
 
 router.get('/quant/scores', async (req, res) => {
   try {
-    const response = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
+    // Restrict scoring to the user's portfolio. Without this the Python engine
+    // would iterate every symbol in price_history (~200 after the Nifty 200
+    // training-universe backfill) and blow past undici's headersTimeout.
+    const universe = portfolio.map(p => p.displaySymbol).join(',');
+    const response = await fetch(
+      `${QUANT_ENGINE_URL}/api/scores?symbols=${encodeURIComponent(universe)}`
+    );
     const data = await response.json();
     res.json(data);
 
