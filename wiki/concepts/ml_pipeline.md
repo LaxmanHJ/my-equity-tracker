@@ -235,86 +235,53 @@ Feature count grew from 15 → 18. Also added `pcr_score` (Angel One PCR).
 3. Consider meta-labeling (López de Prado Ch.3): use linear composite as primary direction model, train ML as secondary "should-we-take-this-trade?" model
 4. CPCV still pending
 
-### 2026-04-24 SIC-41 Experiment A — Regression Target
+### 2026-04-24 Experiment A — Cross-Sectional Rank Regression (SIC-41)
 
-Reframed the ML problem from 3-class classification to cross-sectional rank regression on `fwd_ret_20d`. Code: `quant_engine/ml/diagnostic.py` `ml_regression` track (parallel; production pickle untouched).
+First of the six-experiment ML edge recovery program (memory: `project_ml_edge_recovery.md`). Hypothesis: ML loses because of problem framing, not features — (1) the 3-class `{BUY, HOLD, SELL}` target with ±3% HOLD band throws away magnitude, and (2) pooled training on absolute `fwd_ret_20d` mismatches the cross-sectional rank metric used for evaluation (IC).
 
-**Result**: 20d pooled IC moved 0.003 → +0.022 (7× lift), hit rate 49.9% → 53.7% — best of all tracks at the longest horizon. But pooled 20d IC remained below the +0.035 pass threshold and below the linear composite's +0.040.
+**Change**: added a third diagnostic track `ml_regression` that trains `RandomForestRegressor` with production `RF_PARAMS` (minus `class_weight`) on the label `rank_pct_per_date(fwd_ret_20d) * 2 - 1 ∈ [-1, +1]`. Identical features, identical walk-forward purged folds, identical test rows as the classifier track — so the only variable that moved is problem framing.
 
-| Horizon | ML cls | ML reg | Linear |
-|--------:|-------:|-------:|-------:|
-| 1d  | +0.018 | +0.020 | +0.017 |
-| 5d  | +0.027 | +0.028 | +0.028 |
-| 10d | +0.017 | +0.022 | +0.045 |
-| 20d | +0.003 | **+0.022** | **+0.040** |
+Rows with per-date cross-section size < 5 stocks are NaN-labelled and dropped from training (`MIN_CROSS_N = 5` in `diagnostic.py`).
 
-Per-fold: regression was the only track without fold-level blow-ups. Fold 3 outright beat linear (+0.054 vs −0.007).
+**Pooled aggregate** (n=20,030 OOS rows, 1,573 trading dates, 2019-10 → 2026-03):
 
-**Verdict**: framing hypothesis validated, but regression-direct-ML still underperforms a hand-tuned linear composite. SIC-41's fail-branch rule escalated SIC-42 (meta-labeling) to Urgent.
+| Horizon | ML classifier IC | ML regression IC | Linear IC | ML cls hit | ML reg hit | Linear hit |
+|--------:|-----------------:|-----------------:|----------:|-----------:|-----------:|-----------:|
+| 1d  | +0.018 | +0.020 | +0.017 | 48.9% | 50.1% | 50.4% |
+| 5d  | +0.027 | +0.028 | +0.028 | 49.3% | 51.1% | 51.2% |
+| 10d | +0.017 | +0.022 | +0.045 | 49.6% | 51.8% | 52.0% |
+| 20d | +0.003 | **+0.022** | **+0.040** | 49.9% | **53.7%** | 53.1% |
 
-### 2026-05-09 SIC-42 Experiment B — Meta-Labeling + Universe Expansion (production path)
+**Per-fold 20d IC** (revealing — the pooled number hides meaningful structure):
 
-Two-step program. Treat the linear composite as the primary direction model (already has +0.040 IC at 20d) and train a secondary classifier that, conditional on a primary BUY, predicts profitability at 20d. The secondary's calibrated probability becomes a bet-sizing prior.
+| Fold | Test period | ML cls | ML reg | Linear |
+|-----:|:------------|-------:|-------:|-------:|
+| 1 | 2019-10 → 2021-04 (COVID) | −0.043 | −0.012 | +0.047 |
+| 2 | 2021-04 → 2022-08 | +0.100 | +0.044 | +0.109 |
+| 3 | 2022-08 → 2023-11 | +0.037 | **+0.054** | −0.007 |
+| 4 | 2023-11 → 2025-01 | −0.040 | +0.048 | +0.073 |
+| 5 | 2025-01 → 2026-03 | −0.042 | −0.019 | −0.030 |
 
-The path zig-zagged: the secondary needs both a wider universe (for statistical power) AND cross-sectional features (for discriminative content). First-cut attempts hit one or the other but not both.
+**Findings**:
 
-**Universe expansion (2026-05-09 morning)**
+1. **Framing hypothesis validated.** At 20d the classifier→regression reframing moves IC from +0.003 to +0.022 — a **7×** increase. The lift concentrates at longer horizons (20d most, 10d some, 1d/5d flat), exactly as the hypothesis predicts — the ±3% HOLD zone misprices larger-horizon magnitudes most.
+2. **Hit rate at 20d (53.7%) now beats linear (53.1%).** On directional accuracy the regression is the best of the three tracks. The IC gap remains (regression still ranks the cross-section slightly less well than the hand-tuned linear composite) but on sign it's now the strongest signal.
+3. **Regression is the only stable track.** Classifier has two fold-IC of −0.04 (fold 1, 4) — model-destroying regimes. Regression has no such collapse; worst fold is −0.019 (fold 5, where every track is negative).
+4. **Fold-3 regression outright beats linear** (+0.054 vs −0.007). The regime when a hand-tuned linear composite struggles is precisely when non-linear modelling on a cross-sectional label has the most to offer.
+5. **Fold 5 (most recent year) is negative for every track.** ML classifier −0.042, linear −0.030, ML regression −0.019. This is a separate regime/decay warning — not specific to the classifier, and not fixable by reframing. Worth a follow-up investigation (open: signal decay on 2025-26 data).
 
-The previous session diagnostic showed n=176 primary-BUY rows across 2 valid folds at `primary_threshold=0.40` — underpowered. Backfilled 200 Nifty 200 constituents from Angel One (`scripts/backfill-nifty200.mjs`, 15-year OHLCV, idempotent UPSERT, batched libSQL writes). Result: Turso went from 17 → 208 distinct symbols, 609k rows upserted in 15.8 min, 0 failed.
+**Pass/fail vs SIC-41 acceptance criterion (20d IC ≥ +0.035)**: **FAIL by +0.013**. Pooled IC +0.022 vs threshold +0.035. But fold-level story and hit-rate beating linear argue the framing fix is a real and substantial win, even if it did not fully close the IC gap to the hand-tuned composite.
 
-Industry coverage was a blocker — only 9 of 200 had `stock_fundamentals.industry`. Standardised the entire universe to NSE broad sectors (`scripts/upsert-nifty200-industries.mjs`, Path B from this session). 191 inserts + 9 updates. Reclassifications were sane (TATASTEEL "Iron & Steel" → "Metals & Mining"; INFY "Software & Programming" → "Information Technology"). Six pre-existing non-Nifty-200 names (BAJAJHIND, AWL, BANDHANBNK, REPCOHOME, TANLA, APLLTD) kept their fine-grained labels.
+**Recommendation**:
 
-**The valid-mask trap**
+* Keep the regression pipeline alive — it's the best ML track we have by hit rate at every horizon and the only one without fold-level blow-ups.
+* Escalate **Experiment B (SIC-42) — meta-labeling** to Urgent per the plan's fallback. Linear stays the primary direction signal (still highest IC), ML regression becomes a secondary bet-size classifier. This stacks on top of the framing fix.
+* Consider running **Experiment D (SIC-44) — LightGBM + monotonic constraints** in parallel. Half-tested inside this run (regressor only, no constraints); adding monotonicity on momentum/RS/trend_ma factors may close the remaining 0.018 IC gap cheaply.
+* Investigate **fold 5 decay** separately — all three tracks underperformed on the most recent year, indicating a regime/model-staleness issue orthogonal to the ML reframing program.
 
-First post-expansion meta-labeler run: dataset stuck at 15 stocks despite 206 in price_history. Cause: `build_dataset_with_horizons.valid_mask = features.notna().all(axis=1)` requires every column in `FEATURE_COLS` to be non-NaN, including `delivery_score` and the 7 intraday features. The new symbols don't have those. Every row of every new symbol got dropped.
+**Code changes**: `quant_engine/ml/diagnostic.py` adds `RF_PARAMS_REG`, `_build_regression_pipeline`, `_build_cs_rank_label`, and an `ml_regression` entry in `TRACKS`. Production `sicilian_rf.pkl` and `trainer.py` untouched — this remains a diagnostic track until a follow-up productionizes it.
 
-Fix: added `required_feature_cols` parameter to `build_dataset_with_horizons` (default = full FEATURE_COLS for backward compat). Meta-labeler passes its narrower list so only its actual features need to be present.
-
-**Slim-5 attempt (failed)**
-
-First post-fix meta-labeler used `META_FEATURE_COLS = [sector_rotation, vix_regime, nifty_trend, markov_regime, fii_fo_score]` — 5 features, all available across the wider universe. Dataset jumped to 372k rows / 205 stocks. **Result: 0 pp hit uplift, pooled rank_IC = +0.002.** The secondary collapsed to no-op — every primary-BUY row passed the 0.55 threshold (filtered_n ≈ test_pb in every fold).
-
-Diagnosis: 4 of the 5 features are constant per date (vix/nifty/markov/fii_fo). Only `sector_rotation` varies cross-sectionally. With ~1 cross-sectional signal, the LR has no discriminative content within a primary-BUY date. *Reinterpreting*: the previous session's +12.2 pp uplift on n=176 was small-sample noise — when n grew 23×, the apparent edge vanished.
-
-**Experiment B (12 features) — passed**
-
-Added the 7 primary factor scores back to `META_FEATURE_COLS` (rsi, macd, trend_ma, bollinger, volume, volatility, relative_strength). Total 12 features — all OHLC-derivable, all available across the wider universe. The original SIC-42 spec excluded the factors on the theory that the secondary would just re-derive the primary; in practice the secondary refines them *non-linearly* and that's exactly the win López de Prado's design allows. Updated module docstring to record this.
-
-**Single-threshold (0.55) result**: pooled rank_IC = +0.105 (vs +0.002 with slim-5), hit uplift +0.89 pp, mostly because the 0.55 cutoff was too generous (89% pass-through). Fold 5 stood out: trade_threshold=0.55 already filtered to 36% pass with **+8.05 pp hit uplift** (51.6% → 59.6%) on the most recent regime (2025-01 → 2026-03).
-
-**Threshold sweep** (`--sweep` flag added to meta_labeler.py, writes `data/meta_labeler_sweep.json`):
-
-| Threshold | filt_n | pass% | filt_hit | uplift | mean_ret_f | Sharpe_f |
-|---:|---:|---:|---:|---:|---:|---:|
-| 0.55 | 3669 | 89% | 60.10% | +0.89 pp | 4.30% | 0.321 |
-| 0.65 | 2964 | 72% | 61.27% | +2.06 pp | 4.81% | 0.357 |
-| 0.70 | 2452 | 60% | 61.17% | +1.96 pp | 4.95% | 0.362 |
-| **0.75** | **1708** | **41%** | **63.00%** | **+3.79 pp** | **5.21%** | **0.400** |
-| 0.80 | 1157 | 28% | 62.32% | +3.11 pp | 5.38% | 0.412 |
-
-Baseline: 59.21% hit, 3.94% mean return, Sharpe 0.30 across n=4124 primary-BUY rows.
-
-Per-fold robustness at threshold 0.75: fold 2 60.3%, fold 3 71.2%, fold 4 62.7% — all positive lifts vs their fold baselines (56.4 / 67.2 / 59.0). Fold 5 hits the n<50 floor at this threshold. At 0.80 things start to deteriorate (fold 3 collapses 71% → 65%) — signal-to-noise peaks around 0.75.
-
-Statistical sanity: at 0.75, pooled uplift +3.79 pp on n_filt=1708 / SE_diff ≈ 1.40 pp → z ≈ 2.7 (p ≈ 0.007).
-
-**Production decision**: meta-labeler is shippable at `META_TRADE_THRESHOLD = 0.75`. Pre-trade filter on top of the existing linear primary BUY gate. Expected lifts on the 4-year OOS sample:
-- Hit rate: 59.21% → 63.00% (+3.79 pp)
-- Mean per-trade return: 3.94% → 5.21% (+127 bps)
-- Sharpe: 0.30 → 0.40 (+33%)
-- ~60% of low-quality primary-BUY signals filtered out
-
-**Project Usage**:
-- Diagnostic: `python -m quant_engine.ml.meta_labeler --primary-threshold 0.40 --sweep`
-- Outputs: `data/meta_labeler_diagnostic.json` (single threshold) + `data/meta_labeler_sweep.json` (full sweep)
-- Production model artifact: `quant_engine/ml/models/meta_labeler.pkl` (final fit on full primary-BUY history; trained via `--train-final` mode, see SIC-42 productionisation tasks)
-- Live gate wiring: `signalQueueService.js` calls `/api/scores` which includes `meta_prob` per stock; trade only when `meta_prob >= 0.75` (TBD — Step 2c of 2026-05-09 plan).
-
-**Open follow-ups after Exp B**:
-1. **Backfill delivery + intraday for the wider universe** (~24% of feature importance lost). Likely incremental Sharpe lift.
-2. **Re-evaluate at primary_threshold tighter than 0.40** — primary-BUY coverage was 1.4% even at 0.40; tightening might produce a higher-quality conditioning subset for the secondary.
-3. **Triple-barrier labels for the secondary** (SIC-43) — replace `fwd_ret_20d > 0` with TP/SL/time barriers.
-4. **CPCV + Deflated Sharpe** (SIC-46) — formal validation methodology before live capital.
+**Artifacts**: `data/ml_diagnostic.json` now carries three tracks under `aggregate_pooled.{ml,linear,ml_regression}` plus per-fold horizons.
 
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
