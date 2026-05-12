@@ -322,7 +322,14 @@ class SicilianStrategy(BaseStrategy):
             sector_series = pd.Series(dtype=float)
 
         # ── Intraday-derived features (15-min candles, Angel One; ~2018+) ───
-        intraday_feats = build_intraday_features(symbol)
+        # Narrow the source window to df.index so Turso returns ~250 intraday
+        # rows instead of ~49,000. Trainer/diagnostic callers go through their
+        # own paths and continue to fetch full history.
+        intraday_feats = build_intraday_features(
+            symbol,
+            from_date=df.index[0].strftime("%Y-%m-%d") if len(df) else None,
+            daily_limit=(len(df) + 30) if len(df) else None,
+        )
 
         return pd.DataFrame(
             {

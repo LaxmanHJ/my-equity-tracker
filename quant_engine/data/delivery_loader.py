@@ -13,22 +13,35 @@ def load_delivery_series(symbol: str, limit: int = 365) -> pd.DataFrame:
     clean = symbol.replace(".NS", "").replace(".BO", "")
     conn = connect()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT date, delivery_pct, delivery_qty, circuit_hit
-            FROM delivery_data
-            WHERE symbol = ?
-            ORDER BY date ASC
-            """,
-            conn,
-            params=(clean,),
-        )
+        if limit:
+            df = pd.read_sql_query(
+                """
+                SELECT date, delivery_pct, delivery_qty, circuit_hit FROM (
+                    SELECT date, delivery_pct, delivery_qty, circuit_hit
+                    FROM delivery_data
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                ) ORDER BY date ASC
+                """,
+                conn,
+                params=(clean, limit),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT date, delivery_pct, delivery_qty, circuit_hit
+                FROM delivery_data
+                WHERE symbol = ?
+                ORDER BY date ASC
+                """,
+                conn,
+                params=(clean,),
+            )
         if df.empty:
             return df
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
-        if limit:
-            df = df.tail(limit)
         return df
     finally:
         conn.close()
