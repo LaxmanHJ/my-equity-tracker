@@ -3,8 +3,9 @@ Scores Router — API endpoints for the quant scoring engine.
 """
 import logging
 from datetime import date
+from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from quant_engine.scoring.composite import score_all_stocks, score_single_stock
 from quant_engine.data.loader import load_benchmark
 from quant_engine.scoring.ic_weights import get_weight_metadata
@@ -14,12 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/scores")
-def get_all_scores():
+def get_all_scores(symbols: Optional[str] = Query(None)):
     """
-    Return composite factor scores for all portfolio stocks,
-    sorted by score descending (strongest long first).
+    Return composite factor scores for the requested universe.
+
+    `symbols` is a comma-separated list (e.g. ?symbols=INFY,TANLA). Node's
+    proxy passes the portfolio's displaySymbols here so live scoring stays
+    bounded; without it the route falls back to every symbol in price_history
+    (~200 after the Nifty 200 backfill — too slow for live).
     """
-    results = score_all_stocks()
+    universe = (
+        [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        if symbols
+        else None
+    )
+    results = score_all_stocks(symbols=universe)
 
     summary = {
         "total": len(results),
