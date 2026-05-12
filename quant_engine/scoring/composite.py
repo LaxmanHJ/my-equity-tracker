@@ -9,6 +9,8 @@ Signal priority:
   2. Linear fallback — weighted sum of the 7 factor scores when ML is unavailable.
 """
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List
 
 import pandas as pd
@@ -35,6 +37,7 @@ def _build_ml_sub_scores(
     symbol: str,
     df: pd.DataFrame,
     benchmark_df: pd.DataFrame,
+    market_ctx: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Build the feature dict for predictor.predict() on the latest bar.
@@ -53,7 +56,7 @@ def _build_ml_sub_scores(
     from quant_engine.ml.predictor import HARD_GATE_FEATURES
 
     strat = SicilianStrategy("_live")
-    feats = strat._build_ml_features(df, benchmark_df, symbol)
+    feats = strat._build_ml_features(df, benchmark_df, symbol, market_ctx=market_ctx)
     if feats.empty:
         return None
     last_row = feats.iloc[-1]
@@ -79,7 +82,61 @@ def _build_ml_sub_scores(
     return last_row.to_dict()
 
 
-def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict]:
+def _build_market_context(benchmark_df: pd.DataFrame) -> dict:
+    """
+    Precompute market-wide series that are identical across all symbols.
+
+    Calling this once per scoring run and passing the result as `market_ctx`
+    to score_single_stock eliminates ~8 redundant DB round-trips per symbol
+    (VIX, FII flows, FII FO, PCR, Nifty 50 sector, industry map, markov,
+    nifty trend). For a 15-stock portfolio that cuts ~120 queries to ~8.
+    """
+    from quant_engine.data.market_regime_loader import (
+        load_vix_series, vix_to_score,
+        build_markov_score_series,
+        load_fii_flow_series, load_fii_fo_series, _flow_to_score,
+        load_pcr_series, pcr_to_score,
+    )
+    from quant_engine.data.sector_indices_loader import load_sector_series
+    from quant_engine.data.loader import load_industry_map
+    from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+
+    raw_vix = load_vix_series(limit=2000)
+    vix_score = vix_to_score(raw_vix) if not raw_vix.empty else pd.Series(dtype=float)
+
+    nifty_trend = SicilianStrategy._build_nifty_trend(benchmark_df)
+    markov_score = build_markov_score_series(benchmark_df)
+
+    raw_fii_flow = load_fii_flow_series(limit=2000)
+    if not raw_fii_flow.empty:
+        fii_flow_score = _flow_to_score(raw_fii_flow.rolling(10).sum())
+    else:
+        fii_flow_score = pd.Series(dtype=float)
+
+    raw_fii_fo = load_fii_fo_series(limit=2000)
+    fii_fo_score = _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
+
+    raw_pcr = load_pcr_series(limit=2000)
+    pcr_score = pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
+
+    nifty_50_close = load_sector_series("Nifty 50", limit=2000)
+    industry_map = load_industry_map()
+
+    return {
+        "vix_score":      vix_score,
+        "nifty_trend":    nifty_trend,
+        "markov_score":   markov_score,
+        "fii_flow_score": fii_flow_score,
+        "fii_fo_score":   fii_fo_score,
+        "pcr_score":      pcr_score,
+        "nifty_50_close": nifty_50_close,
+        "industry_map":   industry_map,
+    }
+
+
+def score_single_stock(
+    symbol: str, benchmark_df: pd.DataFrame, market_ctx: Optional[dict] = None
+) -> Optional[dict]:
     """
     Calculate all factor scores and the composite for a single stock.
     Returns None if insufficient data.
@@ -121,12 +178,13 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
     # ── ML signal — primary when model is available ───────────────────────────
     ml_result  = None
     ml_signal  = None
+    sub_scores = None  # populated below when ML path runs; reused by meta-labeler
 
     ml_unavailable = False  # True means model exists but features incomplete on this bar
     try:
         from quant_engine.ml import predictor as _predictor
         if _predictor.is_model_available():
-            sub_scores = _build_ml_sub_scores(symbol, df, benchmark_df)
+            sub_scores = _build_ml_sub_scores(symbol, df, benchmark_df, market_ctx=market_ctx)
             if sub_scores is None:
                 # Feature(s) NaN on latest bar — matches backtest which takes no
                 # position on such bars. Emit HOLD instead of linear so live
@@ -179,22 +237,79 @@ def score_single_stock(symbol: str, benchmark_df: pd.DataFrame) -> Optional[dict
         result["ml_confidence"]    = ml_result["confidence"]
         result["ml_probabilities"] = ml_result["probabilities"]
 
+    # ── Meta-labeler prior — bet-sizing on top of linear primary BUY ────────
+    # Only meaningful when the linear primary said LONG; below that threshold
+    # the secondary's training distribution doesn't apply. Builds sub_scores
+    # locally if the existing ML path didn't (e.g., when sicilian_rf.pkl is
+    # absent). Failures abstain — meta_prob = None lets Node fall back to the
+    # linear gate alone.
+    if linear_signal == "LONG":
+        try:
+            from quant_engine.ml import meta_labeler as _meta
+            if _meta.is_model_available():
+                meta_features = sub_scores if sub_scores is not None else \
+                    _build_ml_sub_scores(symbol, df, benchmark_df, market_ctx=market_ctx)
+                if meta_features is not None:
+                    p = _meta.predict_proba(meta_features)
+                    if p is not None:
+                        result["meta_prob"] = p
+                        result["meta_pass"] = p >= _meta.META_TRADE_THRESHOLD
+                        result["meta_threshold"] = _meta.META_TRADE_THRESHOLD
+        except Exception as exc:
+            logger.warning("meta-labeler scoring failed for %s: %s", symbol, exc)
+
     return result
 
 
-def score_all_stocks() -> List[dict]:
+def score_all_stocks(symbols: Optional[List[str]] = None) -> List[dict]:
     """
-    Score every stock in the database and return sorted by composite score.
+    Score the requested universe and return sorted by composite score.
+
+    `symbols` lets the caller (Node `/api/scores`) restrict the universe to
+    the user's actual portfolio. When omitted, falls back to every symbol in
+    price_history — used by tests / ad-hoc scripts. The DB now holds the
+    Nifty 200 backfill (training universe), so iterating all symbols at live-
+    scoring time blows past Node's fetch headersTimeout; the route is
+    expected to pass the portfolio list explicitly.
+
+    Performance: market-wide series (VIX, FII, PCR, etc.) are fetched once
+    via _build_market_context, then per-symbol I/O runs in a thread pool.
+    Each Turso call is an HTTP POST, so threads overlap the network wait
+    without needing async.
     """
-    symbols = load_all_symbols()
+    if symbols is None:
+        symbols = load_all_symbols()
+    t0 = time.perf_counter()
     benchmark_df = load_benchmark()
+    market_ctx = _build_market_context(benchmark_df)
+    # Pre-warm the IC cache before fanout so worker threads don't all serialize
+    # on _cache["lock"] inside get_active_weights() the first time around.
+    # No-op on a warm cache (already populated by FastAPI startup hook).
+    get_active_weights()
+    t_ctx = time.perf_counter()
 
     results = []
-    for symbol in symbols:
-        result = score_single_stock(symbol, benchmark_df)
-        if result:
-            results.append(result)
+    max_workers = min(len(symbols), 10)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(score_single_stock, sym, benchmark_df, market_ctx): sym
+            for sym in symbols
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+            except Exception as exc:
+                sym = futures[future]
+                logger.warning("score_single_stock failed for %s: %s", sym, exc)
+                continue
+            if result:
+                results.append(result)
 
-    # Sort by composite score descending (strongest long first)
     results.sort(key=lambda x: x["composite_score"], reverse=True)
+    t_end = time.perf_counter()
+    n = max(len(symbols), 1)
+    logger.info(
+        "score_all_stocks: %d symbols in %.2fs (ctx %.2fs, pool %.2fs, avg %.2fs/sym)",
+        len(symbols), t_end - t0, t_ctx - t0, t_end - t_ctx, (t_end - t_ctx) / n,
+    )
     return results

@@ -39,6 +39,24 @@ def health_check():
     return {"status": "ok", "engine": "quant", "port": PORT}
 
 
+@app.on_event("startup")
+def _warm_ic_weights():
+    """
+    Pre-populate the IC weights cache so the first user request hits a warm
+    cache instead of paying the ~2-3s panel-build cost. Failures are logged
+    but swallowed so a transient Turso outage at boot doesn't crash the
+    process.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from quant_engine.scoring.ic_weights import get_active_weights
+        get_active_weights()
+        log.info("IC weights pre-warmed at startup")
+    except Exception as exc:
+        log.warning("IC weights warmup failed: %s", exc)
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("quant_engine.main:app", host=HOST, port=PORT, reload=True)

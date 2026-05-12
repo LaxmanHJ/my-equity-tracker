@@ -257,6 +257,13 @@ export async function initDatabase() {
   // signals_log additional columns (idempotent)
   try { await db.execute(`ALTER TABLE signals_log ADD COLUMN ml_confidence REAL`); } catch (_) {}
   try { await db.execute(`ALTER TABLE signals_log ADD COLUMN linear_signal TEXT`); } catch (_) {}
+  // SIC-42 meta-labeler track. Stored on every scored row (NULL when linear
+  // wasn't LONG — meta_prob is undefined off-distribution). Lets the signal-
+  // quality dashboard compute IC for the meta track WITHOUT sample-selection
+  // bias from the live conviction gate. See wiki/concepts/ml_pipeline.md
+  // § "2026-05-09 SIC-42 Experiment B".
+  try { await db.execute(`ALTER TABLE signals_log ADD COLUMN meta_prob REAL`); } catch (_) {}
+  try { await db.execute(`ALTER TABLE signals_log ADD COLUMN meta_pass INTEGER`); } catch (_) {}
 
   // market_regime FII/DII columns (ALTER TABLE is idempotent via try/catch)
   for (const col of [
@@ -790,22 +797,32 @@ export async function upsertFiiDii(date, fiiNet, diiNet) {
 
 /**
  * Upsert a batch of Sicilian signals into signals_log.
- * stocks: array of { symbol, signal, linear_signal, composite_score, ml_confidence }
+ * stocks: array of { symbol, signal, linear_signal, composite_score,
+ *                    ml_confidence, meta_prob, meta_pass }
+ *
+ * meta_prob / meta_pass are only set when linear_signal == LONG (the
+ * meta-labeler's training distribution); writes NULL otherwise. Persisting
+ * them on every primary-BUY row, regardless of whether the live gate would
+ * have kept the signal, is what lets the dashboard compute the meta track's
+ * IC without selection bias.
  */
 export async function saveSignalsLog(stocks) {
   const today = new Date().toISOString().slice(0, 10);
   const recordedAt = new Date().toISOString();
   for (const s of stocks) {
+    const metaPassInt = s.meta_pass === true ? 1 : s.meta_pass === false ? 0 : null;
     await db.execute({
-      sql: `INSERT INTO signals_log (signal_date, symbol, signal, linear_signal, composite_score, ml_confidence, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+      sql: `INSERT INTO signals_log (signal_date, symbol, signal, linear_signal, composite_score, ml_confidence, meta_prob, meta_pass, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(signal_date, symbol) DO UPDATE SET
               signal          = excluded.signal,
               linear_signal   = excluded.linear_signal,
               composite_score = excluded.composite_score,
               ml_confidence   = excluded.ml_confidence,
+              meta_prob       = excluded.meta_prob,
+              meta_pass       = excluded.meta_pass,
               recorded_at     = excluded.recorded_at`,
-      args: nn(today, s.symbol, s.signal, s.linear_signal ?? null, s.composite_score ?? null, s.ml_confidence ?? null, recordedAt)
+      args: nn(today, s.symbol, s.signal, s.linear_signal ?? null, s.composite_score ?? null, s.ml_confidence ?? null, s.meta_prob ?? null, metaPassInt, recordedAt)
     });
   }
 }

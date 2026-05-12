@@ -1921,6 +1921,27 @@ function renderQuantCards(stocks) {
         : '⚪';
     const scoreColor = stock.composite_score > 0 ? 'var(--success)' : 'var(--danger)';
 
+    const metaProb = stock.meta_prob;
+    const metaPass = stock.meta_pass;
+    const metaThreshold = stock.meta_threshold ?? 0.75;
+    let metaRow = '';
+    if (metaProb != null) {
+      const passColor = metaPass ? 'var(--success)' : metaProb >= 0.55 ? '#f59e0b' : 'var(--danger)';
+      const passLabel = metaPass ? 'PASS' : 'FAIL';
+      const pctW = (metaProb * 100).toFixed(0);
+      metaRow = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.7rem;padding:6px 8px;border:1px solid ${passColor}33;background:${passColor}0d;border-radius:8px;"
+             title="Meta-labeler: P(profitable @ 20d | linear=LONG). Threshold ${metaThreshold}.">
+          <span style="font-size:0.65rem;font-weight:700;color:${passColor};letter-spacing:0.5px;">META</span>
+          <div style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;position:relative;">
+            <div style="width:${pctW}%;height:100%;background:${passColor};border-radius:3px;transition:width 0.5s;"></div>
+            <div style="position:absolute;left:${(metaThreshold * 100).toFixed(0)}%;top:-2px;bottom:-2px;width:1px;background:rgba(255,255,255,0.5);"></div>
+          </div>
+          <span style="font-size:0.7rem;color:${passColor};font-weight:600;width:48px;text-align:right;">${(metaProb * 100).toFixed(1)}%</span>
+          <span style="font-size:0.65rem;font-weight:700;color:${passColor};width:34px;text-align:right;">${passLabel}</span>
+        </div>`;
+    }
+
     const factorBars = Object.entries(stock.factors).map(([name, data]) => {
       const pct = ((data.score + 1) / 2 * 100).toFixed(0);
       const barColor = data.score > 0.2 ? 'var(--success)'
@@ -1952,6 +1973,7 @@ function renderQuantCards(stocks) {
           </div>
         </div>
         <div style="border-top:1px solid var(--border-color);padding-top:0.8rem;">
+          ${metaRow}
           ${factorBars}
         </div>
       </div>`;

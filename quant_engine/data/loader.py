@@ -19,20 +19,33 @@ def load_price_history(symbol: str, limit: int = 365) -> pd.DataFrame:
     clean_symbol = symbol.replace(".NS", "").replace(".BO", "")
     conn = get_connection()
     try:
-        df = pd.read_sql_query(
-            """
-            SELECT date, open, high, low, close, volume
-            FROM price_history
-            WHERE symbol = ?
-            ORDER BY date ASC
-            """,
-            conn,
-            params=(clean_symbol,),
-        )
+        if limit:
+            df = pd.read_sql_query(
+                """
+                SELECT date, open, high, low, close, volume FROM (
+                    SELECT date, open, high, low, close, volume
+                    FROM price_history
+                    WHERE symbol = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                ) ORDER BY date ASC
+                """,
+                conn,
+                params=(clean_symbol, limit),
+            )
+        else:
+            df = pd.read_sql_query(
+                """
+                SELECT date, open, high, low, close, volume
+                FROM price_history
+                WHERE symbol = ?
+                ORDER BY date ASC
+                """,
+                conn,
+                params=(clean_symbol,),
+            )
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
-        if limit:
-            df = df.tail(limit)
         return df
     finally:
         conn.close()

@@ -188,7 +188,11 @@ class SicilianStrategy(BaseStrategy):
             return None
 
     def _build_ml_features(
-        self, df: pd.DataFrame, benchmark_df: pd.DataFrame, symbol: str
+        self,
+        df: pd.DataFrame,
+        benchmark_df: pd.DataFrame,
+        symbol: str,
+        market_ctx: dict = None,
     ) -> pd.DataFrame:
         """
         Compute all ML feature columns for every bar in df.
@@ -204,19 +208,16 @@ class SicilianStrategy(BaseStrategy):
             df:           OHLCV DataFrame with DateTimeIndex.
             benchmark_df: Benchmark OHLCV DataFrame (may be empty).
             symbol:       NSE ticker string (e.g. "RELIANCE").
+            market_ctx:   Optional precomputed market-wide series from
+                          composite._build_market_context. When provided,
+                          skips 8 redundant Turso round-trips (VIX, FII, PCR,
+                          Nifty 50, industry map, markov, nifty trend).
 
         Returns:
             pd.DataFrame indexed like df with one column per ML feature.
         """
-        from quant_engine.data.market_regime_loader import (
-            load_vix_series, vix_to_score,
-            build_markov_score_series,
-            load_fii_flow_series, load_fii_fo_series, _flow_to_score,
-            load_pcr_series, pcr_to_score,
-        )
         from quant_engine.data.delivery_loader import load_delivery_series
         from quant_engine.data.sector_indices_loader import load_sector_series
-        from quant_engine.data.loader import load_industry_map
         from quant_engine.data.intraday_features import build_intraday_features
         from quant_engine.config import INDUSTRY_TO_NSE_INDEX
 
@@ -267,15 +268,51 @@ class SicilianStrategy(BaseStrategy):
         vola_s = self._rolling_volatility_score(close)
         rs_s   = self._rolling_relative_strength_score(close, benchmark_df)
 
-        # ── VIX regime ───────────────────────────────────────────────────────
-        raw_vix   = load_vix_series(limit=2000)
-        vix_score = vix_to_score(raw_vix) if not raw_vix.empty else pd.Series(dtype=float)
+        # ── Market-wide series — use precomputed ctx when available ──────────
+        if market_ctx is not None:
+            vix_score    = market_ctx["vix_score"]
+            nifty_trend  = market_ctx["nifty_trend"]
+            markov_score = market_ctx["markov_score"]
+            fii_flow_score = market_ctx["fii_flow_score"]
+            fii_fo_score   = market_ctx["fii_fo_score"]
+            pcr_score      = market_ctx["pcr_score"]
+            industry_map   = market_ctx["industry_map"]
+            nifty_close    = market_ctx["nifty_50_close"]
+        else:
+            from quant_engine.data.market_regime_loader import (
+                load_vix_series, vix_to_score,
+                build_markov_score_series,
+                load_fii_flow_series, load_fii_fo_series, _flow_to_score,
+                load_pcr_series, pcr_to_score,
+            )
+            from quant_engine.data.loader import load_industry_map
 
-        # ── NIFTY trend & Markov ─────────────────────────────────────────────
-        nifty_trend  = self._build_nifty_trend(benchmark_df)
-        markov_score = build_markov_score_series(benchmark_df)
+            raw_vix = load_vix_series(limit=2000)
+            vix_score = vix_to_score(raw_vix) if not raw_vix.empty else pd.Series(dtype=float)
 
-        # ── Delivery score ───────────────────────────────────────────────────
+            nifty_trend  = self._build_nifty_trend(benchmark_df)
+            markov_score = build_markov_score_series(benchmark_df)
+
+            raw_fii_flow = load_fii_flow_series(limit=2000)
+            if not raw_fii_flow.empty:
+                fii_flow_score = _flow_to_score(raw_fii_flow.rolling(10).sum())
+            else:
+                fii_flow_score = pd.Series(dtype=float)
+
+            raw_fii_fo = load_fii_fo_series(limit=2000)
+            fii_fo_score = (
+                _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
+            )
+
+            raw_pcr = load_pcr_series(limit=2000)
+            pcr_score = (
+                pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
+            )
+
+            industry_map = load_industry_map()
+            nifty_close  = load_sector_series("Nifty 50", limit=2000)
+
+        # ── Delivery score (per-symbol) ──────────────────────────────────────
         delivery_df = load_delivery_series(symbol, limit=2000)
         if not delivery_df.empty and "delivery_pct" in delivery_df.columns:
             delivery_pct = _ensure_unique(delivery_df["delivery_pct"], "delivery_pct")
@@ -286,10 +323,9 @@ class SicilianStrategy(BaseStrategy):
         else:
             delivery_score = pd.Series(dtype=float)
 
-        # ── Sector rotation ──────────────────────────────────────────────────
-        industry_map = load_industry_map()
-        industry     = industry_map.get(symbol)
-        nse_index    = (
+        # ── Sector rotation (per-symbol industry index) ──────────────────────
+        industry  = industry_map.get(symbol)
+        nse_index = (
             INDUSTRY_TO_NSE_INDEX.get(industry, "Nifty 500")
             if industry
             else "Nifty 500"
@@ -309,27 +345,15 @@ class SicilianStrategy(BaseStrategy):
         else:
             sector_series = pd.Series(dtype=float)
 
-        # ── FII flows ────────────────────────────────────────────────────────
-        raw_fii_flow = load_fii_flow_series(limit=2000)
-        if not raw_fii_flow.empty:
-            fii_10d        = raw_fii_flow.rolling(10).sum()
-            fii_flow_score = _flow_to_score(fii_10d)
-        else:
-            fii_flow_score = pd.Series(dtype=float)
-
-        raw_fii_fo   = load_fii_fo_series(limit=2000)
-        fii_fo_score = (
-            _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
-        )
-
-        # ── PCR sentiment (put-call ratio) ──────────────────────────────────
-        raw_pcr   = load_pcr_series(limit=2000)
-        pcr_score = (
-            pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
-        )
-
         # ── Intraday-derived features (15-min candles, Angel One; ~2018+) ───
-        intraday_feats = build_intraday_features(symbol)
+        # Narrow the source window to df.index so Turso returns ~250 intraday
+        # rows instead of ~49,000. Trainer/diagnostic callers go through their
+        # own paths and continue to fetch full history.
+        intraday_feats = build_intraday_features(
+            symbol,
+            from_date=df.index[0].strftime("%Y-%m-%d") if len(df) else None,
+            daily_limit=(len(df) + 30) if len(df) else None,
+        )
 
         return pd.DataFrame(
             {

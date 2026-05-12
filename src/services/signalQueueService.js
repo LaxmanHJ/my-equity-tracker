@@ -66,6 +66,20 @@ export function evaluateConviction(s) {
     });
   }
 
+  // Meta-labeler bet-sizing gate (SIC-42 — wiki/concepts/ml_pipeline.md).
+  // Only active when the secondary model is available and produced a prob.
+  // Fails explicitly on missing prob rather than silently bypassing — keeps
+  // upstream failures visible.
+  if (c.requireMetaPass) {
+    const mp = s.meta_prob;
+    gates.push({
+      name: 'meta_labeler',
+      pass: mp != null && mp >= c.minMetaProb,
+      value: mp,
+      required: `>= ${c.minMetaProb}`,
+    });
+  }
+
   const adv = s.factors?.volume?.avg_volume_20d ?? null;
   gates.push({
     name: 'liquidity_adv',
@@ -90,7 +104,10 @@ export function evaluateConviction(s) {
  * gates. Stocks that fail any gate are returned in `skipped` with reasons.
  */
 export async function generateQueue() {
-  const res = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
+  const universe = portfolio.map(p => p.displaySymbol).join(',');
+  const res = await fetch(
+    `${QUANT_ENGINE_URL}/api/scores?symbols=${encodeURIComponent(universe)}`,
+  );
   if (!res.ok) throw new Error(`Scoring engine returned ${res.status}`);
   const data = await res.json();
 
@@ -248,8 +265,12 @@ export async function evaluateSignal(signalId) {
     return { error: 'claude_not_configured', detail: 'ANTHROPIC_API_KEY is missing in .env' };
   }
 
-  // 1) Fresh factor snapshot for this symbol from the Python scoring engine
-  const scoresRes = await fetch(`${QUANT_ENGINE_URL}/api/scores`);
+  // 1) Fresh factor snapshot for this symbol from the Python scoring engine.
+  // Scope to portfolio symbols only — same reasoning as generateQueue().
+  const evalUniverse = portfolio.map(p => p.displaySymbol).join(',');
+  const scoresRes = await fetch(
+    `${QUANT_ENGINE_URL}/api/scores?symbols=${encodeURIComponent(evalUniverse)}`,
+  );
   if (!scoresRes.ok) {
     return { error: 'scoring_engine_unreachable', status: scoresRes.status };
   }
