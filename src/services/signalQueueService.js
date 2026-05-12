@@ -21,83 +21,11 @@ import { createEodPriceProvider } from '../risk/priceProvider.js';
 import { runRiskChecks } from '../risk/riskManager.js';
 import { nextTradingDay, todayStr } from '../utils/tradingCalendar.js';
 import { evaluateSignalWithClaude, isClaudeConfigured } from './claudeEvaluator.js';
+import { evaluateConviction } from './convictionGates.js';
+
+export { evaluateConviction };
 
 const QUANT_ENGINE_URL = process.env.QUANT_ENGINE_URL || 'http://localhost:5001';
-
-/**
- * Conviction gates — applied at queue-generation time so only threshold-passing
- * stocks reach the UI for Claude-assisted execution. Returns per-gate pass/fail
- * so skipped signals carry their reasons into the response for debugging.
- *
- * Thresholds live in `config/riskLimits.js` → `conviction`. Rationale:
- *   - composite ≥ 40: project's canonical LONG threshold
- *   - linear_signal agreement: ML has ~0 OOS IC, linear is the authoritative direction
- *   - ml_confidence ≥ 55 (when ML path active): confirmation, not a driver
- *   - avg_volume_20d ≥ 500k: liquidity cap (checklist M2)
- *   - data_points ≥ 200: enough bars for factor windows to be meaningful
- */
-export function evaluateConviction(s) {
-  const c = riskLimits.conviction;
-  const gates = [];
-
-  gates.push({
-    name: 'composite',
-    pass: s.composite_score >= c.minCompositeScore,
-    value: s.composite_score,
-    required: `>= ${c.minCompositeScore}`,
-  });
-
-  if (c.requireLinearAgreement) {
-    gates.push({
-      name: 'linear_agreement',
-      pass: s.linear_signal === 'LONG',
-      value: s.linear_signal,
-      required: 'LONG',
-    });
-  }
-
-  if (s.ml_path) {
-    const conf = s.ml_confidence;
-    gates.push({
-      name: 'ml_confidence',
-      pass: conf != null && conf >= c.minMlConfidencePct,
-      value: conf,
-      required: `>= ${c.minMlConfidencePct}`,
-    });
-  }
-
-  // Meta-labeler bet-sizing gate (SIC-42 — wiki/concepts/ml_pipeline.md).
-  // Only active when the secondary model is available and produced a prob.
-  // Fails explicitly on missing prob rather than silently bypassing — keeps
-  // upstream failures visible.
-  if (c.requireMetaPass) {
-    const mp = s.meta_prob;
-    gates.push({
-      name: 'meta_labeler',
-      pass: mp != null && mp >= c.minMetaProb,
-      value: mp,
-      required: `>= ${c.minMetaProb}`,
-    });
-  }
-
-  const adv = s.factors?.volume?.avg_volume_20d ?? null;
-  gates.push({
-    name: 'liquidity_adv',
-    pass: adv != null && adv >= c.minAvgDailyVolume,
-    value: adv,
-    required: `>= ${c.minAvgDailyVolume}`,
-  });
-
-  gates.push({
-    name: 'data_points',
-    pass: (s.data_points ?? 0) >= c.minDataPoints,
-    value: s.data_points,
-    required: `>= ${c.minDataPoints}`,
-  });
-
-  const failed = gates.filter(g => !g.pass);
-  return { passed: failed.length === 0, failedGates: failed, gates };
-}
 
 /**
  * Run the scoring engine and enqueue only signals that clear all conviction

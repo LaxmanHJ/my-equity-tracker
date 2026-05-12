@@ -308,7 +308,7 @@ Statistical sanity: at 0.75, pooled uplift +3.79 pp on n_filt=1708 / SE_diff ≈
 - Diagnostic: `python -m quant_engine.ml.meta_labeler --primary-threshold 0.40 --sweep`
 - Outputs: `data/meta_labeler_diagnostic.json` (single threshold) + `data/meta_labeler_sweep.json` (full sweep)
 - Production model artifact: `quant_engine/ml/models/meta_labeler.pkl` (final fit on full primary-BUY history; trained via `--train-final` mode, see SIC-42 productionisation tasks)
-- Live gate wiring: `signalQueueService.js` calls `/api/scores` which includes `meta_prob` per stock; trade only when `meta_prob >= 0.75` (TBD — Step 2c of 2026-05-09 plan).
+- Live gate wiring: **SHIPPED 2026-05-12**. `quant_engine/scoring/composite.py` calls `meta_labeler.predict_proba()` whenever `linear_signal == "LONG"` and decorates the score payload with `meta_prob`, `meta_pass`, `meta_threshold`. `src/services/signalQueueService.js::evaluateConviction` reads `s.meta_prob` and enforces `>= riskLimits.conviction.minMetaProb` (currently 0.75) as a hard pre-queue gate when `requireMetaPass` is true. Coverage test: `tests/signalQueueService.test.mjs`.
 
 **Open follow-ups after Exp B**:
 1. **Backfill delivery + intraday for the wider universe** (~24% of feature importance lost). Likely incremental Sharpe lift.
