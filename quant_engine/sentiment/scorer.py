@@ -139,6 +139,12 @@ def _score_finbert(text: str) -> Optional[float]:
 
 _CLAUDE_CLIENT = None  # lazy-loaded singleton
 
+# How many headlines to send per Claude API call. With Haiku 4.5's 200K context
+# this is bounded by output, not input: each item produces ~25 output tokens,
+# and we cap max_tokens around 50*30 = 1500 to keep latency low and stay
+# comfortably under the API ceiling.
+_CLAUDE_BATCH_SIZE = int(os.getenv("CLAUDE_SENTIMENT_BATCH_SIZE", "30"))
+
 _CLAUDE_PROMPT = (
     "You are a financial-news sentiment classifier for Indian equities. "
     "Read the headline and return ONLY a JSON object of the form "
@@ -149,54 +155,179 @@ _CLAUDE_PROMPT = (
     "macro-level company impact. Do not include any other text."
 )
 
+_CLAUDE_BATCH_PROMPT = (
+    "You are a financial-news sentiment classifier for Indian equities. "
+    "You will receive a JSON object of the form "
+    '{"items": [{"i": <int>, "text": <headline>}, ...]}. '
+    "For EACH item, return a sentiment score in [-1.0, +1.0] where "
+    "-1 = strongly negative for the stock price, +1 = strongly positive, "
+    "0 = neutral or non-price-relevant. Consider: earnings beats/misses, "
+    "guidance, regulatory action, management change, M&A, downgrades, "
+    "fraud, macro-level company impact. "
+    'Reply with ONLY a JSON object: {"scores": [{"i": <int>, "score": <num>}, ...]} '
+    "containing exactly one entry per input item. No prose, no code fences."
+)
+
+
+def _ensure_claude_client():
+    """Lazy-initialise the Anthropic client singleton. Returns None on failure."""
+    global _CLAUDE_CLIENT
+    if _CLAUDE_CLIENT is not None:
+        return _CLAUDE_CLIENT
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None
+    try:
+        import anthropic  # type: ignore[import-not-found]
+    except ImportError:
+        logger.info("anthropic SDK not installed; claude_v1 scorer unavailable")
+        return None
+    try:
+        _CLAUDE_CLIENT = anthropic.Anthropic()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("anthropic client init failed: %s", exc)
+        return None
+    return _CLAUDE_CLIENT
+
+
+def _log_anthropic_error(context: str, exc: BaseException) -> None:
+    """Log full Anthropic API error including status code and response body.
+
+    The bare exception message often hides the actual cause ("Method Not
+    Allowed" vs "model not found" vs "invalid_request_error: field X"); the
+    response payload is where the real detail lives.
+    """
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "response", None)
+    body_text = None
+    if body is not None:
+        try:
+            body_text = body.text  # httpx.Response
+        except Exception:  # noqa: BLE001
+            body_text = repr(body)
+    logger.warning(
+        "Claude %s failed: %s [%s] status=%s body=%s",
+        context, type(exc).__name__, exc, status, body_text,
+    )
+
 
 def _score_claude(text: str) -> Optional[float]:
     """
-    Score a headline via claude-haiku-4-5. Returns None when:
-      * ANTHROPIC_API_KEY is missing (chain falls through to TextBlob)
-      * the anthropic SDK isn't installed
-      * the model returned an unparseable response (logged warning)
-      * any transport-level failure (logged warning, chain falls through)
-
-    Cost: ≈ 200 input + 15 output tokens per call → ≈ $0.0003 per headline
-    on Haiku 4.5 pricing as of 2026-05.
+    Single-text Claude scorer — thin wrapper around the batch path so all
+    Anthropic traffic flows through one code path. Returns None on any of:
+      * empty text
+      * missing ANTHROPIC_API_KEY (chain falls through to TextBlob)
+      * anthropic SDK not installed
+      * unparseable response
+      * transport failure (logged with full Anthropic error body)
     """
     if not text or not text.strip():
         return None
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        return None
+    results = _batch_score_claude([text])
+    return results[0] if results else None
 
-    global _CLAUDE_CLIENT
-    if _CLAUDE_CLIENT is None:
-        try:
-            import anthropic  # type: ignore[import-not-found]
-        except ImportError:
-            logger.info("anthropic SDK not installed; claude_v1 scorer unavailable")
-            return None
-        try:
-            _CLAUDE_CLIENT = anthropic.Anthropic()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("anthropic client init failed: %s", exc)
-            return None
 
+def _batch_score_claude(texts: list[str]) -> list[Optional[float]]:
+    """
+    Score N texts via Claude in batched API calls.
+
+    Bundles up to _CLAUDE_BATCH_SIZE headlines per `messages.create` call,
+    cutting per-symbol traffic from O(articles) to O(ceil(articles / batch)).
+    Returns one Optional[float] per input in the same order; None indicates
+    "Claude abstained / failed for this entry" so callers can fall through
+    to the next scorer in the chain.
+    """
+    if not texts:
+        return []
+    client = _ensure_claude_client()
+    if client is None:
+        return [None] * len(texts)
+
+    out: list[Optional[float]] = [None] * len(texts)
+
+    for start in range(0, len(texts), _CLAUDE_BATCH_SIZE):
+        chunk = texts[start:start + _CLAUDE_BATCH_SIZE]
+        # Drop empty entries up-front so we don't waste API budget on them.
+        items = []
+        local_to_global: list[int] = []
+        for j, t in enumerate(chunk):
+            if t and t.strip():
+                items.append({"i": len(items), "text": t[:600]})
+                local_to_global.append(start + j)
+        if not items:
+            continue
+
+        payload = json.dumps({"items": items}, ensure_ascii=False)
+        try:
+            resp = client.messages.create(
+                model=CLAUDE_MODEL,
+                # ~25 output tokens per item + JSON framing; cap generously.
+                max_tokens=min(4000, 50 * len(items) + 50),
+                system=_CLAUDE_BATCH_PROMPT,
+                messages=[{"role": "user", "content": payload}],
+            )
+        except Exception as exc:  # noqa: BLE001 — third-party transport
+            _log_anthropic_error(f"batch (n={len(items)})", exc)
+            continue  # leave this chunk's entries as None
+
+        raw = "".join(
+            getattr(b, "text", "") for b in (resp.content or [])
+        ).strip()
+        if not raw:
+            continue
+        parsed = _extract_batch_scores_from_claude_text(raw, n_expected=len(items))
+        for local_i, score in enumerate(parsed):
+            if score is not None:
+                out[local_to_global[local_i]] = score
+
+    return out
+
+
+def _extract_batch_scores_from_claude_text(
+    raw: str, n_expected: int,
+) -> list[Optional[float]]:
+    """Parse Claude's batched reply into n_expected scores (in local-index order).
+
+    Expected reply: {"scores": [{"i": <int>, "score": <num>}, ...]}. Tolerates
+    prose around the JSON object (model occasionally adds it despite the
+    instruction). Returns a list of length n_expected, None for any
+    missing/invalid entries — caller treats those as abstain.
+    """
+    out: list[Optional[float]] = [None] * n_expected
+
+    obj = None
     try:
-        resp = _CLAUDE_CLIENT.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=30,
-            system=_CLAUDE_PROMPT,
-            messages=[{"role": "user", "content": text[:600]}],
-        )
-    except Exception as exc:  # noqa: BLE001 — third-party transport
-        logger.warning("Claude scorer transport failed: %s", exc)
-        return None
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        m = re.search(r'\{.*"scores"\s*:.*\}', raw, flags=re.DOTALL)
+        if m:
+            try:
+                obj = json.loads(m.group(0))
+            except (ValueError, TypeError):
+                obj = None
 
-    # Concatenate any text blocks in the reply (Claude can return >1 block)
-    raw = "".join(
-        getattr(b, "text", "") for b in (resp.content or [])
-    ).strip()
-    if not raw:
-        return None
-    return _extract_score_from_claude_text(raw)
+    if not isinstance(obj, dict):
+        logger.warning("Claude batch reply unparseable: %r", raw[:300])
+        return out
+
+    scores = obj.get("scores")
+    if not isinstance(scores, list):
+        logger.warning("Claude batch reply missing 'scores' array: %r", raw[:300])
+        return out
+
+    for entry in scores:
+        if not isinstance(entry, dict):
+            continue
+        i = entry.get("i")
+        s = entry.get("score")
+        if not isinstance(i, int) or i < 0 or i >= n_expected:
+            continue
+        try:
+            v = float(s)
+        except (TypeError, ValueError):
+            continue
+        if -1.0 <= v <= 1.0:
+            out[i] = v
+    return out
 
 
 def _extract_score_from_claude_text(raw: str) -> Optional[float]:
@@ -248,6 +379,25 @@ _SCORERS = {
 }
 
 
+def _batch_score_textblob(texts: list[str]) -> list[Optional[float]]:
+    """TextBlob is CPU-local — a plain loop is identical in cost to "batching"
+    but the wrapper keeps the scorer-chain plumbing uniform."""
+    return [_score_textblob(t) for t in texts]
+
+
+def _batch_score_finbert(texts: list[str]) -> list[Optional[float]]:
+    """Could be vectorised via the transformers pipeline, but FinBERT is
+    optional and rarely the active scorer — a loop keeps the surface minimal."""
+    return [_score_finbert(t) for t in texts]
+
+
+_BATCH_SCORERS = {
+    "claude_v1":   _batch_score_claude,
+    "textblob_v1": _batch_score_textblob,
+    "finbert_v1":  _batch_score_finbert,
+}
+
+
 def available_scorers() -> list[str]:
     """Names of scorers whose dependencies AND credentials are available.
 
@@ -280,39 +430,63 @@ def available_scorers() -> list[str]:
     return avail
 
 
+def score_batch(
+    texts: list[str],
+    prefer: Optional[tuple[str, ...]] = None,
+) -> list[tuple[Optional[float], Optional[ScorerInfo]]]:
+    """
+    Score N texts and return N (score, scorer_info) pairs in input order.
+
+    Same chain semantics as score_text(): tries each scorer in priority
+    order; texts where a scorer returns None fall through to the next
+    scorer in the chain. The Claude scorer batches up to
+    CLAUDE_SENTIMENT_BATCH_SIZE texts per API call — for a 30-headline
+    symbol that's 1 request instead of 30, with the same fallback to
+    TextBlob for any per-text abstains.
+
+    Returns (None, None) entries for texts where every scorer failed.
+    """
+    if not texts:
+        return []
+    if prefer is None:
+        env = os.getenv("SENTIMENT_SCORER")
+        prefer = (env,) if env else DEFAULT_SCORER_CHAIN
+
+    n = len(texts)
+    out: list[tuple[Optional[float], Optional[ScorerInfo]]] = [(None, None)] * n
+    pending = list(range(n))
+
+    for name in prefer:
+        if not pending:
+            break
+        batch_fn = _BATCH_SCORERS.get(name)
+        if batch_fn is None:
+            logger.warning("Unknown scorer requested: %s", name)
+            continue
+        sub_texts = [texts[i] for i in pending]
+        sub_scores = batch_fn(sub_texts)
+        info = SCORER_INFO[name]
+        lo, hi = info.range
+        next_pending: list[int] = []
+        for idx, score in zip(pending, sub_scores):
+            if score is None:
+                next_pending.append(idx)
+                continue
+            out[idx] = (max(lo, min(hi, score)), info)
+        pending = next_pending
+
+    return out
+
+
 def score_text(
     text: str,
     prefer: Optional[tuple[str, ...]] = None,
 ) -> tuple[Optional[float], Optional[ScorerInfo]]:
     """
-    Score `text` and return (score, scorer_info).
-
-    Tries scorers in priority order; first non-None result wins. Returns
-    (None, None) only if every scorer in the chain failed/returned None
-    — meaning every model in the project couldn't produce a score for
-    this text. Callers should record that as "no signal" rather than "0".
-
-    Args:
-        text:   raw string (headline + first paragraph is fine; longer is
-                truncated by individual scorers as needed).
-        prefer: tuple of scorer names to try in order. Defaults to env var
-                SENTIMENT_SCORER (single name) or DEFAULT_SCORER_CHAIN.
-
-    Returns:
-        (score in [-1, +1], ScorerInfo of the scorer that produced it).
+    Single-text wrapper around score_batch — kept for backward compatibility
+    and for callers that have only one string to score. New code paths that
+    score multiple texts should call score_batch directly to benefit from
+    the per-call batching in the Claude scorer.
     """
-    if prefer is None:
-        env = os.getenv("SENTIMENT_SCORER")
-        prefer = (env,) if env else DEFAULT_SCORER_CHAIN
-
-    for name in prefer:
-        fn = _SCORERS.get(name)
-        if fn is None:
-            logger.warning("Unknown scorer requested: %s", name)
-            continue
-        s = fn(text)
-        if s is not None:
-            # Clip to declared range to defend against numeric drift
-            lo, hi = SCORER_INFO[name].range
-            return max(lo, min(hi, s)), SCORER_INFO[name]
-    return None, None
+    results = score_batch([text], prefer=prefer)
+    return results[0] if results else (None, None)

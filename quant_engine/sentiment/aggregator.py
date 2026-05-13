@@ -15,7 +15,9 @@ Schema (created on first write):
     )
 
 Aggregation rules:
-  * One article → one score via scorer.score_text().
+  * All articles in a single aggregate_articles() call are scored via
+    scorer.score_batch() — one batched API request to Claude (chunked
+    internally) instead of one per article.
   * Articles with no score (every scorer abstained) are dropped silently
     and don't count toward n_articles. If every article in the day was
     dropped, no row is written (the caller can distinguish "no data" from
@@ -37,7 +39,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 from quant_engine.data.turso_client import TursoConnection, connect
-from quant_engine.sentiment.scorer import ScorerInfo, score_text
+from quant_engine.sentiment.scorer import ScorerInfo, score_batch
 from quant_engine.sentiment.sources import Article
 
 logger = logging.getLogger(__name__)
@@ -90,15 +92,22 @@ def aggregate_articles(
     """
     Score each article and roll up to (symbol, date) rows.
 
-    Returns a list of dicts shaped for UPSERT_SQL. Empty list if no article
-    produced a usable score.
+    All articles in the input are scored in a single batched call (Claude
+    chunks internally) — for a 30-headline symbol this is 1 API request
+    instead of 30. Returns a list of dicts shaped for UPSERT_SQL. Empty
+    list if no article produced a usable score.
     """
+    article_list = list(articles)
+    if not article_list:
+        return []
+
+    results = score_batch([a.text for a in article_list], prefer=prefer_scorer)
+
     # bucket: (symbol, date) → list[(score, source)], plus the ScorerInfo seen
     buckets: dict[tuple[str, str], list[tuple[float, str]]] = defaultdict(list)
     scorer_seen: Optional[ScorerInfo] = None
 
-    for a in articles:
-        score, info = score_text(a.text, prefer=prefer_scorer)
+    for a, (score, info) in zip(article_list, results):
         if score is None or info is None:
             continue
         key = (a.symbol, _date_key(a.published))

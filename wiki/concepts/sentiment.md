@@ -44,8 +44,10 @@ Default chain (`DEFAULT_SOURCES`): `("stock_news", "newsapi")`. The aggregator d
 
 Default chain (`DEFAULT_SCORER_CHAIN`): `("claude_v1", "textblob_v1")` — Claude when key is set, TextBlob otherwise. Override per-call via `prefer=(...)` or globally via `SENTIMENT_SCORER`. The aggregator stores `scorer_version` (including the Claude model ID) per row so re-running with a different scorer doesn't silently mix label-set semantics.
 
+**Batched scoring (2026-05-13).** The aggregator scores all articles for a symbol in a **single** `score_batch()` call — the Claude scorer bundles up to `CLAUDE_SENTIMENT_BATCH_SIZE` (default 30) headlines per `messages.create` request and asks Claude to return a JSON array of `{i, score}` entries. Per-text fall-through is preserved: items where Claude abstains automatically retry under TextBlob. This cut a 15-symbol force-sync from ~500 Claude calls (one per article) to ~15 (one per symbol) — roughly 30× faster and 30× cheaper, with the same scorer chain semantics. Failed batch requests log the full Anthropic error body (status code + response payload) via `_log_anthropic_error` to make 4xx debugging tractable.
+
 **Cost envelope** (Claude haiku, 60 articles/day, 30 days/month):
-- ~1,800 API calls/month × ~$0.0003 each = **~$0.54/month**
+- Batched: ~30 API calls/month (1 per symbol per day × 15 symbols × 30 days ≈ 450 calls, but most days <30 articles per symbol → 1 batch each) at ~$0.001/call (input grows linearly with batch) = **~$0.45/month**
 - Negligible relative to live capital; cheaper than NewsAPI's paid tier.
 
 ### Storage — `sentiment_daily`
@@ -86,15 +88,17 @@ Missing days return NaN — downstream callers should treat sentiment as a **sof
 - **Force-sync integration**: `POST /api/sync/sentiment` Python endpoint invoked by Node's `POST /api/portfolio/sync` flow alongside VIX / FII / PCR. Runs after `getAllQuotes` populates `stock_news`, so news → score happens in a single force-sync pass.
 - Manual CLI: `python -m quant_engine.sentiment.backfill --portfolio --days 1` (still supported; useful for backfilling >1 day history).
 - Scoring engine (`scoring/composite.py`) attaches `sentiment` to every score payload (observational only — no gating).
-- Weight in linear composite: **0%**. Reason: no live IC measurement yet.
 
 ### Phase 2 — Per-symbol IC measurement (target +6 months of data)
 - Add `quant_engine/sentiment/diagnostic.py` with walk-forward IC at 1d / 5d / 20d horizons, per stock and pooled.
 - Persist `data/sentiment_diagnostic.json`.
 
-### Phase 3 — Composite integration
-- If pooled IC ≥ 0.02 at any horizon and not strongly negatively correlated with momentum, add as a Sicilian factor at 8–10% weight, taking from momentum (25 → 20) and RSI (20 → 15).
-- Add to ML feature set as `sentiment_score`, `sentiment_momentum`, `sentiment_attention`. Same SimpleImputer fallback as other soft features.
+### Phase 3 — Composite integration (shipped 2026-05-13, adaptive)
+- **Live composite (shipped):** sentiment at 10% in static `FACTOR_WEIGHTS` (5pp from momentum 20 → 15, 5pp from RSI 20 → 15). New module `quant_engine/factors/sentiment.py` reads `sent_24h` from `sentiment_daily` and feeds the live composite via `scoring/composite.py`.
+- **Adaptive integration (shipped 2026-05-13):** sentiment promoted to `IC_ADAPTIVE_FACTORS`. `scoring/ic_weights.py::_panel_row` now left-joins per-day `sentiment_daily.sent_score` onto each symbol's price panel, so sentiment competes for weight on the same cross-sectional Spearman-IC criterion as the 7 price factors. Until enough valid date observations accumulate (≥ `MIN_IC_OBS = 20` with ≥ `MIN_CROSS_N = 5` stocks each), the IC engine assigns sentiment 0% live weight automatically — the same gating the original Phase 3 plan asked for, expressed through the IC engine. The 10% in `FACTOR_WEIGHTS` is the static fallback used when the IC engine returns `static_fallback`.
+- **User-directed early activation:** the static fallback (10%) was flipped on **before** the original Phase-3 IC gate (≥6mo data + pooled IC ≥ 0.02). In adaptive mode this no longer matters in practice — sentiment will only earn live weight once it earns IC.
+- **Known live↔backtest gap:** `sicilian_strategy._linear_signals` (backtest path) still hardcodes the 7 price factors only — sentiment is not in the backtest composite. Adding it would require historical `sentiment_daily` rows which we don't yet have; the backtest sentiment contribution would be uniformly 0 anyway. Live backtests will under-report composite scores by up to ±10pp relative to live during this gap. Re-aligned once historical sentiment is backfilled.
+- **ML still pending:** sentiment not yet added to `FEATURE_COLS` — defer until Phase 2 diagnostic confirms IC.
 
 ### Phase 4 — Event-driven mode
 - Tag articles via `event_classifier.py` (earnings/guidance/M&A/regulatory/other).
@@ -116,6 +120,7 @@ Missing days return NaN — downstream callers should treat sentiment as a **sof
 |---|---|---|
 | `ANTHROPIC_API_KEY` | unset | Enables `claude_v1` scorer. Already used by Node's claude_final_gate. |
 | `CLAUDE_SENTIMENT_MODEL` | `claude-haiku-4-5-20251001` | Override scorer model. Haiku is cheapest; opus is overkill for headlines. |
+| `CLAUDE_SENTIMENT_BATCH_SIZE` | `30` | Headlines per Claude API call. Higher = fewer requests but larger payloads; 30 keeps output well under Haiku's max_tokens ceiling. |
 | `NEWS_API_KEY` | unset | Enables NewsAPI source. Optional — pipeline runs from `stock_news` alone if unset. |
 | `SENTIMENT_SOURCES` | `stock_news,newsapi` | Comma-separated override of default chain. |
 | `SENTIMENT_SCORER` | unset | If set, forces a single scorer (e.g. `textblob_v1`); skips the chain. |

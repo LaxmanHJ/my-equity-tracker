@@ -53,11 +53,11 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(aggregate_articles([]), [])
 
     def test_drops_articles_when_all_scorers_abstain(self):
-        # Force every scorer to abstain by patching score_text. The aggregator
+        # Force every scorer to abstain by patching score_batch. The aggregator
         # must produce zero rows rather than fabricating a neutral score.
         with patch(
-            "quant_engine.sentiment.aggregator.score_text",
-            return_value=(None, None),
+            "quant_engine.sentiment.aggregator.score_batch",
+            return_value=[(None, None)],
         ):
             rows = aggregate_articles([
                 _mk("INFY", datetime(2026, 5, 12, tzinfo=timezone.utc),
@@ -68,9 +68,11 @@ class TestAggregator(unittest.TestCase):
     def test_groups_by_symbol_and_date(self):
         # Two INFY articles on the same UTC day, one TANLA on a different day.
         # Expect 2 output rows (one per (symbol, date)), with INFY score = mean.
+        # score_batch is now called once per aggregate_articles() invocation and
+        # returns one (score, info) tuple per article in input order.
         with patch(
-            "quant_engine.sentiment.aggregator.score_text",
-            side_effect=[
+            "quant_engine.sentiment.aggregator.score_batch",
+            return_value=[
                 (0.6, _DummyInfo("textblob_v1")),
                 (0.2, _DummyInfo("textblob_v1")),
                 (-0.4, _DummyInfo("textblob_v1")),
@@ -169,13 +171,17 @@ class TestClaudeReplyExtraction(unittest.TestCase):
 
 
 class TestScoreTextChain(unittest.TestCase):
+    """score_text delegates to score_batch which dispatches via _BATCH_SCORERS,
+    so the chain semantics are exercised by patching the batch dict.
+    """
+
     def test_chain_falls_through_when_first_abstains(self):
         # First scorer returns None — chain should try the next.
         with patch.dict(
-            "quant_engine.sentiment.scorer._SCORERS",
+            "quant_engine.sentiment.scorer._BATCH_SCORERS",
             {
-                "claude_v1":   lambda _t: None,
-                "textblob_v1": lambda _t: 0.25,
+                "claude_v1":   lambda texts: [None] * len(texts),
+                "textblob_v1": lambda texts: [0.25] * len(texts),
             },
             clear=False,
         ):
@@ -188,10 +194,10 @@ class TestScoreTextChain(unittest.TestCase):
 
     def test_chain_returns_none_when_all_abstain(self):
         with patch.dict(
-            "quant_engine.sentiment.scorer._SCORERS",
+            "quant_engine.sentiment.scorer._BATCH_SCORERS",
             {
-                "claude_v1":   lambda _t: None,
-                "textblob_v1": lambda _t: None,
+                "claude_v1":   lambda texts: [None] * len(texts),
+                "textblob_v1": lambda texts: [None] * len(texts),
             },
             clear=False,
         ):
@@ -202,8 +208,8 @@ class TestScoreTextChain(unittest.TestCase):
     def test_clips_to_declared_range(self):
         # If a scorer returns out-of-range, score_text must clip to range.
         with patch.dict(
-            "quant_engine.sentiment.scorer._SCORERS",
-            {"textblob_v1": lambda _t: 1.5},
+            "quant_engine.sentiment.scorer._BATCH_SCORERS",
+            {"textblob_v1": lambda texts: [1.5] * len(texts)},
             clear=False,
         ):
             score, _ = score_text("x", prefer=("textblob_v1",))

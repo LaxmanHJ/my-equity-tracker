@@ -28,6 +28,7 @@ from quant_engine.factors import (
     volatility,
     volume,
     relative_strength,
+    sentiment as sentiment_factor,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,18 @@ def score_single_stock(
     if df.empty or len(df) < 30:
         return None
 
-    # Calculate each factor
+    # Sentiment is queried once and reused both as a composite factor input
+    # AND as the dashboard `result["sentiment"]` payload at the bottom of
+    # this function — avoids two Turso reads per symbol per scoring run.
+    sentiment_features = None
+    try:
+        from quant_engine.sentiment.features import build_sentiment_features
+        sentiment_features = build_sentiment_features(symbol)
+    except Exception as exc:  # noqa: BLE001 — soft factor; never block scoring
+        logger.debug("sentiment features unavailable for %s: %s", symbol, exc)
+
+    # Calculate each factor. Sentiment falls back to a neutral score (0.0)
+    # when no sentiment_daily row exists, so weight isn't silently reshuffled.
     factors = {
         "momentum":          momentum.calculate(df),
         "bollinger":         bollinger.calculate(df),
@@ -155,6 +167,7 @@ def score_single_stock(
         "volatility":        volatility.calculate(df),
         "volume":            volume.calculate(df),
         "relative_strength": relative_strength.calculate(df, benchmark_df),
+        "sentiment":         sentiment_factor.calculate(symbol, features=sentiment_features),
     }
 
     # Compute weighted composite score using IC-adaptive weights
@@ -258,18 +271,14 @@ def score_single_stock(
         except Exception as exc:
             logger.warning("meta-labeler scoring failed for %s: %s", symbol, exc)
 
-    # ── Sentiment features (soft, observational) ─────────────────────────────
-    # Attached to every score payload as `sentiment` so the dashboard / Claude
-    # gate can display them, but NOT yet folded into the composite weight.
-    # Status (2026-05-12): data-collection mode. Weight stays 0% until ≥ 6
-    # months of live sentiment_daily rows exist and per-symbol IC has been
-    # measured. See wiki/concepts/sentiment.md "Productionisation phases".
-    try:
-        from quant_engine.sentiment.features import build_sentiment_features
-        sent = build_sentiment_features(symbol)
-        result["sentiment"] = sent.to_dict()
-    except Exception as exc:  # noqa: BLE001 — non-critical optional feature
-        logger.debug("sentiment features unavailable for %s: %s", symbol, exc)
+    # ── Sentiment payload (dashboard / Claude gate) ──────────────────────────
+    # Sentiment features were fetched once at the top of this function and
+    # already fed into the composite via factors["sentiment"]. Here we expose
+    # the same dict on the result so the UI doesn't have to recompute. When
+    # the fetch failed earlier, sentiment_features is None and we just omit
+    # the field — clients should treat absence as "no signal".
+    if sentiment_features is not None:
+        result["sentiment"] = sentiment_features.to_dict()
 
     return result
 

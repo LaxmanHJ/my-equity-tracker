@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from quant_engine.config import FACTOR_WEIGHTS
+from quant_engine.config import FACTOR_WEIGHTS, IC_ADAPTIVE_FACTORS
 
 logger = logging.getLogger(__name__)
 
@@ -72,11 +72,21 @@ def _panel_row(
     """
     Per-symbol worker for _build_factor_panel.
 
-    Fetches price history + computes the seven rolling factor scores + the
-    forward return. Returns one stacked frame or None if the symbol has
-    insufficient history to contribute. Runs inside a ThreadPoolExecutor
-    worker — must be self-contained and tolerate identical concurrent calls
-    on other symbols.
+    Fetches price history + computes the seven rolling price-factor scores,
+    left-joins per-day sentiment from sentiment_daily as an eighth factor,
+    and attaches the N-day forward return. Returns one stacked frame or None
+    if the symbol has insufficient history to contribute. Runs inside a
+    ThreadPoolExecutor worker — must be self-contained and tolerate identical
+    concurrent calls on other symbols.
+
+    Sentiment join behaviour
+    ------------------------
+    Most (symbol, date) cells have no sentiment_daily row yet. Those become
+    NaN in the panel; `_ic_from_panel` does `dropna()` per date so they're
+    skipped cleanly. Until enough valid (date, ≥MIN_CROSS_N stocks)
+    observations accumulate, the sentiment IC falls below MIN_IC_OBS and the
+    factor receives 0 weight — the same gating the wiki Phase 3 plan
+    described, now expressed through the IC engine.
     """
     from quant_engine.data.loader import load_price_history
     from quant_engine.strategies.sicilian_strategy import SicilianStrategy as _S
@@ -98,6 +108,25 @@ def _panel_row(
         "relative_strength": _S._rolling_relative_strength_score(close, benchmark_df),
     }, index=df.index)
 
+    # Sentiment join — separate try block so a missing/empty sentiment_daily
+    # table doesn't kill the panel row for this symbol; sentiment column
+    # simply stays NaN and the IC engine assigns 0 weight on the spot.
+    try:
+        from quant_engine.sentiment.features import load_sentiment_series
+        sent_df = load_sentiment_series(symbol, days_back=lookback + horizon + 30)
+        if not sent_df.empty:
+            sent_series = sent_df.set_index("date")["sent_score"].astype(float)
+            # Normalise both indexes to midnight so a price index of
+            # 2026-05-12 09:15 aligns with sentiment_daily.date='2026-05-12'.
+            sent_series.index = pd.to_datetime(sent_series.index).normalize()
+            price_idx = pd.to_datetime(scores.index).normalize()
+            scores["sentiment"] = sent_series.reindex(price_idx).values
+        else:
+            scores["sentiment"] = float("nan")
+    except Exception as exc:  # noqa: BLE001 — soft factor; never block panel build
+        logger.debug("sentiment join failed for %s: %s", symbol, exc)
+        scores["sentiment"] = float("nan")
+
     scores["fwd_ret"] = df["close"].shift(-horizon) / df["close"] - 1
     scores["symbol"]  = symbol
 
@@ -110,10 +139,11 @@ def _panel_row(
 
 def _build_factor_panel(lookback: int, horizon: int) -> pd.DataFrame:
     """
-    Load price history for every portfolio stock, compute all 7 rolling factor
-    scores, attach the N-day forward return, and return a stacked panel.
+    Load price history for every portfolio stock, compute the rolling
+    price-factor scores, attach a per-day sentiment column from
+    sentiment_daily, and the N-day forward return — returns a stacked panel.
 
-    The panel has columns: date, symbol, <factor_names>, fwd_ret
+    The panel has columns: date, symbol, <factor_names>, sentiment, fwd_ret
     Only rows where fwd_ret is available (i.e. not the last `horizon` bars)
     are kept.  The last `lookback` rows per stock are retained.
 
@@ -181,11 +211,28 @@ def compute_ic_weights(
     Returns a dict with the same keys as FACTOR_WEIGHTS, values normalised
     to sum to 1.0.  Also updates _cache["ic_values"] with raw ICs.
 
+    Factors listed in `IC_ADAPTIVE_FACTORS` are IC-rebalanced within their
+    portion of the total weight budget; all others pass through at their
+    static `FACTOR_WEIGHTS` value so they aren't silently zeroed by the IC
+    computation. Today every factor (including sentiment) is in
+    IC_ADAPTIVE_FACTORS; the reserved mechanism is retained for any future
+    hard-static factor.
+
     Raises nothing — caller should handle exceptions and fall back.
     """
     _t0 = time.perf_counter()
     panel = _build_factor_panel(lookback, horizon)
     _t_panel = time.perf_counter()
+
+    # Static pass-through weights for non-IC-adaptive factors (e.g. sentiment).
+    # These are reserved from the total budget; IC rebalancing happens only
+    # over IC_ADAPTIVE_FACTORS within the remaining (1 - reserved) share.
+    reserved = {
+        k: FACTOR_WEIGHTS[k]
+        for k in FACTOR_WEIGHTS
+        if k not in IC_ADAPTIVE_FACTORS
+    }
+    adaptive_budget = max(0.0, 1.0 - sum(reserved.values()))
 
     if panel.empty:
         logger.warning("IC weights: empty panel — returning static weights")
@@ -193,15 +240,23 @@ def compute_ic_weights(
         _cache["method"]    = "static_fallback"
         return dict(FACTOR_WEIGHTS)
 
-    factor_names = list(FACTOR_WEIGHTS.keys())
+    factor_names = list(IC_ADAPTIVE_FACTORS)
     raw_ic: dict[str, float] = {}
 
     for name in factor_names:
+        if name not in panel.columns:
+            # Defensive — _panel_row hardcodes the factor list. A new factor
+            # added to IC_ADAPTIVE_FACTORS without a corresponding column in
+            # the panel builder must surface here, not silently fall to zero.
+            logger.warning("IC weights: factor %s missing from panel", name)
+            raw_ic[name] = 0.0
+            continue
         mean_ic, n_obs = _ic_from_panel(panel, name)
         raw_ic[name]   = mean_ic if n_obs >= MIN_IC_OBS else 0.0
         logger.debug("Factor %s: IC=%.4f (%d obs)", name, mean_ic, n_obs)
 
-    _cache["ic_values"] = raw_ic
+    # Record raw IC for diagnostics; reserved factors get None (no IC).
+    _cache["ic_values"] = {**raw_ic, **{k: None for k in reserved}}
 
     # Apply floor and long-only constraint
     clipped = {}
@@ -216,13 +271,19 @@ def compute_ic_weights(
         _cache["method"] = "static_fallback"
         return dict(FACTOR_WEIGHTS)
 
-    # Normalise first, then cap per-factor at IC_MAX_W, then re-normalise.
-    # Applying the cap post-normalisation prevents a single dominant factor
-    # from absorbing all weight when most others are zeroed.
-    weights = {k: v / total for k, v in clipped.items()}
-    weights = {k: min(v, IC_MAX_W) for k, v in weights.items()}
+    # Normalise within the adaptive budget, cap per-factor at IC_MAX_W of the
+    # adaptive share, then re-normalise. The cap prevents a single dominant
+    # factor from absorbing the entire adaptive share when most others zero.
+    adaptive_cap = IC_MAX_W * adaptive_budget if adaptive_budget > 0 else IC_MAX_W
+    weights = {k: (v / total) * adaptive_budget for k, v in clipped.items()}
+    weights = {k: min(v, adaptive_cap) for k, v in weights.items()}
     total2  = sum(weights.values())
-    weights = {k: round(v / total2, 4) for k, v in weights.items()}
+    if total2 > 1e-9:
+        weights = {k: (v / total2) * adaptive_budget for k, v in weights.items()}
+
+    # Re-attach reserved factors at their static weight, then round.
+    weights.update(reserved)
+    weights = {k: round(v, 4) for k, v in weights.items()}
 
     _cache["method"] = "ic_weighted"
     _t_end = time.perf_counter()

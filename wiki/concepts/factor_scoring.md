@@ -8,17 +8,20 @@ Each factor returns a raw score in **[−1.0, +1.0]**. Scores are combined as a 
 
 Calibrated against ML feature importances (per `quant_engine/config.py`):
 
-| Factor | Module | Weight | Type |
-|--------|--------|--------|------|
-| Momentum | `factors/momentum.py` | 20% | Trend |
-| Volatility | `factors/volatility.py` | 20% | Risk |
-| RSI (trend-confirming) | `factors/rsi.py` | 20% | Oscillator |
-| Bollinger Bands | `factors/bollinger.py` | 15% | Oscillator (replaces mean_reversion) |
-| MACD | `factors/macd.py` | 12% | Trend |
-| Relative Strength | `factors/relative_strength.py` | 8% | Cross-sectional |
-| Volume | `factors/volume.py` | 5% | Sentiment |
+| Factor | Module | Weight | Type | IC-adaptive |
+|--------|--------|--------|------|-------------|
+| Volatility | `factors/volatility.py` | 20% | Risk | yes |
+| Momentum | `factors/momentum.py` | 15% | Trend | yes |
+| RSI (trend-confirming) | `factors/rsi.py` | 15% | Oscillator | yes |
+| Bollinger Bands | `factors/bollinger.py` | 15% | Oscillator (replaces mean_reversion) | yes |
+| MACD | `factors/macd.py` | 12% | Trend | yes |
+| **Sentiment** | `factors/sentiment.py` | **10%** (fallback) | News (soft) | **yes** |
+| Relative Strength | `factors/relative_strength.py` | 8% | Cross-sectional | yes |
+| Volume | `factors/volume.py` | 5% | Volume | yes |
 
-**Sum: 100%**. `mean_reversion` replaced by `bollinger` (same contrarian intent, volatility-adaptive). RSI direction flipped to trend-confirmation — high RSI = bullish, not overbought.
+**Sum: 100%**. `mean_reversion` replaced by `bollinger` (same contrarian intent, volatility-adaptive). RSI direction flipped to trend-confirmation — high RSI = bullish, not overbought. Sentiment activated 2026-05-13 at 10% (user-directed, ahead of wiki Phase 3 IC gate) — 5pp from momentum, 5pp from RSI; see `wiki/concepts/sentiment.md`. Static values above are the fallback used when the IC engine returns `static_fallback`.
+
+**IC-adaptive.** All 8 factors are listed in `IC_ADAPTIVE_FACTORS` and have their weights daily-rebalanced by `quant_engine/scoring/ic_weights.py` over the full **100% budget**. The IC panel builder (`_panel_row`) left-joins per-day `sentiment_daily.sent_score` onto each symbol's price history, so sentiment competes for weight on exactly the same Spearman-rank-IC criterion as the price factors. Until enough historical sentiment rows accumulate (≥ `MIN_IC_OBS = 20` valid date observations with ≥ `MIN_CROSS_N = 5` stocks each), sentiment's IC falls below the floor and it receives **0% live weight** — same gating Phase 3 envisaged, now expressed through the IC engine itself. The `reserved` mechanism in `IC_ADAPTIVE_FACTORS` is kept for any future hard-static factor we deliberately want the IC engine to leave alone (empty set today).
 
 ## Signal Thresholds
 
@@ -32,15 +35,18 @@ composite ≤ −40  → SHORT
 
 ```python
 composite = (
-    0.20 * momentum_score +
     0.20 * volatility_score +
-    0.20 * rsi_score +
+    0.15 * momentum_score +
+    0.15 * rsi_score +
     0.15 * bollinger_score +
     0.12 * macd_score +
+    0.10 * sentiment_score +       # sent_24h ∈ [-1, +1]; 0.0 when no sentiment row
     0.08 * relative_strength_score +
     0.05 * volume_score
 ) * 100
 ```
+
+The numerical weights above are the static `FACTOR_WEIGHTS` defined in `quant_engine/config.py` — the live composite uses `get_active_weights()`, which IC-rebalances all 8 factors (sentiment included) once per day. Call `GET /api/ic-weights` to see the current live values vs. the static fallback.
 
 ## Dynamic Weights (Regime-Adaptive)
 

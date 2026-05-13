@@ -1850,15 +1850,17 @@ async function loadICWeights() {
     const labels = {
       momentum: 'Momentum', bollinger: 'Bollinger', rsi: 'RSI',
       macd: 'MACD', volatility: 'Volatility', volume: 'Volume',
-      relative_strength: 'Rel. Strength'
+      relative_strength: 'Rel. Strength', sentiment: 'Sentiment'
     };
 
     barsEl.innerHTML = Object.keys(weights).map(factor => {
       const w      = weights[factor] ?? 0;
       const sw     = statics[factor] ?? 0;
       const ic     = rawIC[factor];
-      const icTxt  = ic != null ? (ic >= 0 ? `IC +${ic.toFixed(4)}` : `IC ${ic.toFixed(4)}`) : '';
-      const icColor = ic > 0.05 ? '#10b981' : ic > 0.02 ? '#f59e0b' : ic != null ? '#ef4444' : '#64748b';
+      // ic === null means the factor is a static pass-through (not IC-adaptive).
+      const isStatic = factor in rawIC && rawIC[factor] === null;
+      const icTxt  = isStatic ? 'STATIC' : ic != null ? (ic >= 0 ? `IC +${ic.toFixed(4)}` : `IC ${ic.toFixed(4)}`) : '';
+      const icColor = isStatic ? '#64748b' : ic > 0.05 ? '#10b981' : ic > 0.02 ? '#f59e0b' : ic != null ? '#ef4444' : '#64748b';
       const wPct   = (w * 100).toFixed(1);
       const swPct  = (sw * 100).toFixed(1);
       const changed = Math.abs(w - sw) > 0.005;
@@ -1948,13 +1950,36 @@ function renderQuantCards(stocks) {
         : data.score < -0.2 ? 'var(--danger)'
           : 'var(--text-muted)';
       const label = name.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+      // Sentiment gets an extra sub-row: article count, 5d mean, momentum arrow.
+      let sentimentSub = '';
+      if (name === 'sentiment') {
+        const n   = data.n_articles_24h ?? 0;
+        const s5d = data.sent_5d;
+        const mom = data.sent_momentum;
+        const dt  = data.last_date ?? '';
+        const momArrow = mom == null ? '—'
+          : mom > 0.05 ? '↑' : mom < -0.05 ? '↓' : '→';
+        const momColor = mom == null ? 'var(--text-muted)'
+          : mom > 0.05 ? 'var(--success)' : mom < -0.05 ? 'var(--danger)' : 'var(--text-muted)';
+        const s5dTxt = s5d != null ? `5d ${s5d >= 0 ? '+' : ''}${s5d.toFixed(2)}` : '5d —';
+        sentimentSub = `
+          <div style="grid-column:2/-1;display:flex;gap:0.8rem;margin-top:2px;margin-bottom:2px;">
+            <span style="font-size:0.65rem;color:var(--text-muted);">${n} article${n !== 1 ? 's' : ''} today</span>
+            <span style="font-size:0.65rem;color:var(--text-muted);">${s5dTxt}</span>
+            <span style="font-size:0.65rem;color:${momColor};font-weight:600;">${momArrow}</span>
+            ${dt ? `<span style="font-size:0.65rem;color:var(--text-muted);margin-left:auto;">${dt}</span>` : ''}
+          </div>`;
+      }
+
       return `
-        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:4px;">
-          <span style="width:110px;font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">${label}</span>
-          <div style="flex:1;height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+        <div style="display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:0.5rem;margin-bottom:4px;">
+          <span style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">${label}</span>
+          <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
             <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width 0.5s;"></div>
           </div>
-          <span style="width:40px;font-size:0.7rem;color:${barColor};text-align:right;">${data.score > 0 ? '+' : ''}${data.score.toFixed(2)}</span>
+          <span style="font-size:0.7rem;color:${barColor};text-align:right;">${data.score > 0 ? '+' : ''}${data.score.toFixed(2)}</span>
+          ${sentimentSub}
         </div>`;
     }).join('');
 
