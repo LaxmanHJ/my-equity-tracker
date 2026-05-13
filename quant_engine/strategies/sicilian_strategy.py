@@ -330,6 +330,7 @@ class SicilianStrategy(BaseStrategy):
             if industry
             else "Nifty 500"
         )
+        idx_close = load_sector_series(nse_index, limit=2000)
         idx_close   = _ensure_unique(load_sector_series(nse_index, limit=2000), f"sector.{nse_index}")
         nifty_close = _ensure_unique(load_sector_series("Nifty 50",  limit=2000), "sector.Nifty 50")
         if not idx_close.empty:

@@ -535,7 +535,7 @@ def train_final(
         "n_total_rows_in_dataset": int(len(X_all)),
         "n_stocks": int(meta_all["symbol"].nunique()),
         "label_def": "1 if fwd_ret_20d > 0 else 0",
-        "model_path": str(META_MODEL_PATH),
+        "model_path": str(META_MODEL_PATH.relative_to(PROJECT_ROOT)),
         "notes": (
             "Final-fit meta-labeler. Predicts P(profitable @ 20d | primary BUY) "
             "for live scoring. Walk-forward OOS validation lives in "

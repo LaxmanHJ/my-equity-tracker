@@ -258,6 +258,19 @@ def score_single_stock(
         except Exception as exc:
             logger.warning("meta-labeler scoring failed for %s: %s", symbol, exc)
 
+    # ── Sentiment features (soft, observational) ─────────────────────────────
+    # Attached to every score payload as `sentiment` so the dashboard / Claude
+    # gate can display them, but NOT yet folded into the composite weight.
+    # Status (2026-05-12): data-collection mode. Weight stays 0% until ≥ 6
+    # months of live sentiment_daily rows exist and per-symbol IC has been
+    # measured. See wiki/concepts/sentiment.md "Productionisation phases".
+    try:
+        from quant_engine.sentiment.features import build_sentiment_features
+        sent = build_sentiment_features(symbol)
+        result["sentiment"] = sent.to_dict()
+    except Exception as exc:  # noqa: BLE001 — non-critical optional feature
+        logger.debug("sentiment features unavailable for %s: %s", symbol, exc)
+
     return result
 
 
@@ -279,6 +292,8 @@ def score_all_stocks(symbols: Optional[List[str]] = None) -> List[dict]:
     """
     if symbols is None:
         symbols = load_all_symbols()
+    benchmark_df = load_benchmark()
+    market_ctx = _build_market_context(benchmark_df)
     t0 = time.perf_counter()
     benchmark_df = load_benchmark()
     market_ctx = _build_market_context(benchmark_df)
