@@ -26,6 +26,48 @@ import { evaluateConviction } from './convictionGates.js';
 export { evaluateConviction };
 
 const QUANT_ENGINE_URL = process.env.QUANT_ENGINE_URL || 'http://localhost:5001';
+  if (s.ml_path) {
+    const conf = s.ml_confidence;
+    gates.push({
+      name: 'ml_confidence',
+      pass: conf != null && conf >= c.minMlConfidencePct,
+      value: conf,
+      required: `>= ${c.minMlConfidencePct}`,
+    });
+  }
+
+  // Meta-labeler bet-sizing gate (SIC-42 — wiki/concepts/ml_pipeline.md).
+  // Only active when the secondary model is available and produced a prob.
+  // Fails explicitly on missing prob rather than silently bypassing — keeps
+  // upstream failures visible.
+  if (c.requireMetaPass) {
+    const mp = s.meta_prob;
+    gates.push({
+      name: 'meta_labeler',
+      pass: mp != null && mp >= c.minMetaProb,
+      value: mp,
+      required: `>= ${c.minMetaProb}`,
+    });
+  }
+
+  const adv = s.factors?.volume?.avg_volume_20d ?? null;
+  gates.push({
+    name: 'liquidity_adv',
+    pass: adv != null && adv >= c.minAvgDailyVolume,
+    value: adv,
+    required: `>= ${c.minAvgDailyVolume}`,
+  });
+
+  gates.push({
+    name: 'data_points',
+    pass: (s.data_points ?? 0) >= c.minDataPoints,
+    value: s.data_points,
+    required: `>= ${c.minDataPoints}`,
+  });
+
+  const failed = gates.filter(g => !g.pass);
+  return { passed: failed.length === 0, failedGates: failed, gates };
+}
 
 /**
  * Run the scoring engine and enqueue only signals that clear all conviction

@@ -21,6 +21,6 @@
   "n_total_rows_in_dataset": 372133,
   "n_stocks": 205,
   "label_def": "1 if fwd_ret_20d > 0 else 0",
-  "model_path": "quant_engine/ml/models/meta_labeler.pkl",
+  "model_path": "/Users/elj/Desktop/Proyectos/PersonalStockAnalyser/quant_engine/ml/models/meta_labeler.pkl",
   "notes": "Final-fit meta-labeler. Predicts P(profitable @ 20d | primary BUY) for live scoring. Walk-forward OOS validation lives in data/meta_labeler_sweep.json \u2014 re-run --sweep before each retrain."
 }

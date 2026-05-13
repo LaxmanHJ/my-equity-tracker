@@ -25,6 +25,8 @@ restart cycle.
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -61,6 +63,51 @@ _cache: dict = {
 }
 
 
+def _panel_row(
+    symbol: str,
+    benchmark_df: pd.DataFrame,
+    lookback: int,
+    horizon: int,
+) -> Optional[pd.DataFrame]:
+    """
+    Per-symbol worker for _build_factor_panel.
+
+    Fetches price history + computes the seven rolling factor scores + the
+    forward return. Returns one stacked frame or None if the symbol has
+    insufficient history to contribute. Runs inside a ThreadPoolExecutor
+    worker — must be self-contained and tolerate identical concurrent calls
+    on other symbols.
+    """
+    from quant_engine.data.loader import load_price_history
+    from quant_engine.strategies.sicilian_strategy import SicilianStrategy as _S
+
+    df = load_price_history(symbol, limit=lookback + horizon + 30)
+    if len(df) < IC_LOOKBACK // 4:   # need at least ~63 bars
+        return None
+
+    close = df["close"]
+    vol   = df["volume"]
+
+    scores = pd.DataFrame({
+        "momentum":          _S._rolling_momentum_score(close),
+        "bollinger":         _S._rolling_bollinger_score(close),
+        "rsi":               _S._rolling_rsi_score(close),
+        "macd":              _S._rolling_macd_score(close),
+        "volatility":        _S._rolling_volatility_score(close),
+        "volume":            _S._rolling_volume_score(close, vol),
+        "relative_strength": _S._rolling_relative_strength_score(close, benchmark_df),
+    }, index=df.index)
+
+    scores["fwd_ret"] = df["close"].shift(-horizon) / df["close"] - 1
+    scores["symbol"]  = symbol
+
+    scores = scores.dropna(subset=["fwd_ret"]).tail(lookback)
+    if len(scores) < 30:
+        return None
+
+    return scores.reset_index()
+
+
 def _build_factor_panel(lookback: int, horizon: int) -> pd.DataFrame:
     """
     Load price history for every portfolio stock, compute all 7 rolling factor
@@ -69,43 +116,33 @@ def _build_factor_panel(lookback: int, horizon: int) -> pd.DataFrame:
     The panel has columns: date, symbol, <factor_names>, fwd_ret
     Only rows where fwd_ret is available (i.e. not the last `horizon` bars)
     are kept.  The last `lookback` rows per stock are retained.
+
+    Per-symbol fetches run in a ThreadPoolExecutor — the work is dominated by
+    Turso HTTP round-trips, and the GIL releases during `requests.post`.
     """
-    # Local imports to avoid circular deps at module load time
-    from quant_engine.data.loader import load_price_history, load_all_symbols, load_benchmark
-    from quant_engine.strategies.sicilian_strategy import SicilianStrategy as _S
+    from quant_engine.data.loader import load_all_symbols, load_benchmark
 
     symbols      = load_all_symbols()
-    benchmark_df = load_benchmark()
-    factor_names = list(FACTOR_WEIGHTS.keys())
+    benchmark_df = load_benchmark()   # loaded once, shared read-only across workers
 
-    frames = []
-    for symbol in symbols:
-        df = load_price_history(symbol, limit=lookback + horizon + 30)
-        if len(df) < IC_LOOKBACK // 4:   # need at least ~63 bars
-            continue
+    frames: list[pd.DataFrame] = []
+    if not symbols:
+        return pd.DataFrame()
 
-        close  = df["close"]
-        vol    = df["volume"]
-
-        scores = pd.DataFrame({
-            "momentum":          _S._rolling_momentum_score(close),
-            "bollinger":         _S._rolling_bollinger_score(close),
-            "rsi":               _S._rolling_rsi_score(close),
-            "macd":              _S._rolling_macd_score(close),
-            "volatility":        _S._rolling_volatility_score(close),
-            "volume":            _S._rolling_volume_score(close, vol),
-            "relative_strength": _S._rolling_relative_strength_score(close, benchmark_df),
-        }, index=df.index)
-
-        scores["fwd_ret"] = df["close"].shift(-horizon) / df["close"] - 1
-        scores["symbol"]  = symbol
-
-        # Keep settled rows only (fwd_ret is NaN for the last `horizon` bars)
-        scores = scores.dropna(subset=["fwd_ret"]).tail(lookback)
-        if len(scores) < 30:
-            continue
-
-        frames.append(scores.reset_index())
+    max_workers = min(len(symbols), 10)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(_panel_row, sym, benchmark_df, lookback, horizon)
+            for sym in symbols
+        ]
+        for fut in as_completed(futures):
+            try:
+                frame = fut.result()
+            except Exception as exc:
+                logger.warning("IC panel row failed: %s", exc)
+                continue
+            if frame is not None:
+                frames.append(frame)
 
     if not frames:
         return pd.DataFrame()
@@ -146,7 +183,9 @@ def compute_ic_weights(
 
     Raises nothing — caller should handle exceptions and fall back.
     """
+    _t0 = time.perf_counter()
     panel = _build_factor_panel(lookback, horizon)
+    _t_panel = time.perf_counter()
 
     if panel.empty:
         logger.warning("IC weights: empty panel — returning static weights")
@@ -186,6 +225,12 @@ def compute_ic_weights(
     weights = {k: round(v / total2, 4) for k, v in weights.items()}
 
     _cache["method"] = "ic_weighted"
+    _t_end = time.perf_counter()
+    n_symbols = len(panel["symbol"].unique())
+    logger.info(
+        "compute_ic_weights: %d symbols, panel %.2fs, ic %.2fs, total %.2fs",
+        n_symbols, _t_panel - _t0, _t_end - _t_panel, _t_end - _t0,
+    )
     logger.info("IC weights (horizon=%dd, lookback=%dd): %s", horizon, lookback, weights)
     return weights
 
