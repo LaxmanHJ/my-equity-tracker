@@ -438,10 +438,22 @@ function isMarketOpen() {
  * quant engine will read today's prices from the same up-to-date DB.
  */
 router.post('/portfolio/sync', async (req, res) => {
+  // Track each sub-sync so the response body tells the caller exactly what
+  // happened, instead of forcing them to read server console logs.
+  const subSyncs = {
+    holdings:  { ok: false, detail: null },
+    fii:       { ok: false, detail: null },
+    bulkDeals: { ok: false, detail: null },
+    pcrOi:     { ok: false, detail: null },
+    vix:       { ok: false, detail: null },
+    sentiment: { ok: false, detail: null },
+  };
+
   try {
     console.log('[ForceSync] Starting full portfolio + index data refresh into SQLite...');
     const quotes = await getAllQuotes(true); // fetches from RapidAPI/AlphaVantage → writes to SQLite
     console.log(`[ForceSync] ✅ Synced ${quotes.length} holdings to SQLite`);
+    subSyncs.holdings = { ok: true, detail: { synced: quotes.length } };
 
     // Fetch today's FII/DII cash flows via Python engine (session-based, more reliable)
     try {
@@ -449,18 +461,31 @@ router.post('/portfolio/sync', async (req, res) => {
       const fiiData = await fiiRes.json();
       if (fiiData.success) {
         console.log(`[ForceSync] ✅ FII/DII synced`);
+        subSyncs.fii = { ok: true, detail: fiiData };
       } else {
         console.warn(`[ForceSync] ⚠️ FII/DII sync: ${fiiData.error}`);
+        subSyncs.fii = { ok: false, detail: { error: fiiData.error } };
       }
     } catch (e) {
       console.warn('[ForceSync] ⚠️ FII/DII sync skipped (quant engine unavailable):', e.message);
+      subSyncs.fii = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
     }
 
     // Fetch today's bulk/block deals — accumulates institutional activity data over time
-    await fetchBulkDealsToday();
+    try {
+      await fetchBulkDealsToday();
+      subSyncs.bulkDeals = { ok: true, detail: null };
+    } catch (e) {
+      subSyncs.bulkDeals = { ok: false, detail: { error: e.message } };
+    }
 
     // Fetch PCR + OI Buildup from Angel One
-    await fetchPCRAndOIBuildup();
+    try {
+      await fetchPCRAndOIBuildup();
+      subSyncs.pcrOi = { ok: true, detail: null };
+    } catch (e) {
+      subSyncs.pcrOi = { ok: false, detail: { error: e.message } };
+    }
 
     // Fetch today's India VIX from NSE and upsert into market_regime
     try {
@@ -468,11 +493,14 @@ router.post('/portfolio/sync', async (req, res) => {
       const vixData = await vixRes.json();
       if (vixData.success) {
         console.log(`[ForceSync] ✅ VIX synced: ${vixData.date} = ${vixData.india_vix}`);
+        subSyncs.vix = { ok: true, detail: { date: vixData.date, india_vix: vixData.india_vix } };
       } else {
         console.warn(`[ForceSync] ⚠️ VIX sync failed: ${vixData.error}`);
+        subSyncs.vix = { ok: false, detail: { error: vixData.error } };
       }
     } catch (e) {
       console.warn('[ForceSync] ⚠️ VIX sync skipped (quant engine unavailable):', e.message);
+      subSyncs.vix = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
     }
 
     // Score today's sentiment from stock_news (and NewsAPI if configured)
@@ -491,22 +519,40 @@ router.post('/portfolio/sync', async (req, res) => {
           `${sentData.articles} articles, ${sentData.rows_written} rows ` +
           `(scorers: ${(sentData.available_scorers || []).join(',') || 'none'})`,
         );
+        subSyncs.sentiment = {
+          ok: true,
+          detail: {
+            symbols:           sentData.symbols,
+            articles:          sentData.articles,
+            rows_written:      sentData.rows_written,
+            available_scorers: sentData.available_scorers,
+          },
+        };
       } else {
         console.warn(`[ForceSync] ⚠️ Sentiment sync failed: ${sentData.error}`);
+        subSyncs.sentiment = {
+          ok: false,
+          detail: {
+            error:             sentData.error,
+            available_scorers: sentData.available_scorers,
+          },
+        };
       }
     } catch (e) {
       console.warn('[ForceSync] ⚠️ Sentiment sync skipped (quant engine unavailable):', e.message);
+      subSyncs.sentiment = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
     }
 
     res.json({
       success: true,
       synced: quotes.length,
       message: `Refreshed ${quotes.length} holdings in database`,
+      subSyncs,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('[ForceSync] Error:', error);
-    res.status(500).json({ success: false, error: 'Failed to sync portfolio data' });
+    res.status(500).json({ success: false, error: 'Failed to sync portfolio data', subSyncs });
   }
 });
 
