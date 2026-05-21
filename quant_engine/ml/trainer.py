@@ -43,8 +43,7 @@ from quant_engine.data.loader import (
 from quant_engine.data.delivery_loader import load_delivery_series
 from quant_engine.data.market_regime_loader import (
     load_vix_series, vix_to_score, build_markov_score_series,
-    load_fii_flow_series, load_fii_fo_series, _flow_to_score,
-    load_pcr_series, pcr_to_score,
+    load_fii_fo_series, _flow_to_score,
 )
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
@@ -71,11 +70,10 @@ FEATURE_COLS = [
     "markov_regime",      # Markov P(Bull) - P(Bear) from 252-day rolling transition matrix
     # NSE delivery data
     "delivery_score",     # rolling z-score of delivery_pct vs 60-day mean, clipped to [-1, +1]
-    # FII flow signals (market-wide, same value for every stock on the same date)
-    "fii_flow_score",     # 10-day rolling FII net cash, percentile-ranked → [-1 outflow, +1 inflow]
+    # FII F&O positioning (market-wide). fii_flow_score (cash) and pcr_score
+    # were dropped 2026-05-20: only ~20 DB rows each, zero importance in the
+    # April-19 pickle. Cash FII + PCR are not yet backfilled in Turso.
     "fii_fo_score",       # FII net index futures (long-short), percentile-ranked → [-1 short, +1 long]
-    # PCR sentiment (market-wide)
-    "pcr_score",          # put-call ratio percentile-ranked → [-1 bearish, +1 bullish]
     # Intraday-derived features (from 15-min candles, Angel One; ~2018+ coverage)
     "overnight_gap",          # (today_open - prev_close) / prev_close
     "intraday_range_ratio",   # (day_high - day_low) / ATR14
@@ -205,9 +203,7 @@ def _build_feature_frame(
     nifty_trend: pd.Series,
     markov_score: pd.Series,
     delivery_score: pd.Series,
-    fii_flow_score: pd.Series,
     fii_fo_score: pd.Series,
-    pcr_score: pd.Series,
     intraday_feats: pd.DataFrame,
 ) -> pd.DataFrame:
     """
@@ -247,9 +243,7 @@ def _build_feature_frame(
             "nifty_trend":       _align(nifty_trend),
             "markov_regime":     _align(markov_score),
             "delivery_score":    _align(delivery_score),
-            "fii_flow_score":    _align(fii_flow_score),
             "fii_fo_score":      _align(fii_fo_score),
-            "pcr_score":         _align(pcr_score),
             "overnight_gap":         _align_intraday("overnight_gap"),
             "intraday_range_ratio":  _align_intraday("intraday_range_ratio"),
             "last_hour_momentum":    _align_intraday("last_hour_momentum"),
@@ -313,17 +307,6 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
     markov_score_series = build_markov_score_series(benchmark_df)
     logger.info("Markov regime series: %d bars", len(markov_score_series))
 
-    # FII flow score: 10-day rolling net cash, percentile-ranked → [-1, +1]
-    raw_fii_flow = load_fii_flow_series(limit=2000)
-    if not raw_fii_flow.empty:
-        fii_10d = raw_fii_flow.rolling(10).sum()
-        fii_flow_score_series = _flow_to_score(fii_10d)
-        logger.info("FII flow series: %d bars", len(fii_flow_score_series))
-    else:
-        fii_flow_score_series = pd.Series(dtype=float)
-        logger.warning("No FII flow data — fii_flow_score will be 0. "
-                       "Run: python -m quant_engine.data.backfill_fii_dii --from-csv <path>")
-
     # FII F&O score: net index futures positioning, percentile-ranked → [-1, +1]
     raw_fii_fo = load_fii_fo_series(limit=2000)
     if not raw_fii_fo.empty:
@@ -333,16 +316,6 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
         fii_fo_score_series = pd.Series(dtype=float)
         logger.warning("No FII F&O data — fii_fo_score will be 0. "
                        "Run: python -m quant_engine.data.backfill_fo_oi --from 2023-01-01")
-
-    # PCR score: put-call ratio percentile-ranked → [-1 bearish, +1 bullish]
-    raw_pcr = load_pcr_series(limit=2000)
-    if not raw_pcr.empty:
-        pcr_score_series = pcr_to_score(raw_pcr)
-        logger.info("PCR series: %d bars", len(pcr_score_series))
-    else:
-        pcr_score_series = pd.Series(dtype=float)
-        logger.warning("No PCR data — pcr_score will be 0. "
-                       "Accumulates via force-sync from Angel One PCR API.")
 
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
@@ -372,9 +345,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 vix_score_series, nifty_trend_series,
                 markov_score_series,
                 delivery_score_series,
-                fii_flow_score_series,
                 fii_fo_score_series,
-                pcr_score_series,
                 intraday_feats,
             )
 

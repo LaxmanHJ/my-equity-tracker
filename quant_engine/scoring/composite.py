@@ -95,8 +95,7 @@ def _build_market_context(benchmark_df: pd.DataFrame) -> dict:
     from quant_engine.data.market_regime_loader import (
         load_vix_series, vix_to_score,
         build_markov_score_series,
-        load_fii_flow_series, load_fii_fo_series, _flow_to_score,
-        load_pcr_series, pcr_to_score,
+        load_fii_fo_series, _flow_to_score,
     )
     from quant_engine.data.sector_indices_loader import load_sector_series
     from quant_engine.data.loader import load_industry_map
@@ -108,17 +107,8 @@ def _build_market_context(benchmark_df: pd.DataFrame) -> dict:
     nifty_trend = SicilianStrategy._build_nifty_trend(benchmark_df)
     markov_score = build_markov_score_series(benchmark_df)
 
-    raw_fii_flow = load_fii_flow_series(limit=2000)
-    if not raw_fii_flow.empty:
-        fii_flow_score = _flow_to_score(raw_fii_flow.rolling(10).sum())
-    else:
-        fii_flow_score = pd.Series(dtype=float)
-
     raw_fii_fo = load_fii_fo_series(limit=2000)
     fii_fo_score = _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
-
-    raw_pcr = load_pcr_series(limit=2000)
-    pcr_score = pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
 
     nifty_50_close = load_sector_series("Nifty 50", limit=2000)
     industry_map = load_industry_map()
@@ -127,9 +117,7 @@ def _build_market_context(benchmark_df: pd.DataFrame) -> dict:
         "vix_score":      vix_score,
         "nifty_trend":    nifty_trend,
         "markov_score":   markov_score,
-        "fii_flow_score": fii_flow_score,
         "fii_fo_score":   fii_fo_score,
-        "pcr_score":      pcr_score,
         "nifty_50_close": nifty_50_close,
         "industry_map":   industry_map,
     }
@@ -188,26 +176,24 @@ def score_single_stock(
     else:
         linear_signal = "HOLD"
 
-    # ── ML signal — primary when model is available ───────────────────────────
+    # ── ML signal — exposed as confirmation only ──────────────────────────────
+    # SIC-91 closure 2026-05-20: ML primary was promoted to authoritative when
+    # `sicilian_rf.pkl` existed, but the retrain on the cleaned 20-feature set
+    # (CV 0.335, n=24373) confirmed the model still rank-orders only marginally
+    # better than April-19 (20d cs-IC +0.030 vs +0.001) while its 20d sign-accuracy
+    # is 47.9% — worse than coin flip. Linear (52.6%) and ml_regression (54.9%)
+    # both beat it on hit rate. Demote ML to a side-channel: still report the
+    # verdict/confidence/probabilities for visibility and meta-labeler gating,
+    # but the authoritative `signal` is now the linear composite.
     ml_result  = None
-    ml_signal  = None
     sub_scores = None  # populated below when ML path runs; reused by meta-labeler
-
-    ml_unavailable = False  # True means model exists but features incomplete on this bar
     try:
         from quant_engine.ml import predictor as _predictor
         if _predictor.is_model_available():
             sub_scores = _build_ml_sub_scores(symbol, df, benchmark_df, market_ctx=market_ctx)
-            if sub_scores is None:
-                # Feature(s) NaN on latest bar — matches backtest which takes no
-                # position on such bars. Emit HOLD instead of linear so live
-                # decisions stay bit-consistent with Sicilian (ML) backtest.
-                ml_unavailable = True
-            else:
+            if sub_scores is not None:
                 ml_result = _predictor.predict(sub_scores)
                 if ml_result is not None:
-                    verdict_map = {"BUY": "LONG", "SELL": "SHORT", "HOLD": "HOLD"}
-                    ml_signal = verdict_map.get(ml_result["verdict"], "HOLD")
                     logger.debug(
                         "ML signal for %s: %s (confidence %.1f%%)",
                         symbol, ml_result["verdict"], ml_result["confidence"],
@@ -216,23 +202,14 @@ def score_single_stock(
         # Narrow catch for transient sklearn issues (shape/dtype). A RuntimeError
         # from _verify_feature_alignment (SIC-29) is a deployment bug and MUST
         # propagate so we notice immediately instead of silently running linear.
-        logger.warning("ML path failed for %s, using linear signal: %s", symbol, exc)
+        logger.warning("ML predict failed for %s: %s", symbol, exc)
 
-    # Primary signal: ML verdict when the model ran; HOLD when model exists but
-    # features were NaN on this bar (matches Sicilian (ML) backtest — no position);
-    # linear signal only when the trained model isn't available at all.
-    if ml_signal is not None:
-        signal = ml_signal
-    elif ml_unavailable:
-        signal = "HOLD"
-    else:
-        signal = linear_signal
+    signal = linear_signal
 
-    # Circuit breaker override (applies to both)
+    # Circuit breaker override
     circuit = load_circuit_status(symbol)
     if circuit == -1 and signal == "LONG":
         signal = "HOLD"
-    if circuit == -1 and linear_signal == "LONG":
         linear_signal = "HOLD"
 
     result = {
@@ -247,8 +224,14 @@ def score_single_stock(
     }
     if ml_result is not None:
         result["ml_verdict"]       = ml_result["verdict"]
-        result["ml_confidence"]    = ml_result["confidence"]
         result["ml_probabilities"] = ml_result["probabilities"]
+        # ml_confidence carries P(BUY) × 100 — directional, comparable across
+        # rows, on the same axis as the LONG/SHORT/HOLD signal column. This
+        # replaces the prior winning-class probability semantics so the journal
+        # number actually corresponds to a direction.
+        buy_prob = ml_result["probabilities"].get("BUY")
+        if buy_prob is not None:
+            result["ml_confidence"] = round(float(buy_prob) * 100, 1)
 
     # ── Meta-labeler prior — bet-sizing on top of linear primary BUY ────────
     # Only meaningful when the linear primary said LONG; below that threshold

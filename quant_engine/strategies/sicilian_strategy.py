@@ -273,17 +273,14 @@ class SicilianStrategy(BaseStrategy):
             vix_score    = market_ctx["vix_score"]
             nifty_trend  = market_ctx["nifty_trend"]
             markov_score = market_ctx["markov_score"]
-            fii_flow_score = market_ctx["fii_flow_score"]
-            fii_fo_score   = market_ctx["fii_fo_score"]
-            pcr_score      = market_ctx["pcr_score"]
-            industry_map   = market_ctx["industry_map"]
-            nifty_close    = market_ctx["nifty_50_close"]
+            fii_fo_score = market_ctx["fii_fo_score"]
+            industry_map = market_ctx["industry_map"]
+            nifty_close  = market_ctx["nifty_50_close"]
         else:
             from quant_engine.data.market_regime_loader import (
                 load_vix_series, vix_to_score,
                 build_markov_score_series,
-                load_fii_flow_series, load_fii_fo_series, _flow_to_score,
-                load_pcr_series, pcr_to_score,
+                load_fii_fo_series, _flow_to_score,
             )
             from quant_engine.data.loader import load_industry_map
 
@@ -293,20 +290,9 @@ class SicilianStrategy(BaseStrategy):
             nifty_trend  = self._build_nifty_trend(benchmark_df)
             markov_score = build_markov_score_series(benchmark_df)
 
-            raw_fii_flow = load_fii_flow_series(limit=2000)
-            if not raw_fii_flow.empty:
-                fii_flow_score = _flow_to_score(raw_fii_flow.rolling(10).sum())
-            else:
-                fii_flow_score = pd.Series(dtype=float)
-
             raw_fii_fo = load_fii_fo_series(limit=2000)
             fii_fo_score = (
                 _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
-            )
-
-            raw_pcr = load_pcr_series(limit=2000)
-            pcr_score = (
-                pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
             )
 
             industry_map = load_industry_map()
@@ -370,9 +356,7 @@ class SicilianStrategy(BaseStrategy):
                 "nifty_trend":           _align(nifty_trend,    "nifty_trend"),
                 "markov_regime":         _align(markov_score,   "markov_score"),
                 "delivery_score":        _align(delivery_score, "delivery_score"),
-                "fii_flow_score":        _align(fii_flow_score, "fii_flow_score"),
                 "fii_fo_score":          _align(fii_fo_score,   "fii_fo_score"),
-                "pcr_score":             _align(pcr_score,      "pcr_score"),
                 "overnight_gap":         _align_intraday(intraday_feats, "overnight_gap"),
                 "intraday_range_ratio":  _align_intraday(intraday_feats, "intraday_range_ratio"),
                 "last_hour_momentum":    _align_intraday(intraday_feats, "last_hour_momentum"),

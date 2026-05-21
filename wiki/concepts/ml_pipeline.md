@@ -363,6 +363,38 @@ Rows with per-date cross-section size < 5 stocks are NaN-labelled and dropped fr
 
 **Artifacts**: `data/ml_diagnostic.json` now carries three tracks under `aggregate_pooled.{ml,linear,ml_regression}` plus per-fold horizons.
 
+### 2026-05-20 SIC-91 closure — ML classifier demoted to confirmation
+
+Re-trained the primary RF on the cleaned 20-feature set (dropped `fii_flow_score`, `pcr_score` — both ~20 DB rows, 0.000 importance in the April-19 pickle). Ran walk-forward diagnostic + meta-labeler sweep + portfolio backtest against the SIC-91 ship-gates.
+
+**Primary RF retrain — new pickle (`sicilian_rf.pkl`, 2026-05-20):**
+- 20 features (was 22), n_samples 24,373, **15 effective stocks** despite 206-symbol DB (intraday valid-mask drops the rest)
+- Best params unchanged: `max_depth=12, min_samples_leaf=20`
+- CV 0.3352 ± 0.024 (down 0.02 from April-19's 0.3555)
+- Class dist still skewed: BUY 40.9% / SELL 35.9% / HOLD 23.2%
+
+**Ship-gate diagnostic vs April-19 baseline:**
+
+| Track | 20d cs-IC | 20d hit rate | Note |
+|---|---:|---:|---|
+| ML classifier (new) | **+0.030** | **47.9%** | IC ↑ 30× vs April-19's +0.001 — but sign-accuracy below random |
+| Linear composite | +0.0315 | 52.6% | Production primary, still wins on hit rate |
+| ml_regression | +0.0277 | **54.9%** | Strongest hit rate; not yet productionized |
+| Meta-labeler @0.75 | folds 3-4: +14pp / +21pp uplift | — | Threshold still holds on the new dataset |
+
+**Decision: demote ML classifier to confirmation, linear is authoritative.**
+
+The CV gate (≥ 0.41) failed strictly — but it failed under April-19 too, so the gate is empirically too strict for this dataset. The substantive failure is the **47.9% hit rate**: the classifier ranks reasonably but flips signs more than half the time. Promoting it as the primary signal would amplify the failure mode the live dashboard was already showing (ML calling LONG on every stock regardless of composite score).
+
+Implementation (2026-05-20):
+- `quant_engine/scoring/composite.py` now sets `signal = linear_signal` unconditionally. ML verdict / confidence / probabilities are still computed and returned (`ml_verdict`, `ml_confidence`, `ml_probabilities`) so they remain visible and so the meta-labeler can still gate linear BUYs.
+- `public/js/app.js` shows ML as an AGREES/DIFFERS overlay row, not as the primary pill. The pill now derives from `signal` which equals `linear_signal`, so the score and the verdict can no longer disagree.
+- Sanity check on the 13-stock portfolio after the demote: 1/13 LONG (composite +77.84), 12/13 HOLD. Before the fix: 13/13 LONG. UI bug closed.
+
+**Structural finding (load-bearing):** the Nifty 200 backfill premise was falsified. The `valid_mask = features.notna().all(axis=1)` in trainer + diagnostic drops every row where any intraday feature is NaN — i.e. every symbol whose intraday history doesn't extend back far enough. So with 206 symbols in the DB, the training set still has rows from only 15 stocks (the original portfolio). The meta-labeler dataset escapes this because it uses only `META_FEATURE_COLS` (no intraday) → 372k rows / 205 stocks. Expanding the *ML classifier* training universe needs either an intraday backfill for the wider universe or a model variant that omits the intraday features. Memory's SIC-91 risk #1 was correct: more data doesn't fix a structurally-mis-specified model.
+
+**Next:** productionize `ml_regression` (the only track with both positive cs-IC and >50% hit rate). Memory: `project_ml_regression_productionize.md`. Needs trainer + predictor + API field; uses identical features as the classifier but cs-rank regression label.
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML
