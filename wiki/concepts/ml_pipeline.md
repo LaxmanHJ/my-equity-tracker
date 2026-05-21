@@ -363,8 +363,41 @@ Rows with per-date cross-section size < 5 stocks are NaN-labelled and dropped fr
 
 **Artifacts**: `data/ml_diagnostic.json` now carries three tracks under `aggregate_pooled.{ml,linear,ml_regression}` plus per-fold horizons.
 
+### 2026-05-21 Audit Findings
+
+Full audit: **[ml_audit_2026_05_21.md](ml_audit_2026_05_21.md)** — severity-ranked
+structural issues, hedge-fund-practice gap analysis, alpha-vs-beta / multiple-testing
+caveats, scrap-vs-fix recommendation, prioritized P0-P3 rewrite plan with cost/lift
+estimates.
+
+**Top-line findings:**
+
+- **Scrap `sicilian_rf.pkl` as a live signal source.** SIC-91 demoted it on hit-rate
+  evidence but `composite.py:191-229` still routes `ml_signal` as primary when the
+  pickle is loaded. Expected ML lift post-fix is ~0.005-0.010 IC vs linear's 0.040 —
+  not worth keeping the primary-routing risk live.
+- **Keep & harden linear + meta-labeler.** Both have validated edge; meta-labeler's
+  +3.79 pp hit lift at p≥0.75 is the strongest single ML result in the codebase.
+- **Honest grade: ~40% on the AFML curriculum.** Bigger gaps are labels, sample
+  weights, CV honesty, universe completeness, and multiple-testing — not the model.
+
+**P0 action items (ship this week, no lift but stop active falsehoods):**
+
+1. `composite.py:224-229` — remove ML-primary routing; linear is always primary, ML
+   payload becomes telemetry only.
+2. `trainer.py` — import `_purge_train_indices` from `diagnostic.py` and wrap both
+   `_tune_hyperparams` and the CV reporting loop in `train()`. AFML Ch.10.
+3. Remove dead features (`pcr_score`, `fii_flow_score`) from `FEATURE_COLS` in
+   `trainer.py`, `predictor.py`, `sicilian_strategy._build_ml_features`. Retrain so the
+   pickle's `feature_names_in_` matches.
+
+See the audit's prioritized rewrite plan for P1-P3 items (triple-barrier labels,
+uniqueness weights, valid_mask loosening, CPCV, DSR, survivorship audit, market-neutral
+construction).
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — factor scores are ML features
 - [regime_detection.md](regime_detection.md) — regime features added to ML
 - [backtesting.md](backtesting.md) — ML signal validated in backtest
 - [intraday_features.md](intraday_features.md) — Phase 4 Angel One intraday features
+- [ml_audit_2026_05_21.md](ml_audit_2026_05_21.md) — full ML pipeline audit (2026-05-21)
