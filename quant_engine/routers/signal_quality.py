@@ -58,6 +58,7 @@ _FETCH_SQL = """
         sl.symbol,
         sl.signal,
         sl.linear_signal,
+        sl.ml_verdict,
         sl.ml_confidence,
         sl.composite_score,
         sl.meta_prob,
@@ -296,9 +297,9 @@ def get_signal_quality(limit: int = 500):
     # Most recent 40 signals — all three engines side by side
     journal_cols = [
         "signal_date", "symbol",
-        "signal", "ml_confidence",       # ML engine
-        "linear_signal", "composite_score",  # Linear engine
-        "meta_prob", "meta_pass",        # Meta-labeler (SIC-42)
+        "ml_verdict", "ml_confidence",       # ML engine (verdict + P(BUY))
+        "signal", "linear_signal", "composite_score",  # Linear engine
+        "meta_prob", "meta_pass",            # Meta-labeler (SIC-42)
         "entry_price", "entry_bar_date",
         "fwd_ret_1d", "fwd_ret_5d", "fwd_ret_10d", "fwd_ret_20d",
     ]

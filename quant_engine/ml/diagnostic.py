@@ -101,11 +101,8 @@ from quant_engine.data.loader import (
 from quant_engine.data.market_regime_loader import (
     _flow_to_score,
     build_markov_score_series,
-    load_fii_flow_series,
     load_fii_fo_series,
-    load_pcr_series,
     load_vix_series,
-    pcr_to_score,
     vix_to_score,
 )
 from quant_engine.ml.trainer import (
@@ -248,20 +245,9 @@ def build_dataset_with_horizons(
     nifty_trend_series = _build_nifty_trend_series(benchmark_df)
     markov_score_series = build_markov_score_series(benchmark_df)
 
-    raw_fii_flow = load_fii_flow_series(limit=2000)
-    if not raw_fii_flow.empty:
-        fii_flow_score_series = _flow_to_score(raw_fii_flow.rolling(10).sum())
-    else:
-        fii_flow_score_series = pd.Series(dtype=float)
-
     raw_fii_fo = load_fii_fo_series(limit=2000)
     fii_fo_score_series = (
         _flow_to_score(raw_fii_fo) if not raw_fii_fo.empty else pd.Series(dtype=float)
-    )
-
-    raw_pcr = load_pcr_series(limit=2000)
-    pcr_score_series = (
-        pcr_to_score(raw_pcr) if not raw_pcr.empty else pd.Series(dtype=float)
     )
 
     all_X: list[pd.DataFrame] = []
@@ -295,9 +281,7 @@ def build_dataset_with_horizons(
                 nifty_trend_series,
                 markov_score_series,
                 delivery_score_series,
-                fii_flow_score_series,
                 fii_fo_score_series,
-                pcr_score_series,
                 intraday_feats,
             )
 

@@ -264,6 +264,11 @@ export async function initDatabase() {
   // § "2026-05-09 SIC-42 Experiment B".
   try { await db.execute(`ALTER TABLE signals_log ADD COLUMN meta_prob REAL`); } catch (_) {}
   try { await db.execute(`ALTER TABLE signals_log ADD COLUMN meta_pass INTEGER`); } catch (_) {}
+  // ml_verdict: the RF classifier's actual winning class (BUY/HOLD/SELL), distinct
+  // from `signal` (which is the linear composite since SIC-91 demotion). Letting
+  // the journal show ML verdict alongside Linear makes the two-engine disagreement
+  // visible — a high P(BUY) paired with a HOLD linear signal is no longer a mystery.
+  try { await db.execute(`ALTER TABLE signals_log ADD COLUMN ml_verdict TEXT`); } catch (_) {}
 
   // market_regime FII/DII columns (ALTER TABLE is idempotent via try/catch)
   for (const col of [
@@ -812,17 +817,18 @@ export async function saveSignalsLog(stocks) {
   for (const s of stocks) {
     const metaPassInt = s.meta_pass === true ? 1 : s.meta_pass === false ? 0 : null;
     await db.execute({
-      sql: `INSERT INTO signals_log (signal_date, symbol, signal, linear_signal, composite_score, ml_confidence, meta_prob, meta_pass, recorded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      sql: `INSERT INTO signals_log (signal_date, symbol, signal, linear_signal, ml_verdict, composite_score, ml_confidence, meta_prob, meta_pass, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(signal_date, symbol) DO UPDATE SET
               signal          = excluded.signal,
               linear_signal   = excluded.linear_signal,
+              ml_verdict      = excluded.ml_verdict,
               composite_score = excluded.composite_score,
               ml_confidence   = excluded.ml_confidence,
               meta_prob       = excluded.meta_prob,
               meta_pass       = excluded.meta_pass,
               recorded_at     = excluded.recorded_at`,
-      args: nn(today, s.symbol, s.signal, s.linear_signal ?? null, s.composite_score ?? null, s.ml_confidence ?? null, s.meta_prob ?? null, metaPassInt, recordedAt)
+      args: nn(today, s.symbol, s.signal, s.linear_signal ?? null, s.ml_verdict ?? null, s.composite_score ?? null, s.ml_confidence ?? null, s.meta_prob ?? null, metaPassInt, recordedAt)
     });
   }
 }

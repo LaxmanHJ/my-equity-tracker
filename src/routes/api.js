@@ -643,6 +643,7 @@ router.get('/quant/scores', async (req, res) => {
         symbol:          s.symbol,
         signal:          s.signal,
         linear_signal:   s.linear_signal ?? null,
+        ml_verdict:      s.ml_verdict ?? null,
         composite_score: s.composite_score,
         ml_confidence:   s.ml_confidence ?? null,
         meta_prob:       s.meta_prob ?? null,

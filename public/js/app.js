@@ -1789,6 +1789,11 @@ function renderSignalJournal(el, signals) {
     return `<span style="margin-left:4px;font-size:0.65rem;padding:1px 5px;background:rgba(245,158,11,0.15);color:#f59e0b;border-radius:8px;" title="ML and Linear disagree">!</span>`;
   };
 
+  // ML verdict comes from the RF classifier as BUY/HOLD/SELL. Map to the
+  // LONG/HOLD/SHORT vocabulary used by the badge helpers so colors stay
+  // consistent with the Linear column.
+  const mlToSignal = (v) => v === 'BUY' ? 'LONG' : v === 'SELL' ? 'SHORT' : v === 'HOLD' ? 'HOLD' : null;
+
   el.innerHTML = `
     <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
       <thead>
@@ -1797,7 +1802,7 @@ function renderSignalJournal(el, signals) {
           <th style="padding:6px 10px;text-align:left;">Symbol</th>
           <th style="padding:6px 10px;text-align:center;">ML Signal</th>
           <th style="padding:6px 10px;text-align:center;">Linear</th>
-          <th style="padding:6px 10px;text-align:right;">Confidence</th>
+          <th style="padding:6px 10px;text-align:right;" title="ML model's P(BUY) × 100 — directional, sits on the same axis as the signal column.">Buy Confidence</th>
           <th style="padding:6px 10px;text-align:right;">1d</th>
           <th style="padding:6px 10px;text-align:right;">5d</th>
           <th style="padding:6px 10px;text-align:right;">10d</th>
@@ -1807,13 +1812,19 @@ function renderSignalJournal(el, signals) {
       <tbody>
         ${signals.map(s => {
           const conf      = s.ml_confidence != null ? `${s.ml_confidence.toFixed(1)}%` : '—';
-          const confColor = s.ml_confidence >= 75 ? '#10b981' : s.ml_confidence >= 55 ? '#f59e0b' : '#94a3b8';
-          // WIN/LOSS uses ML signal (primary engine)
+          const confColor = s.ml_confidence >= 60 ? '#10b981' : s.ml_confidence >= 50 ? '#f59e0b' : '#94a3b8';
+          // ML column now shows the RF classifier's actual verdict, mapped to
+          // LONG/HOLD/SHORT. Linear column shows the linear composite. They can
+          // (and often will) disagree post-SIC-91 demotion — disagreement is
+          // surfaced explicitly via the '!' badge. fwd-return WIN/LOSS uses
+          // `signal` (the authoritative linear signal) since that's what would
+          // drive a real trade.
+          const mlSig = mlToSignal(s.ml_verdict);
           return `
           <tr style="border-bottom:1px solid var(--border-color);">
             <td style="padding:7px 10px;color:var(--text-muted);white-space:nowrap;">${s.signal_date}</td>
             <td style="padding:7px 10px;font-weight:600;">${s.symbol}</td>
-            <td style="padding:7px 10px;text-align:center;">${signalBadge(s.signal)}${disagreeBadge(s.signal, s.linear_signal)}</td>
+            <td style="padding:7px 10px;text-align:center;">${signalBadge(mlSig)}${disagreeBadge(mlSig, s.linear_signal)}</td>
             <td style="padding:7px 10px;text-align:center;">${signalBadge(s.linear_signal)}</td>
             <td style="padding:7px 10px;text-align:right;font-weight:600;color:${confColor};">${conf}</td>
             <td style="padding:7px 10px;text-align:right;">${fmtRet(s.fwd_ret_1d,  s.signal, '1d')}</td>
@@ -1923,6 +1934,30 @@ function renderQuantCards(stocks) {
         : '⚪';
     const scoreColor = stock.composite_score > 0 ? 'var(--success)' : 'var(--danger)';
 
+    let mlRow = '';
+    if (stock.ml_verdict) {
+      const mv = stock.ml_verdict;
+      const mc = stock.ml_confidence;
+      const mlColor = mv === 'BUY' ? 'var(--success)' : mv === 'SELL' ? 'var(--danger)' : 'var(--text-muted)';
+      const agreesLinear =
+        (mv === 'BUY'  && stock.linear_signal === 'LONG') ||
+        (mv === 'SELL' && stock.linear_signal === 'SHORT') ||
+        (mv === 'HOLD' && stock.linear_signal === 'HOLD');
+      const agreeBadge = agreesLinear
+        ? `<span style="font-size:0.6rem;color:var(--success);font-weight:600;">AGREES</span>`
+        : `<span style="font-size:0.6rem;color:#f59e0b;font-weight:600;">DIFFERS</span>`;
+      const probs = stock.ml_probabilities || {};
+      const probsTxt = `SELL ${((probs.SELL||0)*100).toFixed(0)}% / HOLD ${((probs.HOLD||0)*100).toFixed(0)}% / BUY ${((probs.BUY||0)*100).toFixed(0)}%`;
+      mlRow = `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.7rem;padding:6px 8px;border:1px solid ${mlColor}33;background:${mlColor}0d;border-radius:8px;"
+             title="ML classifier verdict (confirmation only — primary signal is the linear composite). Probabilities: ${probsTxt}">
+          <span style="font-size:0.65rem;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;">ML</span>
+          <span style="font-size:0.7rem;color:${mlColor};font-weight:600;">${mv}</span>
+          <span style="font-size:0.65rem;color:var(--text-muted);">${mc?.toFixed?.(1) ?? mc}% buy conf</span>
+          <span style="margin-left:auto;">${agreeBadge}</span>
+        </div>`;
+    }
+
     const metaProb = stock.meta_prob;
     const metaPass = stock.meta_pass;
     const metaThreshold = stock.meta_threshold ?? 0.75;
@@ -1998,6 +2033,7 @@ function renderQuantCards(stocks) {
           </div>
         </div>
         <div style="border-top:1px solid var(--border-color);padding-top:0.8rem;">
+          ${mlRow}
           ${metaRow}
           ${factorBars}
         </div>
