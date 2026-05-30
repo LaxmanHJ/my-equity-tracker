@@ -422,11 +422,17 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
     leaf_candidates  = [20, 30, 50, 80]
     depth_candidates = [6, 8, 10, 12]
 
+    # Purge training rows whose 20d label horizon overlaps the test fold (AFML
+    # Ch.10). Function-local import breaks the trainer↔diagnostic import cycle
+    # (diagnostic imports FEATURE_COLS/_build_feature_frame from this module).
+    from quant_engine.ml.diagnostic import _purge_train_indices, LABEL_HORIZON_DAYS
+    dates = pd.DatetimeIndex(X.index)
+
     tscv = TimeSeriesSplit(n_splits=5)
     best_score = -1.0
     best_params = {}
 
-    logger.info("Hyperparameter search: %d combinations × 5 CV folds",
+    logger.info("Hyperparameter search: %d combinations × 5 CV folds (label-horizon purged)",
                 len(leaf_candidates) * len(depth_candidates))
 
     for max_depth in depth_candidates:
@@ -434,9 +440,16 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
             params = {**RF_PARAMS, "max_depth": max_depth, "min_samples_leaf": min_leaf}
             fold_scores = []
             for train_idx, test_idx in tscv.split(X):
+                train_idx = _purge_train_indices(
+                    np.asarray(train_idx), np.asarray(test_idx), dates, LABEL_HORIZON_DAYS
+                )
+                if len(train_idx) == 0:
+                    continue
                 clf = _build_pipeline(params)
                 clf.fit(X.iloc[train_idx], y.iloc[train_idx])
                 fold_scores.append(clf.score(X.iloc[test_idx], y.iloc[test_idx]))
+            if not fold_scores:
+                continue
             mean_acc = float(np.mean(fold_scores))
             logger.info("  max_depth=%-4s  min_samples_leaf=%-3d  → CV acc %.4f",
                         str(max_depth), min_leaf, mean_acc)
@@ -460,15 +473,28 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
     final_params = {**RF_PARAMS, **best_params}
 
     # ── Step 2: CV with best params (for honest accuracy reporting) ──
+    # Label-horizon purging (AFML Ch.10): drop training rows whose 20d label
+    # overlaps the test fold start. Without this, the reported CV accuracy is
+    # optimistic by ~3-5pp (the test fold's own future prices leak into the
+    # training labels). See wiki/concepts/ml_audit_2026_05_21.md → S2.
+    from quant_engine.ml.diagnostic import _purge_train_indices, LABEL_HORIZON_DAYS
+    dates = pd.DatetimeIndex(X.index)
+
     tscv = TimeSeriesSplit(n_splits=5)
     cv_accuracies: list[float] = []
 
     for fold, (train_idx, test_idx) in enumerate(tscv.split(X), 1):
+        train_idx = _purge_train_indices(
+            np.asarray(train_idx), np.asarray(test_idx), dates, LABEL_HORIZON_DAYS
+        )
+        if len(train_idx) == 0:
+            logger.warning("CV fold %d: purged training set empty — skipping", fold)
+            continue
         clf_cv = _build_pipeline(final_params)
         clf_cv.fit(X.iloc[train_idx], y.iloc[train_idx])
         acc = clf_cv.score(X.iloc[test_idx], y.iloc[test_idx])
         cv_accuracies.append(acc)
-        logger.info("CV fold %d accuracy: %.3f", fold, acc)
+        logger.info("CV fold %d accuracy: %.3f (purged train n=%d)", fold, acc, len(train_idx))
 
     # ── Step 3: final model trained on the full dataset ──────────
     clf = _build_pipeline(final_params)
