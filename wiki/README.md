@@ -15,6 +15,7 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [hurst_trend_following_century_2017.md](papers/hurst_trend_following_century_2017.md) | A Century of Evidence on Trend-Following — Hurst, Ooi & Pedersen (2017) | Ingested |
 | [grinold_kahn_active_portfolio.md](papers/grinold_kahn_active_portfolio.md) | Active Portfolio Management — Grinold & Kahn (1999) | Placeholder |
 | [cartea_jaimungal_ahft_2015.md](papers/cartea_jaimungal_ahft_2015.md) | Algorithmic and High-Frequency Trading — Cartea, Jaimungal & Penalva (2015) | Ingested (ToC + Preface) |
+| [lebron_laws_of_trading_2019.md](papers/lebron_laws_of_trading_2019.md) | The Laws of Trading — Agustin Lebron (2019) | Ingested |
 
 ## Concepts
 
