@@ -103,6 +103,25 @@ The secondary model improves precision — only trades when confidence is high.
 cd quant_engine && python ml/trainer.py
 ```
 
+### Training universe (2026-05-21, P1-a)
+
+`trainer.build_training_dataset(required_feature_cols=…)` decides which rows
+survive `valid_mask`:
+
+- **Default**: the 7 always-available price-derived factors (`rsi`, `macd`,
+  `trend_ma`, `bollinger`, `volume`, `volatility`, `relative_strength`) — same
+  set as `predictor.HARD_GATE_FEATURES`, asserted equal in tests. Soft
+  features (intraday, delivery, fii_fo, macro regime) may be NaN; the
+  pipeline's `SimpleImputer` fills them at fit time using training-set
+  medians (SIC-29 path). Diagnostic uses the same default so OOS measurement
+  matches what production trains on.
+- **Strict** (legacy): pass `FEATURE_COLS` to get the pre-P1-a behaviour
+  where every column must be non-NaN. Universe shrinks back to ~15 stocks.
+
+Effect on universe: 15 stocks (strict) → ~200 stocks (default) on the
+current DB after the Nifty 200 backfill — confirmed in tests by simulation,
+verifies on the local retrain via `metadata.n_samples`.
+
 ## Model Performance Tracking
 
 **Live tracking**: `routers/signal_quality.py` joins `signals_log` to `price_history` and computes cross-sectional Spearman IC per date at 1d/5d/10d/20d for both the ML engine and the linear engine. Served at `GET /api/quant/signal-quality`. Caveat: sample size is ~500 signals → IC SE ≈ 0.045 → weak statistical power.

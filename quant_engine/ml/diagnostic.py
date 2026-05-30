@@ -220,14 +220,18 @@ def build_dataset_with_horizons(
       HOLD ( 0): otherwise
 
     `required_feature_cols` controls which columns must be non-NaN for a
-    row to survive `valid_mask`. Defaults to FEATURE_COLS (full ML matrix
-    — preserves diagnostic.py's existing behaviour). The meta-labeler
-    passes its own narrower list so symbols missing the cohort-only
-    features (delivery, intraday) aren't dropped wholesale from the
-    expanded NSE-wide universe.
+    row to survive `valid_mask`. Defaults (2026-05-21, P1-a) to the same
+    REQUIRED_FEATURE_COLS_DEFAULT trainer.py uses (the 7 price-derived
+    factors) so the diagnostic measures the same universe production trains
+    on. Soft features (intraday / delivery / fii_fo) are imputed by the
+    pipeline's SimpleImputer rather than gating the row. Pass FEATURE_COLS
+    to restore pre-P1-a strict behaviour (training universe shrinks to ~15
+    stocks). See ML audit S5.
     """
     if required_feature_cols is None:
-        required_feature_cols = FEATURE_COLS
+        # Match trainer's default (P1-a): require only "hard" features.
+        from quant_engine.ml.trainer import REQUIRED_FEATURE_COLS_DEFAULT
+        required_feature_cols = list(REQUIRED_FEATURE_COLS_DEFAULT)
     symbols = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
     industry_map = load_industry_map()

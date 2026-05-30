@@ -239,9 +239,34 @@ def _build_feature_frame(
     )
 
 
-def build_training_dataset() -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+# Always-available "hard" features that every symbol with enough OHLCV has.
+# Loosens valid_mask from "every column non-NaN" (which dropped every Nifty 200
+# stock for lacking intraday/delivery) to "the price-derived row is complete";
+# soft features are imputed by the pipeline's SimpleImputer at inference time.
+# See ML audit S5 + meta_labeler's build_dataset_with_horizons(required_feature_cols=…).
+REQUIRED_FEATURE_COLS_DEFAULT: tuple[str, ...] = (
+    "rsi", "macd", "trend_ma", "bollinger",
+    "volume", "volatility", "relative_strength",
+)
+
+
+def build_training_dataset(
+    required_feature_cols: tuple[str, ...] | list[str] = REQUIRED_FEATURE_COLS_DEFAULT,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
     Iterate over every stock in the DB, compute features + labels, concatenate.
+
+    Args:
+        required_feature_cols: feature columns that must be non-NaN for a row
+            to survive `valid_mask`. Defaults to the 7 always-available
+            price-derived factors (`rsi`, `macd`, `trend_ma`, `bollinger`,
+            `volume`, `volatility`, `relative_strength`) — the same "hard
+            gate" predictor.HARD_GATE_FEATURES uses at inference time. Soft
+            features (intraday, delivery, FII F&O) may be NaN for symbols
+            without that data; the pipeline's SimpleImputer fills them with
+            training-set medians (SIC-29 path). Pass `FEATURE_COLS` to restore
+            the pre-P1-a strict behaviour (training universe shrinks to ~15
+            stocks with full feature coverage). See ML audit S5.
 
     Returns:
         X:             DataFrame (N, len(FEATURE_COLS)) of features
@@ -351,7 +376,13 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series, pd.Series]:
             )
             label_series = events["label"]
 
-            valid_mask = features.notna().all(axis=1) & label_series.notna()
+            # P1-a: require only the "hard" feature columns to be non-NaN.
+            # Soft features (intraday / delivery / fii_fo) may be NaN for
+            # symbols outside the original 15-stock universe — they're imputed
+            # by the pipeline's SimpleImputer at inference time using the
+            # training-set medians persisted in metadata.imputer_medians.
+            hard_cols = [c for c in required_feature_cols if c in features.columns]
+            valid_mask = features[hard_cols].notna().all(axis=1) & label_series.notna()
             features = features[valid_mask]
             label = label_series[valid_mask].astype(int)
             t1_offset = events.loc[valid_mask, "t1_offset"].astype(int).to_numpy()
