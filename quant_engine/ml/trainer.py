@@ -19,6 +19,10 @@ Features (all on –1 to +1 scale, matching Sicilian sub-score outputs):
     composite_factor, rsi, macd, trend_ma, bollinger,
     volume, volatility, relative_strength
 """
+# PEP 604 unions (X | Y) and PEP 585 generics need Python 3.10/3.9 respectively;
+# deferring annotation evaluation makes them safe on every interpreter ≥ 3.7.
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timezone
