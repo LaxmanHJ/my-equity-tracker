@@ -48,6 +48,7 @@ from quant_engine.data.market_regime_loader import (
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+from quant_engine.ml.features import build_feature_frame
 from quant_engine.ml.labels import (
     triple_barrier_events,
     triple_barrier_labels,
@@ -216,52 +217,25 @@ def _build_feature_frame(
     intraday_feats: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Compute all sub-scores for every bar in df.
+    Compute the FEATURE_COLS feature matrix for one symbol.
+
+    Thin wrapper around `quant_engine.ml.features.build_feature_frame` —
+    single source of truth shared with `SicilianStrategy._build_ml_features`
+    (P1-e refactor, ML audit S9). Argument order kept for diagnostic.py and
+    any other positional callers.
     """
     strat = SicilianStrategy("_trainer")
-    close = df["close"]
-    volume = df["volume"]
-
-    def _align(series: pd.Series) -> pd.Series:
-        """Reindex a market-level series to this stock's date index.
-        Returns zeros if series is empty (e.g. table not yet populated)."""
-        if series.empty:
-            return pd.Series(0.0, index=df.index)
-        return series.reindex(df.index, method="ffill").fillna(0.0)
-
-    # Intraday features: point-in-time, NOT ffilled. Missing rows stay NaN so
-    # that valid_mask drops them — prevents pre-2018 rows (where intraday is
-    # unavailable) from polluting the tree with a spurious zero-constant that
-    # encodes a pre/post-2018 regime split.
-    def _align_intraday(col: str) -> pd.Series:
-        if intraday_feats.empty or col not in intraday_feats.columns:
-            return pd.Series(np.nan, index=df.index)
-        return intraday_feats[col].reindex(df.index)
-
-    return pd.DataFrame(
-        {
-            "rsi":               strat._rolling_rsi_score(close),
-            "macd":              strat._rolling_macd_score(close),
-            "trend_ma":          strat._rolling_trend_score(close),
-            "bollinger":         strat._rolling_bollinger_score(close),
-            "volume":            strat._rolling_volume_score(close, volume),
-            "volatility":        strat._rolling_volatility_score(close),
-            "relative_strength": strat._rolling_relative_strength_score(close, benchmark_df),
-            "sector_rotation":   _align(sector_score),
-            "vix_regime":        _align(vix_score),
-            "nifty_trend":       _align(nifty_trend),
-            "markov_regime":     _align(markov_score),
-            "delivery_score":    _align(delivery_score),
-            "fii_fo_score":      _align(fii_fo_score),
-            "overnight_gap":         _align_intraday("overnight_gap"),
-            "intraday_range_ratio":  _align_intraday("intraday_range_ratio"),
-            "last_hour_momentum":    _align_intraday("last_hour_momentum"),
-            "vwap_deviation":        _align_intraday("vwap_deviation"),
-            "opening_drive_vol":     _align_intraday("opening_drive_vol"),
-            "closing_spike_vol":     _align_intraday("closing_spike_vol"),
-            "vol_concentration":     _align_intraday("vol_concentration"),
-        },
-        index=df.index,
+    return build_feature_frame(
+        df, benchmark_df,
+        strategy=strat,
+        sector_score=sector_score,
+        vix_score=vix_score,
+        nifty_trend=nifty_trend,
+        markov_score=markov_score,
+        delivery_score=delivery_score,
+        fii_fo_score=fii_fo_score,
+        intraday_feats=intraday_feats,
+        context="_trainer",
     )
 
 

@@ -30,13 +30,28 @@ is SIC-43, not yet done.
 
 ## Features
 
-Current features (all 7 factor scores):
-- momentum_score, mean_reversion_score, rsi_score, macd_score
-- volatility_score, volume_score, relative_strength_score
-- VIX, Nifty trend (regime features — added after backfill)
+**Single source of truth (2026-05-21, P1-e)**: `quant_engine/ml/features.py`
+exposes `FEATURE_COLS` (canonical 20-column order) and `build_feature_frame()`.
+Both `trainer._build_feature_frame` and `SicilianStrategy._build_ml_features`
+delegate to it — same pure function, same column order, same NaN handling.
+Per-symbol data loading (delivery, sector, intraday) stays at each caller's
+level; only the column construction is shared. This is what prevents the
+trainer/strategy drift that caused SIC-29.
+
+Headline test: `tests/test_ml_features.py::test_trainer_and_strategy_paths_produce_identical_frames`
+proves the two wrappers produce byte-identical DataFrames on the same inputs.
+If anyone ever re-introduces a divergence, that assertion fails immediately.
+The pickle-alignment guard (`predictor._verify_feature_alignment`) keeps
+catching column-set drift; this catches value-computation drift.
+
+Current FEATURE_COLS (20, after P0-c dropped `pcr_score` / `fii_flow_score`):
+- 7 price-derived: rsi, macd, trend_ma, bollinger, volume, volatility, relative_strength
+- 6 macro/sector: sector_rotation, vix_regime, nifty_trend, markov_regime, delivery_score, fii_fo_score
+- 7 intraday (Angel One 15-min): overnight_gap, intraday_range_ratio, last_hour_momentum,
+  vwap_deviation, opening_drive_vol, closing_spike_vol, vol_concentration
 
 **Planned additions** (López de Prado):
-- fracdiff(close, d=0.35) — stationary but memory-preserving
+- fracdiff(close, d=0.35) — stationary but memory-preserving (P3-b)
 - Bar properties: bar range, volume imbalance
 - Entropy features
 
