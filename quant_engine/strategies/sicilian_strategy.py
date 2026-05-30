@@ -221,52 +221,21 @@ class SicilianStrategy(BaseStrategy):
         from quant_engine.data.intraday_features import build_intraday_features
         from quant_engine.config import INDUSTRY_TO_NSE_INDEX
 
-        close  = df["close"]
-        volume = df["volume"]
-
         def _ensure_unique(obj, label: str):
-            """
-            Collapse duplicate index labels so downstream reindex calls don't
-            raise ValueError("cannot reindex on an axis with duplicate labels").
-
-            Logs a warning when dedup actually happens so the data source can
-            be tracked down — silent-fix masking would let real upstream
-            corruption persist undetected.
-            """
+            """Dedup duplicate index labels before reindex; warn when it fires.
+            Loaded raw series may carry dupes; build_feature_frame dedups its own
+            inputs again defensively, so this is just for the per-symbol re-loads
+            below."""
             if obj is None or (hasattr(obj, "empty") and obj.empty):
                 return obj
             if not obj.index.is_unique:
                 n_dupes = int(obj.index.duplicated().sum())
                 logger.warning(
                     "_build_ml_features(%s): %s had %d duplicate-index row(s); "
-                    "keeping last occurrence",
-                    symbol, label, n_dupes,
+                    "keeping last occurrence", symbol, label, n_dupes,
                 )
                 obj = obj[~obj.index.duplicated(keep="last")]
             return obj
-
-        def _align(series: pd.Series, label: str = "market_series") -> pd.Series:
-            """Reindex a market-level series to df's date index; fill gaps with 0."""
-            if series is None or (hasattr(series, "empty") and series.empty):
-                return pd.Series(0.0, index=df.index)
-            series = _ensure_unique(series, label)
-            return series.reindex(df.index, method="ffill").fillna(0.0)
-
-        def _align_intraday(feats: pd.DataFrame, col: str) -> pd.Series:
-            # Keep NaN so _ml_signals' valid mask drops pre-intraday-coverage bars,
-            # matching trainer behavior (prevents pre-2018 rows from training on zeros).
-            if feats is None or feats.empty or col not in feats.columns:
-                return pd.Series(np.nan, index=df.index)
-            return _ensure_unique(feats[col], f"intraday.{col}").reindex(df.index)
-
-        # ── Technical sub-scores ─────────────────────────────────────────────
-        rsi_s  = self._rolling_rsi_score(close)
-        macd_s = self._rolling_macd_score(close)
-        tma_s  = self._rolling_trend_score(close)
-        bol_s  = self._rolling_bollinger_score(close)
-        vol_s  = self._rolling_volume_score(close, volume)
-        vola_s = self._rolling_volatility_score(close)
-        rs_s   = self._rolling_relative_strength_score(close, benchmark_df)
 
         # ── Market-wide series — use precomputed ctx when available ──────────
         if market_ctx is not None:
@@ -316,7 +285,6 @@ class SicilianStrategy(BaseStrategy):
             if industry
             else "Nifty 500"
         )
-        idx_close = load_sector_series(nse_index, limit=2000)
         idx_close   = _ensure_unique(load_sector_series(nse_index, limit=2000), f"sector.{nse_index}")
         nifty_close = _ensure_unique(load_sector_series("Nifty 50",  limit=2000), "sector.Nifty 50")
         if not idx_close.empty:
@@ -342,30 +310,22 @@ class SicilianStrategy(BaseStrategy):
             daily_limit=(len(df) + 30) if len(df) else None,
         )
 
-        return pd.DataFrame(
-            {
-                "rsi":                   rsi_s,
-                "macd":                  macd_s,
-                "trend_ma":              tma_s,
-                "bollinger":             bol_s,
-                "volume":                vol_s,
-                "volatility":            vola_s,
-                "relative_strength":     rs_s,
-                "sector_rotation":       _align(sector_series,  "sector_series"),
-                "vix_regime":            _align(vix_score,      "vix_score"),
-                "nifty_trend":           _align(nifty_trend,    "nifty_trend"),
-                "markov_regime":         _align(markov_score,   "markov_score"),
-                "delivery_score":        _align(delivery_score, "delivery_score"),
-                "fii_fo_score":          _align(fii_fo_score,   "fii_fo_score"),
-                "overnight_gap":         _align_intraday(intraday_feats, "overnight_gap"),
-                "intraday_range_ratio":  _align_intraday(intraday_feats, "intraday_range_ratio"),
-                "last_hour_momentum":    _align_intraday(intraday_feats, "last_hour_momentum"),
-                "vwap_deviation":        _align_intraday(intraday_feats, "vwap_deviation"),
-                "opening_drive_vol":     _align_intraday(intraday_feats, "opening_drive_vol"),
-                "closing_spike_vol":     _align_intraday(intraday_feats, "closing_spike_vol"),
-                "vol_concentration":     _align_intraday(intraday_feats, "vol_concentration"),
-            },
-            index=df.index,
+        # P1-e: delegate column construction to the shared single-source-of-truth
+        # feature builder. Prevents the trainer/strategy drift that caused SIC-29.
+        # Per-symbol data loading (delivery, sector, intraday) stays here; the
+        # column ordering and align/NaN rules live in quant_engine/ml/features.py.
+        from quant_engine.ml.features import build_feature_frame
+        return build_feature_frame(
+            df, benchmark_df,
+            strategy=self,
+            sector_score=sector_series,
+            vix_score=vix_score,
+            nifty_trend=nifty_trend,
+            markov_score=markov_score,
+            delivery_score=delivery_score,
+            fii_fo_score=fii_fo_score,
+            intraday_feats=intraday_feats,
+            context=symbol,
         )
 
     @staticmethod

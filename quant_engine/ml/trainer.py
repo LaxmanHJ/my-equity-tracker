@@ -19,6 +19,10 @@ Features (all on –1 to +1 scale, matching Sicilian sub-score outputs):
     composite_factor, rsi, macd, trend_ma, bollinger,
     volume, volatility, relative_strength
 """
+# PEP 604 unions (X | Y) and PEP 585 generics need Python 3.10/3.9 respectively;
+# deferring annotation evaluation makes them safe on every interpreter ≥ 3.7.
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -48,6 +52,15 @@ from quant_engine.data.market_regime_loader import (
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+from quant_engine.ml.features import build_feature_frame
+from quant_engine.ml.labels import (
+    triple_barrier_events,
+    triple_barrier_labels,
+    DEFAULT_HORIZON as LABEL_HORIZON,
+    DEFAULT_VOL_MULT as BARRIER_VOL_MULT,
+    DEFAULT_COST as ROUND_TRIP_COST,
+)
+from quant_engine.ml.sample_weights import uniqueness_weights
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +97,12 @@ FEATURE_COLS = [
     "vol_concentration",      # max(15m_vol) / sum(15m_vol)
 ]
 
-# 20-day forward return thresholds for label creation.
-# ±3% (vs original ±2%) widens the HOLD zone so the class isn't
-# starved of samples — with ±2% HOLD was only ~12% of the dataset.
-BUY_RETURN_THRESHOLD  =  0.03   # > +3%  → BUY
-SELL_RETURN_THRESHOLD = -0.03   # < -3%  → SELL
+# DEPRECATED 2026-05-21 (ML audit S3/S7): the fixed ±3% / 20d gross threshold
+# was replaced by vol-scaled, cost-aware triple-barrier labels (see labels.py and
+# the LABEL_HORIZON / BARRIER_VOL_MULT / ROUND_TRIP_COST constants imported above).
+# Kept only because diagnostic.py still imports them for its JSON metadata block.
+BUY_RETURN_THRESHOLD  =  0.03   # > +3%  → BUY   (no longer used for labelling)
+SELL_RETURN_THRESHOLD = -0.03   # < -3%  → SELL  (no longer used for labelling)
 
 # Minimum bars a stock needs to contribute training samples
 MIN_BARS = 120
@@ -207,62 +221,61 @@ def _build_feature_frame(
     intraday_feats: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Compute all sub-scores for every bar in df.
+    Compute the FEATURE_COLS feature matrix for one symbol.
+
+    Thin wrapper around `quant_engine.ml.features.build_feature_frame` —
+    single source of truth shared with `SicilianStrategy._build_ml_features`
+    (P1-e refactor, ML audit S9). Argument order kept for diagnostic.py and
+    any other positional callers.
     """
     strat = SicilianStrategy("_trainer")
-    close = df["close"]
-    volume = df["volume"]
-
-    def _align(series: pd.Series) -> pd.Series:
-        """Reindex a market-level series to this stock's date index.
-        Returns zeros if series is empty (e.g. table not yet populated)."""
-        if series.empty:
-            return pd.Series(0.0, index=df.index)
-        return series.reindex(df.index, method="ffill").fillna(0.0)
-
-    # Intraday features: point-in-time, NOT ffilled. Missing rows stay NaN so
-    # that valid_mask drops them — prevents pre-2018 rows (where intraday is
-    # unavailable) from polluting the tree with a spurious zero-constant that
-    # encodes a pre/post-2018 regime split.
-    def _align_intraday(col: str) -> pd.Series:
-        if intraday_feats.empty or col not in intraday_feats.columns:
-            return pd.Series(np.nan, index=df.index)
-        return intraday_feats[col].reindex(df.index)
-
-    return pd.DataFrame(
-        {
-            "rsi":               strat._rolling_rsi_score(close),
-            "macd":              strat._rolling_macd_score(close),
-            "trend_ma":          strat._rolling_trend_score(close),
-            "bollinger":         strat._rolling_bollinger_score(close),
-            "volume":            strat._rolling_volume_score(close, volume),
-            "volatility":        strat._rolling_volatility_score(close),
-            "relative_strength": strat._rolling_relative_strength_score(close, benchmark_df),
-            "sector_rotation":   _align(sector_score),
-            "vix_regime":        _align(vix_score),
-            "nifty_trend":       _align(nifty_trend),
-            "markov_regime":     _align(markov_score),
-            "delivery_score":    _align(delivery_score),
-            "fii_fo_score":      _align(fii_fo_score),
-            "overnight_gap":         _align_intraday("overnight_gap"),
-            "intraday_range_ratio":  _align_intraday("intraday_range_ratio"),
-            "last_hour_momentum":    _align_intraday("last_hour_momentum"),
-            "vwap_deviation":        _align_intraday("vwap_deviation"),
-            "opening_drive_vol":     _align_intraday("opening_drive_vol"),
-            "closing_spike_vol":     _align_intraday("closing_spike_vol"),
-            "vol_concentration":     _align_intraday("vol_concentration"),
-        },
-        index=df.index,
+    return build_feature_frame(
+        df, benchmark_df,
+        strategy=strat,
+        sector_score=sector_score,
+        vix_score=vix_score,
+        nifty_trend=nifty_trend,
+        markov_score=markov_score,
+        delivery_score=delivery_score,
+        fii_fo_score=fii_fo_score,
+        intraday_feats=intraday_feats,
+        context="_trainer",
     )
 
 
-def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
+# Always-available "hard" features that every symbol with enough OHLCV has.
+# Loosens valid_mask from "every column non-NaN" (which dropped every Nifty 200
+# stock for lacking intraday/delivery) to "the price-derived row is complete";
+# soft features are imputed by the pipeline's SimpleImputer at inference time.
+# See ML audit S5 + meta_labeler's build_dataset_with_horizons(required_feature_cols=…).
+REQUIRED_FEATURE_COLS_DEFAULT: tuple[str, ...] = (
+    "rsi", "macd", "trend_ma", "bollinger",
+    "volume", "volatility", "relative_strength",
+)
+
+
+def build_training_dataset(
+    required_feature_cols: tuple[str, ...] | list[str] = REQUIRED_FEATURE_COLS_DEFAULT,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
     Iterate over every stock in the DB, compute features + labels, concatenate.
 
+    Args:
+        required_feature_cols: feature columns that must be non-NaN for a row
+            to survive `valid_mask`. Defaults to the 7 always-available
+            price-derived factors (`rsi`, `macd`, `trend_ma`, `bollinger`,
+            `volume`, `volatility`, `relative_strength`) — the same "hard
+            gate" predictor.HARD_GATE_FEATURES uses at inference time. Soft
+            features (intraday, delivery, FII F&O) may be NaN for symbols
+            without that data; the pipeline's SimpleImputer fills them with
+            training-set medians (SIC-29 path). Pass `FEATURE_COLS` to restore
+            the pre-P1-a strict behaviour (training universe shrinks to ~15
+            stocks with full feature coverage). See ML audit S5.
+
     Returns:
-        X: DataFrame of shape (N, len(FEATURE_COLS)) with FEATURE_COLS columns
-        y: Series of shape (N,) with values in {-1, 0, 1}
+        X:             DataFrame (N, len(FEATURE_COLS)) of features
+        y:             Series (N,) with values in {-1, 0, 1} — triple-barrier labels
+        sample_weight: Series (N,) of AFML §4.6 uniqueness weights ∈ (0, 1]
     """
     symbols      = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
@@ -319,6 +332,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
+    all_t1: list[pd.DatetimeIndex] = []   # per-label resolution date (for uniqueness weights)
     skipped_train: list[str] = []
 
     for symbol, df in all_prices.items():
@@ -349,23 +363,48 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 intraday_feats,
             )
 
-            # 20-day forward return (labelled without look-ahead: we shift backward)
-            forward_return = df["close"].shift(-20) / df["close"] - 1
+            # Triple-barrier events (vol-scaled, cost-aware) — AFML Ch.3.
+            # Replaces the old fixed ±3% / 20d gross threshold (heteroscedastic
+            # across vol regimes + cost-blind). See wiki/concepts/ml_audit_2026_05_21.md
+            # S3/S7 and quant_engine/ml/labels.py. Labels are NaN in the warm-up
+            # and trailing-horizon windows, so valid_mask drops them exactly like
+            # the old forward_return.notna() did. The `t1_offset` column carries
+            # per-label resolution time — required for P1-c sample-uniqueness
+            # weighting so an early barrier touch isn't treated the same as a
+            # full-horizon timeout.
+            events = triple_barrier_events(
+                df["close"],
+                horizon=LABEL_HORIZON,
+                vol_mult=BARRIER_VOL_MULT,
+                cost=ROUND_TRIP_COST,
+            )
+            label_series = events["label"]
 
-            # Drop NaN rows (warmup period + last 20 bars with no label)
-            valid_mask = features.notna().all(axis=1) & forward_return.notna()
+            # P1-a: require only the "hard" feature columns to be non-NaN.
+            # Soft features (intraday / delivery / fii_fo) may be NaN for
+            # symbols outside the original 15-stock universe — they're imputed
+            # by the pipeline's SimpleImputer at inference time using the
+            # training-set medians persisted in metadata.imputer_medians.
+            hard_cols = [c for c in required_feature_cols if c in features.columns]
+            valid_mask = features[hard_cols].notna().all(axis=1) & label_series.notna()
             features = features[valid_mask]
-            fwd = forward_return[valid_mask]
+            label = label_series[valid_mask].astype(int)
+            t1_offset = events.loc[valid_mask, "t1_offset"].astype(int).to_numpy()
 
             if len(features) < 60:
                 continue
 
-            label = pd.Series(0, index=fwd.index, dtype=int)   # HOLD default
-            label[fwd > BUY_RETURN_THRESHOLD]  =  1
-            label[fwd < SELL_RETURN_THRESHOLD] = -1
+            # Map each label's t1_offset to the resolving bar's calendar date,
+            # using the symbol's own price index. Positional lookup is safe
+            # because valid_mask preserves the original ordering.
+            sym_index = df.index
+            valid_positions = sym_index.get_indexer(features.index)
+            t1_positions = valid_positions + t1_offset
+            t1_dates = sym_index[t1_positions]
 
             all_X.append(features)
             all_y.append(label)
+            all_t1.append(pd.DatetimeIndex(t1_dates))
 
         except Exception as exc:
             skipped_train.append(symbol)
@@ -380,15 +419,33 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
     X = pd.concat(all_X)
     y = pd.concat(all_y)
-    # Sort both by date so TimeSeriesSplit cuts on actual time boundaries.
+    t1_dates = pd.DatetimeIndex(np.concatenate([t1.values for t1 in all_t1]))
+
+    # Sort by date so TimeSeriesSplit cuts on actual time boundaries.
     # Use iloc + argsort (positional) to avoid duplicate-index expansion that
     # .loc[X.index] would cause when the same date appears for many stocks.
     order = X.index.argsort(kind="mergesort")
     X = X.iloc[order]
     y = y.iloc[order]
+    t1_dates = t1_dates[order]
 
-    logger.info("Training dataset: %d samples from %d stocks", len(X), len(all_X))
-    return X, y
+    # Sample-uniqueness weights (P1-c / AFML §4.6). Pooled across all symbols:
+    # a label observed on date d shares information with every label observed
+    # on dates [d, t1] regardless of which symbol it came from.
+    t0_dates = pd.DatetimeIndex(X.index)
+    sample_weight = pd.Series(
+        uniqueness_weights(t0_dates, t1_dates),
+        index=X.index,
+        name="sample_weight",
+    )
+
+    logger.info(
+        "Training dataset: %d samples from %d stocks  "
+        "(uniqueness weight: mean=%.3f, min=%.3f)",
+        len(X), len(all_X),
+        float(sample_weight.mean()), float(sample_weight.min()),
+    )
+    return X, y, sample_weight
 
 
 def _build_pipeline(rf_params: dict) -> Pipeline:
@@ -406,7 +463,7 @@ def _build_pipeline(rf_params: dict) -> Pipeline:
     ])
 
 
-def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
+def _tune_hyperparams(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
     """
     Grid search over min_samples_leaf × max_depth using walk-forward CV.
 
@@ -446,7 +503,11 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
                 if len(train_idx) == 0:
                     continue
                 clf = _build_pipeline(params)
-                clf.fit(X.iloc[train_idx], y.iloc[train_idx])
+                # Pipeline routes sample_weight to the RF step via "<step>__sample_weight".
+                clf.fit(
+                    X.iloc[train_idx], y.iloc[train_idx],
+                    rf__sample_weight=sample_weight.iloc[train_idx].to_numpy(),
+                )
                 fold_scores.append(clf.score(X.iloc[test_idx], y.iloc[test_idx]))
             if not fold_scores:
                 continue
@@ -461,15 +522,18 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
     return best_params
 
 
-def train(X: pd.DataFrame, y: pd.Series) -> dict:
+def train(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
     """
     Tune hyperparameters, then train a Random Forest on X/y with walk-forward CV.
     Saves the model + metadata to ML_MODEL_DIR and returns the metadata dict.
+
+    `sample_weight` is the AFML §4.6 uniqueness weight produced by
+    `build_training_dataset` and is passed to every RF .fit() (tune, CV, final).
     """
     ML_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── Step 1: find best min_samples_leaf + max_depth ───────────
-    best_params = _tune_hyperparams(X, y)
+    best_params = _tune_hyperparams(X, y, sample_weight)
     final_params = {**RF_PARAMS, **best_params}
 
     # ── Step 2: CV with best params (for honest accuracy reporting) ──
@@ -491,14 +555,17 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
             logger.warning("CV fold %d: purged training set empty — skipping", fold)
             continue
         clf_cv = _build_pipeline(final_params)
-        clf_cv.fit(X.iloc[train_idx], y.iloc[train_idx])
+        clf_cv.fit(
+            X.iloc[train_idx], y.iloc[train_idx],
+            rf__sample_weight=sample_weight.iloc[train_idx].to_numpy(),
+        )
         acc = clf_cv.score(X.iloc[test_idx], y.iloc[test_idx])
         cv_accuracies.append(acc)
         logger.info("CV fold %d accuracy: %.3f (purged train n=%d)", fold, acc, len(train_idx))
 
     # ── Step 3: final model trained on the full dataset ──────────
     clf = _build_pipeline(final_params)
-    clf.fit(X, y)
+    clf.fit(X, y, rf__sample_weight=sample_weight.to_numpy())
 
     # Persist (pipeline: imputer + RF — imputer's learned medians are baked in
     # so inference can fill NaN for soft features without silently dropping bars)
@@ -519,6 +586,11 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
         for col, val in zip(FEATURE_COLS, imputer.statistics_)
     }
 
+    # Effective sample size after uniqueness weighting (AFML §4.6).
+    # n_eff = (Σ w_i)² / Σ w_i² — the variance-equivalent unique-obs count.
+    w_arr = sample_weight.to_numpy()
+    n_eff = float((w_arr.sum() ** 2) / (np.square(w_arr).sum())) if w_arr.size else 0.0
+
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "n_samples": int(len(X)),
@@ -530,6 +602,16 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
         "imputer_medians": imputer_medians,
         "classes": rf_step.classes_.tolist(),
         "rf_params": final_params,
+        "label_method": "triple_barrier",
+        "label_horizon": LABEL_HORIZON,
+        "barrier_vol_mult": BARRIER_VOL_MULT,
+        "round_trip_cost": ROUND_TRIP_COST,
+        "uniqueness_weights": {
+            "mean": round(float(w_arr.mean()), 4) if w_arr.size else None,
+            "min":  round(float(w_arr.min()),  4) if w_arr.size else None,
+            "n_effective": round(n_eff, 1),
+            "n_effective_pct": round(100.0 * n_eff / max(len(w_arr), 1), 1),
+        },
     }
 
     with open(ML_MODEL_DIR / "metadata.json", "w") as fh:
@@ -546,9 +628,9 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
 def run_training_pipeline() -> dict:
     """Entry point: build dataset → train → return metadata."""
     logger.info("Building training dataset …")
-    X, y = build_training_dataset()
+    X, y, sample_weight = build_training_dataset()
     logger.info("Training Random Forest …")
-    return train(X, y)
+    return train(X, y, sample_weight)
 
 
 if __name__ == "__main__":

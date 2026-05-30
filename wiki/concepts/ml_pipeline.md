@@ -7,24 +7,51 @@
 
 ## Labels
 
-Current labels: `Buy / Hold / Sell` derived from forward return + composite score threshold.
+**Current (2026-05-21, P1-d/P1-b)**: vol-scaled, cost-aware **triple-barrier** labels —
+`quant_engine/ml/labels.py::triple_barrier_labels`, used by both `trainer.py` and
+`diagnostic.py` (the `ml` RF track) so they label identically.
+- Upper barrier: `+k·σ_t` (profit-taking) → BUY (+1)
+- Lower barrier: `−k·σ_t` (stop-loss) → SELL (−1)
+- Vertical barrier: `T = 20` bars, no touch → HOLD (0)
+- `k = 2.5` (matches live `stopLoss.volMultiplier`); σ_t = causal EWM daily vol (no look-ahead)
+- Realised return is taken **net of a 50 bp round-trip cost**, so costs make BUYs harder and
+  SELLs easier (P1-b / AFML S7).
+- Tests: `tests/test_ml_labels.py` (12 deterministic assertions on the label output).
+- **Retrain required**: the live `sicilian_rf.pkl` must be retrained locally (`python -m
+  quant_engine.ml.trainer`, needs Turso) for the new labels to take effect. Check the new
+  `metadata.json` `class_distribution` — net-of-cost labelling skews toward SELL on
+  low/zero-drift names; `class_weight="balanced"` compensates.
 
-**Gap**: Labels should use Triple-Barrier Method (López de Prado Ch.3):
-- Upper barrier: +h×σ (profit-taking) → Buy
-- Lower barrier: −h×σ (stop-loss) → Sell
-- Time barrier: T days → Hold
+**Superseded**: the old fixed ±3% / 20d gross threshold (`BUY_RETURN_THRESHOLD` /
+`SELL_RETURN_THRESHOLD`, now deprecated constants kept only for diagnostic metadata).
 
-This would make labels volatility-adaptive and more realistic.
+**Remaining**: triple-barrier for the **meta-labeler** secondary (replace `fwd_ret_20d > 0`)
+is SIC-43, not yet done.
 
 ## Features
 
-Current features (all 7 factor scores):
-- momentum_score, mean_reversion_score, rsi_score, macd_score
-- volatility_score, volume_score, relative_strength_score
-- VIX, Nifty trend (regime features — added after backfill)
+**Single source of truth (2026-05-21, P1-e)**: `quant_engine/ml/features.py`
+exposes `FEATURE_COLS` (canonical 20-column order) and `build_feature_frame()`.
+Both `trainer._build_feature_frame` and `SicilianStrategy._build_ml_features`
+delegate to it — same pure function, same column order, same NaN handling.
+Per-symbol data loading (delivery, sector, intraday) stays at each caller's
+level; only the column construction is shared. This is what prevents the
+trainer/strategy drift that caused SIC-29.
+
+Headline test: `tests/test_ml_features.py::test_trainer_and_strategy_paths_produce_identical_frames`
+proves the two wrappers produce byte-identical DataFrames on the same inputs.
+If anyone ever re-introduces a divergence, that assertion fails immediately.
+The pickle-alignment guard (`predictor._verify_feature_alignment`) keeps
+catching column-set drift; this catches value-computation drift.
+
+Current FEATURE_COLS (20, after P0-c dropped `pcr_score` / `fii_flow_score`):
+- 7 price-derived: rsi, macd, trend_ma, bollinger, volume, volatility, relative_strength
+- 6 macro/sector: sector_rotation, vix_regime, nifty_trend, markov_regime, delivery_score, fii_fo_score
+- 7 intraday (Angel One 15-min): overnight_gap, intraday_range_ratio, last_hour_momentum,
+  vwap_deviation, opening_drive_vol, closing_spike_vol, vol_concentration
 
 **Planned additions** (López de Prado):
-- fracdiff(close, d=0.35) — stationary but memory-preserving
+- fracdiff(close, d=0.35) — stationary but memory-preserving (P3-b)
 - Bar properties: bar range, volume imbalance
 - Entropy features
 
@@ -36,10 +63,20 @@ Current features (all 7 factor scores):
 
 Purpose: the live signal-quality tracker only has ~470 settled 1-day obs — IC SE ≈ 0.046, which is too noisy to drive model-design decisions. The historical diagnostic gives thousands of out-of-sample observations per horizon instead. Run via `python -m quant_engine.ml.diagnostic` or `POST /api/ml/diagnostic`; results are cached at `data/ml_diagnostic.json` and served by `GET /api/ml/diagnostic`.
 
-**Gap (still open)**: Full Purged K-Fold / CPCV:
-- The diagnostic only purges; it doesn't add the post-test embargo (not needed for walk-forward, needed for CPCV)
-- CPCV would run all C(T,k) splits for a distribution of Sharpe/IC values
-- Required for PSR/DSR (López de Prado Ch.14)
+**Embargo (P1-f, 2026-05-21)**: `_purge_train_indices` now takes an
+`embargo_days` parameter (defaults to `label_horizon_days`) that drops training
+rows in the window *after* the test fold ends, not just *before* the test fold
+starts. For pure walk-forward callers (current trainer, diagnostic, meta_labeler)
+this is a no-op — the embargo only engages when training rows live after the
+test fold, which is the CPCV use case. Tests: `tests/test_ml_purge.py` (9
+assertions including a byte-for-byte legacy-behaviour check with
+`embargo_days=0`).
+
+**Gap (still open)**: Full CPCV:
+- The harness now has purge + embargo, so CPCV becomes a wiring problem
+  (combinatorial fold generation) rather than a methodology gap
+- CPCV would run all C(T, k) splits for a Sharpe/IC distribution
+- Required for PSR/DSR (López de Prado Ch.14) → SIC-46
 
 ```python
 # Next step: quant_engine/ml/purged_cv.py
@@ -66,6 +103,25 @@ The secondary model improves precision — only trades when confidence is high.
 cd quant_engine && python ml/trainer.py
 ```
 
+### Training universe (2026-05-21, P1-a)
+
+`trainer.build_training_dataset(required_feature_cols=…)` decides which rows
+survive `valid_mask`:
+
+- **Default**: the 7 always-available price-derived factors (`rsi`, `macd`,
+  `trend_ma`, `bollinger`, `volume`, `volatility`, `relative_strength`) — same
+  set as `predictor.HARD_GATE_FEATURES`, asserted equal in tests. Soft
+  features (intraday, delivery, fii_fo, macro regime) may be NaN; the
+  pipeline's `SimpleImputer` fills them at fit time using training-set
+  medians (SIC-29 path). Diagnostic uses the same default so OOS measurement
+  matches what production trains on.
+- **Strict** (legacy): pass `FEATURE_COLS` to get the pre-P1-a behaviour
+  where every column must be non-NaN. Universe shrinks back to ~15 stocks.
+
+Effect on universe: 15 stocks (strict) → ~200 stocks (default) on the
+current DB after the Nifty 200 backfill — confirmed in tests by simulation,
+verifies on the local retrain via `metadata.n_samples`.
+
 ## Model Performance Tracking
 
 **Live tracking**: `routers/signal_quality.py` joins `signals_log` to `price_history` and computes cross-sectional Spearman IC per date at 1d/5d/10d/20d for both the ML engine and the linear engine. Served at `GET /api/quant/signal-quality`. Caveat: sample size is ~500 signals → IC SE ≈ 0.045 → weak statistical power.
@@ -83,7 +139,26 @@ From López de Prado Ch.14: use Deflated Sharpe Ratio to avoid overfitting when 
 
 ## Sample Weights
 
-**Gap**: All observations treated equally. Should weight by uniqueness (1 / concurrent label count) per López de Prado Ch.4.
+**Current (2026-05-21, P1-c)**: AFML §4.6 uniqueness weights —
+`quant_engine/ml/sample_weights.py::uniqueness_weights` — wired through
+`trainer.build_training_dataset → train` and forwarded to every RF `.fit()`
+call (tune, CV report, final fit) via `Pipeline.fit(rf__sample_weight=…)`.
+
+Per-label weight `u_i = mean over d ∈ [t0_i, t1_i] of (1 / c_d)`, where `c_d`
+is the count of labels alive on master-calendar date `d` (master = union of
+label start dates across all symbols, so concurrency is cross-symbol). The
+`t1_i` comes from `triple_barrier_events.t1_offset` so early barrier touches
+correctly score higher uniqueness than full-horizon timeouts.
+
+Persisted to `metadata.json` as `uniqueness_weights: {mean, min, n_effective,
+n_effective_pct}` where `n_effective = (Σw)² / Σw²`. Expect `n_effective_pct`
+≈ 5–10% on 20d-horizon training: the 24k nominal rows really are ~500–2k
+unique observations, and now the standard errors on every metric reflect that.
+
+Tests: `tests/test_ml_sample_weights.py` (10 deterministic assertions: domain,
+isolated → 1.0, K-coincident → 1/K each, non-overlapping → all 1, monotone
+in concurrency, hand-computed concurrency_count, end-to-end with
+triple_barrier_events).
 
 ## Current Status
 

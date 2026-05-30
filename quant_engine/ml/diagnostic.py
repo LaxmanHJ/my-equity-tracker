@@ -115,6 +115,12 @@ from quant_engine.ml.trainer import (
     _build_nifty_trend_series,
     _build_sector_series,
 )
+from quant_engine.ml.labels import (
+    triple_barrier_labels,
+    DEFAULT_HORIZON as LABEL_HORIZON,
+    DEFAULT_VOL_MULT as BARRIER_VOL_MULT,
+    DEFAULT_COST as ROUND_TRIP_COST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,14 +220,18 @@ def build_dataset_with_horizons(
       HOLD ( 0): otherwise
 
     `required_feature_cols` controls which columns must be non-NaN for a
-    row to survive `valid_mask`. Defaults to FEATURE_COLS (full ML matrix
-    — preserves diagnostic.py's existing behaviour). The meta-labeler
-    passes its own narrower list so symbols missing the cohort-only
-    features (delivery, intraday) aren't dropped wholesale from the
-    expanded NSE-wide universe.
+    row to survive `valid_mask`. Defaults (2026-05-21, P1-a) to the same
+    REQUIRED_FEATURE_COLS_DEFAULT trainer.py uses (the 7 price-derived
+    factors) so the diagnostic measures the same universe production trains
+    on. Soft features (intraday / delivery / fii_fo) are imputed by the
+    pipeline's SimpleImputer rather than gating the row. Pass FEATURE_COLS
+    to restore pre-P1-a strict behaviour (training universe shrinks to ~15
+    stocks). See ML audit S5.
     """
     if required_feature_cols is None:
-        required_feature_cols = FEATURE_COLS
+        # Match trainer's default (P1-a): require only "hard" features.
+        from quant_engine.ml.trainer import REQUIRED_FEATURE_COLS_DEFAULT
+        required_feature_cols = list(REQUIRED_FEATURE_COLS_DEFAULT)
     symbols = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
     industry_map = load_industry_map()
@@ -308,9 +318,18 @@ def build_dataset_with_horizons(
             if len(features) < 60:
                 continue
 
-            label = pd.Series(0, index=fwd_rets.index, dtype=int)
-            label[fwd_rets["fwd_ret_20d"] > BUY_RETURN_THRESHOLD] = 1
-            label[fwd_rets["fwd_ret_20d"] < SELL_RETURN_THRESHOLD] = -1
+            # 3-class label for the RF (`ml`) track — triple-barrier, identical
+            # to trainer.py so the diagnostic measures exactly what production
+            # trains on (AFML Ch.3; ML audit S3/S7). The `linear` and
+            # `ml_regression` tracks score against fwd_ret directly and are
+            # unaffected by this label. Reindex onto the (already valid-masked)
+            # feature index; triple-barrier NaNs in warm-up/tail fall outside it.
+            label = triple_barrier_labels(
+                df["close"],
+                horizon=LABEL_HORIZON,
+                vol_mult=BARRIER_VOL_MULT,
+                cost=ROUND_TRIP_COST,
+            ).reindex(features.index).fillna(0).astype(int)
 
             meta = fwd_rets.copy()
             meta["symbol"] = symbol
@@ -350,33 +369,66 @@ def _purge_train_indices(
     test_idx: np.ndarray,
     dates: pd.DatetimeIndex,
     label_horizon_days: int,
+    embargo_days: int | None = None,
 ) -> np.ndarray:
     """
-    Purge training indices whose label horizon overlaps the test fold start.
+    Purge + embargo a walk-forward / CPCV training set (AFML Ch.10).
 
-    For a walk-forward split (train strictly before test), this means dropping
-    training rows whose date is within `label_horizon_days` unique trading
-    days of the first test date — because their 20d label uses prices that
-    fall inside the test fold.
+    Two reasons a training row leaks into the test set:
 
-    Reference: Lopez de Prado AFML Ch.10.
+      1. Backward overlap (purge): a row dated within `label_horizon_days`
+         trading days BEFORE the test fold has a label whose forward window
+         lands inside the test fold. Drop it.
+      2. Forward overlap (embargo): when the train fold also contains rows
+         AFTER the test fold (only happens in CPCV, never in plain walk-
+         forward), those rows can use features computed from price action
+         shortly after the test set, leaking information backward through
+         autocorrelation. Drop rows within `embargo_days` trading days AFTER
+         the test fold's last date.
+
+    `embargo_days` defaults to `label_horizon_days` (AFML's recommendation —
+    same horizon both sides for symmetric purging). Pass `0` to disable.
+
+    For pure walk-forward (`test_idx > train_idx.max()`) the embargo is a
+    no-op because no train rows live after the test fold; in CPCV it is the
+    AFML §7.4 requirement.
+
+    Returns the surviving train indices (a subset of the input).
     """
     if len(test_idx) == 0 or len(train_idx) == 0:
         return train_idx
 
-    test_start_date = dates[test_idx[0]]
+    if embargo_days is None:
+        embargo_days = label_horizon_days
+
     unique_sorted_dates = sorted(set(dates))
+    n_dates = len(unique_sorted_dates)
+
+    # ── Backward purge: drop train rows in the `label_horizon_days` BEFORE test_start ──
+    test_start_date = dates[test_idx[0]]
     try:
         test_start_pos = unique_sorted_dates.index(test_start_date)
     except ValueError:
         return train_idx
-
     purge_pos = max(0, test_start_pos - label_horizon_days)
     purge_threshold_date = unique_sorted_dates[purge_pos]
-
     train_dates = dates[train_idx]
-    keep = train_dates < purge_threshold_date
-    return train_idx[np.asarray(keep)]
+    keep = np.asarray(train_dates < purge_threshold_date)
+
+    # ── Forward embargo: drop train rows in the `embargo_days` AFTER test_end ──
+    if embargo_days > 0:
+        test_end_date = dates[test_idx[-1]]
+        try:
+            test_end_pos = unique_sorted_dates.index(test_end_date)
+        except ValueError:
+            test_end_pos = n_dates - 1
+        embargo_pos = min(n_dates - 1, test_end_pos + embargo_days)
+        embargo_release_date = unique_sorted_dates[embargo_pos]
+        # Keep rows strictly after the embargo window (they're safe again).
+        after = np.asarray(train_dates > embargo_release_date)
+        keep = keep | after
+
+    return train_idx[keep]
 
 
 # ── Metric computation ───────────────────────────────────────────────────────
