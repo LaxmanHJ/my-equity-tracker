@@ -7,14 +7,26 @@
 
 ## Labels
 
-Current labels: `Buy / Hold / Sell` derived from forward return + composite score threshold.
+**Current (2026-05-21, P1-d/P1-b)**: vol-scaled, cost-aware **triple-barrier** labels —
+`quant_engine/ml/labels.py::triple_barrier_labels`, used by both `trainer.py` and
+`diagnostic.py` (the `ml` RF track) so they label identically.
+- Upper barrier: `+k·σ_t` (profit-taking) → BUY (+1)
+- Lower barrier: `−k·σ_t` (stop-loss) → SELL (−1)
+- Vertical barrier: `T = 20` bars, no touch → HOLD (0)
+- `k = 2.5` (matches live `stopLoss.volMultiplier`); σ_t = causal EWM daily vol (no look-ahead)
+- Realised return is taken **net of a 50 bp round-trip cost**, so costs make BUYs harder and
+  SELLs easier (P1-b / AFML S7).
+- Tests: `tests/test_ml_labels.py` (12 deterministic assertions on the label output).
+- **Retrain required**: the live `sicilian_rf.pkl` must be retrained locally (`python -m
+  quant_engine.ml.trainer`, needs Turso) for the new labels to take effect. Check the new
+  `metadata.json` `class_distribution` — net-of-cost labelling skews toward SELL on
+  low/zero-drift names; `class_weight="balanced"` compensates.
 
-**Gap**: Labels should use Triple-Barrier Method (López de Prado Ch.3):
-- Upper barrier: +h×σ (profit-taking) → Buy
-- Lower barrier: −h×σ (stop-loss) → Sell
-- Time barrier: T days → Hold
+**Superseded**: the old fixed ±3% / 20d gross threshold (`BUY_RETURN_THRESHOLD` /
+`SELL_RETURN_THRESHOLD`, now deprecated constants kept only for diagnostic metadata).
 
-This would make labels volatility-adaptive and more realistic.
+**Remaining**: triple-barrier for the **meta-labeler** secondary (replace `fwd_ret_20d > 0`)
+is SIC-43, not yet done.
 
 ## Features
 

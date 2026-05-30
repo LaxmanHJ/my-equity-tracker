@@ -170,7 +170,7 @@ Convert binary signal → position size using:
 - **Ch.17 bet sizing + Ch.3 meta-labeling (2026-04-21)**: Hard conviction gates act as the primary classifier ("should I trade"); Claude (`opus-4-7`) is the second-stage sizer that discretizes the bet into `{qty, limit_price, stop, target, size_pct}`. NO_GO verdicts are the meta-label saying "primary signal unreliable on this setup."
 
 ### Gaps / Roadmap
-- **Triple-barrier labeling (training)**: The live stop uses vol-scaled barriers, but ML training labels are still score-threshold. Replace with proper volatility-scaled triple-barrier labels.
+- **Triple-barrier labeling (training)** — ✅ IMPLEMENTED 2026-05-21 (P1-d/P1-b). `quant_engine/ml/labels.py::triple_barrier_labels` replaces the fixed ±3% / 20d gross threshold in both `trainer.py` and `diagnostic.py` with vol-scaled (`k·σ_t`, `k = 2.5` to match the live stop's `volMultiplier`), cost-aware (50 bp round-trip) barriers. σ_t is a causal EWM estimate (no look-ahead). Deterministic assertion suite in `tests/test_ml_labels.py` (12 tests: domain, tail/warm-up NaN, monotone-path certainty, vol-scaling monotonicity, cost asymmetry, no-look-ahead). The RF pickle must be retrained locally (needs Turso) for the new labels to take effect; the meta-labeler still uses its own `fwd_ret_20d > 0` binary label (triple-barrier for the secondary is SIC-43).
 - **Purged k-fold CV**: `trainer.py` uses `TimeSeriesSplit` (fixed after bug). Upgrade to Purged K-Fold for clean validation.
 - **Fracdiff features**: Current features are raw scores. Add fracdiff(close) as an ML feature.
 - **Formal meta-labeling classifier**: Claude-as-meta-label is an LLM approximation. A trained binary meta-label model (per Ch.3) would be more auditable and backtestable.

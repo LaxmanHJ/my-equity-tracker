@@ -115,6 +115,12 @@ from quant_engine.ml.trainer import (
     _build_nifty_trend_series,
     _build_sector_series,
 )
+from quant_engine.ml.labels import (
+    triple_barrier_labels,
+    DEFAULT_HORIZON as LABEL_HORIZON,
+    DEFAULT_VOL_MULT as BARRIER_VOL_MULT,
+    DEFAULT_COST as ROUND_TRIP_COST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +314,18 @@ def build_dataset_with_horizons(
             if len(features) < 60:
                 continue
 
-            label = pd.Series(0, index=fwd_rets.index, dtype=int)
-            label[fwd_rets["fwd_ret_20d"] > BUY_RETURN_THRESHOLD] = 1
-            label[fwd_rets["fwd_ret_20d"] < SELL_RETURN_THRESHOLD] = -1
+            # 3-class label for the RF (`ml`) track — triple-barrier, identical
+            # to trainer.py so the diagnostic measures exactly what production
+            # trains on (AFML Ch.3; ML audit S3/S7). The `linear` and
+            # `ml_regression` tracks score against fwd_ret directly and are
+            # unaffected by this label. Reindex onto the (already valid-masked)
+            # feature index; triple-barrier NaNs in warm-up/tail fall outside it.
+            label = triple_barrier_labels(
+                df["close"],
+                horizon=LABEL_HORIZON,
+                vol_mult=BARRIER_VOL_MULT,
+                cost=ROUND_TRIP_COST,
+            ).reindex(features.index).fillna(0).astype(int)
 
             meta = fwd_rets.copy()
             meta["symbol"] = symbol

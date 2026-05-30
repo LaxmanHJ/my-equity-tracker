@@ -48,6 +48,12 @@ from quant_engine.data.market_regime_loader import (
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+from quant_engine.ml.labels import (
+    triple_barrier_labels,
+    DEFAULT_HORIZON as LABEL_HORIZON,
+    DEFAULT_VOL_MULT as BARRIER_VOL_MULT,
+    DEFAULT_COST as ROUND_TRIP_COST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +90,12 @@ FEATURE_COLS = [
     "vol_concentration",      # max(15m_vol) / sum(15m_vol)
 ]
 
-# 20-day forward return thresholds for label creation.
-# ±3% (vs original ±2%) widens the HOLD zone so the class isn't
-# starved of samples — with ±2% HOLD was only ~12% of the dataset.
-BUY_RETURN_THRESHOLD  =  0.03   # > +3%  → BUY
-SELL_RETURN_THRESHOLD = -0.03   # < -3%  → SELL
+# DEPRECATED 2026-05-21 (ML audit S3/S7): the fixed ±3% / 20d gross threshold
+# was replaced by vol-scaled, cost-aware triple-barrier labels (see labels.py and
+# the LABEL_HORIZON / BARRIER_VOL_MULT / ROUND_TRIP_COST constants imported above).
+# Kept only because diagnostic.py still imports them for its JSON metadata block.
+BUY_RETURN_THRESHOLD  =  0.03   # > +3%  → BUY   (no longer used for labelling)
+SELL_RETURN_THRESHOLD = -0.03   # < -3%  → SELL  (no longer used for labelling)
 
 # Minimum bars a stock needs to contribute training samples
 MIN_BARS = 120
@@ -349,20 +356,25 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 intraday_feats,
             )
 
-            # 20-day forward return (labelled without look-ahead: we shift backward)
-            forward_return = df["close"].shift(-20) / df["close"] - 1
+            # Triple-barrier labels (vol-scaled, cost-aware) — AFML Ch.3.
+            # Replaces the old fixed ±3% / 20d gross threshold (heteroscedastic
+            # across vol regimes + cost-blind). See wiki/concepts/ml_audit_2026_05_21.md
+            # S3/S7 and quant_engine/ml/labels.py. Labels are NaN in the warm-up
+            # and trailing-horizon windows, so valid_mask drops them exactly like
+            # the old forward_return.notna() did.
+            label_series = triple_barrier_labels(
+                df["close"],
+                horizon=LABEL_HORIZON,
+                vol_mult=BARRIER_VOL_MULT,
+                cost=ROUND_TRIP_COST,
+            )
 
-            # Drop NaN rows (warmup period + last 20 bars with no label)
-            valid_mask = features.notna().all(axis=1) & forward_return.notna()
+            valid_mask = features.notna().all(axis=1) & label_series.notna()
             features = features[valid_mask]
-            fwd = forward_return[valid_mask]
+            label = label_series[valid_mask].astype(int)
 
             if len(features) < 60:
                 continue
-
-            label = pd.Series(0, index=fwd.index, dtype=int)   # HOLD default
-            label[fwd > BUY_RETURN_THRESHOLD]  =  1
-            label[fwd < SELL_RETURN_THRESHOLD] = -1
 
             all_X.append(features)
             all_y.append(label)
