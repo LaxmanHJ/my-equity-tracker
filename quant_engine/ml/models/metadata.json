@@ -1,40 +1,40 @@
 {
-  "trained_at": "2026-05-19T20:53:26.838044+00:00",
-  "n_samples": 24373,
-  "cv_accuracy_mean": 0.3352,
+  "trained_at": "2026-05-30T20:54:49.687176+00:00",
+  "n_samples": 370139,
+  "cv_accuracy_mean": 0.3881,
   "cv_accuracy_folds": [
-    0.3149,
-    0.3744,
-    0.3383,
-    0.3058,
-    0.3424
+    0.3315,
+    0.4023,
+    0.3939,
+    0.4178,
+    0.3951
   ],
   "class_distribution": {
-    "1": 9973,
-    "-1": 8753,
-    "0": 5647
+    "-1": 159526,
+    "1": 159425,
+    "0": 51188
   },
   "feature_importances": {
-    "rsi": 0.064645,
-    "macd": 0.049803,
-    "trend_ma": 0.017091,
-    "bollinger": 0.049046,
-    "volume": 0.006865,
-    "volatility": 0.081402,
-    "relative_strength": 0.056065,
-    "sector_rotation": 0.069853,
-    "vix_regime": 0.095543,
-    "nifty_trend": 0.084859,
-    "markov_regime": 0.049032,
-    "delivery_score": 0.03729,
-    "fii_fo_score": 0.066086,
-    "overnight_gap": 0.041582,
-    "intraday_range_ratio": 0.035806,
-    "last_hour_momentum": 0.037316,
-    "vwap_deviation": 0.03935,
-    "opening_drive_vol": 0.040715,
-    "closing_spike_vol": 0.040555,
-    "vol_concentration": 0.037094
+    "rsi": 0.115741,
+    "macd": 0.115722,
+    "trend_ma": 0.0302,
+    "bollinger": 0.094796,
+    "volume": 0.027117,
+    "volatility": 0.321249,
+    "relative_strength": 0.029584,
+    "sector_rotation": 0.033567,
+    "vix_regime": 0.064381,
+    "nifty_trend": 0.068393,
+    "markov_regime": 0.031693,
+    "delivery_score": 0.001185,
+    "fii_fo_score": 0.048162,
+    "overnight_gap": 0.002559,
+    "intraday_range_ratio": 0.002786,
+    "last_hour_momentum": 0.002058,
+    "vwap_deviation": 0.002343,
+    "opening_drive_vol": 0.002882,
+    "closing_spike_vol": 0.003211,
+    "vol_concentration": 0.002372
   },
   "feature_cols": [
     "rsi",
@@ -59,12 +59,12 @@
     "vol_concentration"
   ],
   "imputer_medians": {
-    "rsi": 0.012938,
-    "macd": 0.012342,
+    "rsi": 0.058591,
+    "macd": -0.005178,
     "trend_ma": 0.0,
-    "bollinger": -0.017748,
+    "bollinger": -0.085301,
     "volume": 0.0,
-    "volatility": 0.065579,
+    "volatility": 0.054087,
     "relative_strength": 0.0,
     "sector_rotation": 0.0,
     "vix_regime": 0.0,
@@ -72,13 +72,13 @@
     "markov_regime": 0.0,
     "delivery_score": 0.0,
     "fii_fo_score": 0.0,
-    "overnight_gap": 0.002327,
-    "intraday_range_ratio": 0.862231,
+    "overnight_gap": 0.002332,
+    "intraday_range_ratio": 0.862027,
     "last_hour_momentum": -0.000174,
-    "vwap_deviation": -0.001514,
-    "opening_drive_vol": 0.735666,
-    "closing_spike_vol": 0.774119,
-    "vol_concentration": 0.147731
+    "vwap_deviation": -0.001512,
+    "opening_drive_vol": 0.736114,
+    "closing_spike_vol": 0.774808,
+    "vol_concentration": 0.14761
   },
   "classes": [
     -1,
@@ -93,5 +93,15 @@
     "class_weight": "balanced",
     "random_state": 42,
     "n_jobs": -1
+  },
+  "label_method": "triple_barrier",
+  "label_horizon": 20,
+  "barrier_vol_mult": 2.5,
+  "round_trip_cost": 0.005,
+  "uniqueness_weights": {
+    "mean": 0.0005,
+    "min": 0.0003,
+    "n_effective": 26078.1,
+    "n_effective_pct": 7.0
   }
 }
