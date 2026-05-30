@@ -54,6 +54,66 @@ def daily_vol(close: pd.Series, span: int = DEFAULT_VOL_SPAN,
     return returns.ewm(span=span, min_periods=min_periods).std()
 
 
+def triple_barrier_events(
+    close: pd.Series,
+    horizon: int = DEFAULT_HORIZON,
+    vol_mult: float = DEFAULT_VOL_MULT,
+    cost: float = DEFAULT_COST,
+    vol_span: int = DEFAULT_VOL_SPAN,
+    vol_min_periods: int = DEFAULT_VOL_MIN_PERIODS,
+) -> pd.DataFrame:
+    """
+    Compute triple-barrier events: the label AND the bars-to-resolution.
+
+    Returns a DataFrame aligned to `close.index` with columns:
+      • label     — {-1, 0, +1}, or NaN (warm-up / trailing tail)
+      • t1_offset — bars from i to the resolving barrier (1 … horizon), or
+                    `horizon` on a vertical (timeout) touch; NaN where label is NaN
+
+    `t1_offset` is what makes correct sample-uniqueness weighting possible
+    (AFML Ch.4): an early barrier touch overlaps far fewer subsequent labels
+    than a full-horizon timeout, so its observation is *more* unique. See
+    quant_engine/ml/sample_weights.py.
+
+    Same barrier/vol/cost/no-look-ahead semantics as `triple_barrier_labels`.
+    """
+    if horizon < 1:
+        raise ValueError(f"horizon must be ≥ 1, got {horizon}")
+    if cost < 0:
+        raise ValueError(f"cost must be ≥ 0, got {cost}")
+
+    idx = close.index
+    px = close.astype(float).to_numpy()
+    n = len(px)
+
+    sigma = daily_vol(close, span=vol_span, min_periods=vol_min_periods).to_numpy()
+    width = np.maximum(vol_mult * sigma, cost)
+
+    labels = np.full(n, np.nan, dtype=float)
+    t1_off = np.full(n, np.nan, dtype=float)
+    for i in range(n):
+        wi = width[i]
+        if not np.isfinite(wi) or wi <= 0.0 or i + horizon >= n:
+            continue
+        p0 = px[i]
+        lab = 0
+        touched_at = horizon  # default: vertical/timeout at the far edge
+        for offset in range(1, horizon + 1):
+            net = px[i + offset] / p0 - 1.0 - cost
+            if net >= wi:
+                lab = 1
+                touched_at = offset
+                break
+            if net <= -wi:
+                lab = -1
+                touched_at = offset
+                break
+        labels[i] = lab
+        t1_off[i] = touched_at
+
+    return pd.DataFrame({"label": labels, "t1_offset": t1_off}, index=idx)
+
+
 def triple_barrier_labels(
     close: pd.Series,
     horizon: int = DEFAULT_HORIZON,
@@ -85,37 +145,11 @@ def triple_barrier_labels(
 
     No look-ahead: label[i] depends only on close[i … i+horizon] (forward path)
     and past-only σ_i — mutating close beyond i+horizon does not change label[i].
+
+    Thin wrapper over `triple_barrier_events` (the `label` column).
     """
-    if horizon < 1:
-        raise ValueError(f"horizon must be ≥ 1, got {horizon}")
-    if cost < 0:
-        raise ValueError(f"cost must be ≥ 0, got {cost}")
-
-    idx = close.index
-    px = close.astype(float).to_numpy()
-    n = len(px)
-
-    sigma = daily_vol(close, span=vol_span, min_periods=vol_min_periods).to_numpy()
-    width = np.maximum(vol_mult * sigma, cost)
-
-    labels = np.full(n, np.nan, dtype=float)
-    for i in range(n):
-        wi = width[i]
-        # Skip if vol undefined (warm-up) or no full forward window remains.
-        if not np.isfinite(wi) or wi <= 0.0 or i + horizon >= n:
-            continue
-        p0 = px[i]
-        lab = 0
-        upper = wi
-        lower = -wi
-        for s in range(i + 1, i + horizon + 1):
-            net = px[s] / p0 - 1.0 - cost
-            if net >= upper:
-                lab = 1
-                break
-            if net <= lower:
-                lab = -1
-                break
-        labels[i] = lab
-
-    return pd.Series(labels, index=idx, name="label")
+    events = triple_barrier_events(
+        close, horizon=horizon, vol_mult=vol_mult, cost=cost,
+        vol_span=vol_span, vol_min_periods=vol_min_periods,
+    )
+    return events["label"].rename("label")

@@ -49,11 +49,13 @@ from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 from quant_engine.ml.labels import (
+    triple_barrier_events,
     triple_barrier_labels,
     DEFAULT_HORIZON as LABEL_HORIZON,
     DEFAULT_VOL_MULT as BARRIER_VOL_MULT,
     DEFAULT_COST as ROUND_TRIP_COST,
 )
+from quant_engine.ml.sample_weights import uniqueness_weights
 
 logger = logging.getLogger(__name__)
 
@@ -263,13 +265,14 @@ def _build_feature_frame(
     )
 
 
-def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
+def build_training_dataset() -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
     Iterate over every stock in the DB, compute features + labels, concatenate.
 
     Returns:
-        X: DataFrame of shape (N, len(FEATURE_COLS)) with FEATURE_COLS columns
-        y: Series of shape (N,) with values in {-1, 0, 1}
+        X:             DataFrame (N, len(FEATURE_COLS)) of features
+        y:             Series (N,) with values in {-1, 0, 1} — triple-barrier labels
+        sample_weight: Series (N,) of AFML §4.6 uniqueness weights ∈ (0, 1]
     """
     symbols      = load_all_symbols()
     benchmark_df = load_benchmark(limit=2000)
@@ -326,6 +329,7 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
     all_X: list[pd.DataFrame] = []
     all_y: list[pd.Series] = []
+    all_t1: list[pd.DatetimeIndex] = []   # per-label resolution date (for uniqueness weights)
     skipped_train: list[str] = []
 
     for symbol, df in all_prices.items():
@@ -356,28 +360,42 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
                 intraday_feats,
             )
 
-            # Triple-barrier labels (vol-scaled, cost-aware) — AFML Ch.3.
+            # Triple-barrier events (vol-scaled, cost-aware) — AFML Ch.3.
             # Replaces the old fixed ±3% / 20d gross threshold (heteroscedastic
             # across vol regimes + cost-blind). See wiki/concepts/ml_audit_2026_05_21.md
             # S3/S7 and quant_engine/ml/labels.py. Labels are NaN in the warm-up
             # and trailing-horizon windows, so valid_mask drops them exactly like
-            # the old forward_return.notna() did.
-            label_series = triple_barrier_labels(
+            # the old forward_return.notna() did. The `t1_offset` column carries
+            # per-label resolution time — required for P1-c sample-uniqueness
+            # weighting so an early barrier touch isn't treated the same as a
+            # full-horizon timeout.
+            events = triple_barrier_events(
                 df["close"],
                 horizon=LABEL_HORIZON,
                 vol_mult=BARRIER_VOL_MULT,
                 cost=ROUND_TRIP_COST,
             )
+            label_series = events["label"]
 
             valid_mask = features.notna().all(axis=1) & label_series.notna()
             features = features[valid_mask]
             label = label_series[valid_mask].astype(int)
+            t1_offset = events.loc[valid_mask, "t1_offset"].astype(int).to_numpy()
 
             if len(features) < 60:
                 continue
 
+            # Map each label's t1_offset to the resolving bar's calendar date,
+            # using the symbol's own price index. Positional lookup is safe
+            # because valid_mask preserves the original ordering.
+            sym_index = df.index
+            valid_positions = sym_index.get_indexer(features.index)
+            t1_positions = valid_positions + t1_offset
+            t1_dates = sym_index[t1_positions]
+
             all_X.append(features)
             all_y.append(label)
+            all_t1.append(pd.DatetimeIndex(t1_dates))
 
         except Exception as exc:
             skipped_train.append(symbol)
@@ -392,15 +410,33 @@ def build_training_dataset() -> tuple[pd.DataFrame, pd.Series]:
 
     X = pd.concat(all_X)
     y = pd.concat(all_y)
-    # Sort both by date so TimeSeriesSplit cuts on actual time boundaries.
+    t1_dates = pd.DatetimeIndex(np.concatenate([t1.values for t1 in all_t1]))
+
+    # Sort by date so TimeSeriesSplit cuts on actual time boundaries.
     # Use iloc + argsort (positional) to avoid duplicate-index expansion that
     # .loc[X.index] would cause when the same date appears for many stocks.
     order = X.index.argsort(kind="mergesort")
     X = X.iloc[order]
     y = y.iloc[order]
+    t1_dates = t1_dates[order]
 
-    logger.info("Training dataset: %d samples from %d stocks", len(X), len(all_X))
-    return X, y
+    # Sample-uniqueness weights (P1-c / AFML §4.6). Pooled across all symbols:
+    # a label observed on date d shares information with every label observed
+    # on dates [d, t1] regardless of which symbol it came from.
+    t0_dates = pd.DatetimeIndex(X.index)
+    sample_weight = pd.Series(
+        uniqueness_weights(t0_dates, t1_dates),
+        index=X.index,
+        name="sample_weight",
+    )
+
+    logger.info(
+        "Training dataset: %d samples from %d stocks  "
+        "(uniqueness weight: mean=%.3f, min=%.3f)",
+        len(X), len(all_X),
+        float(sample_weight.mean()), float(sample_weight.min()),
+    )
+    return X, y, sample_weight
 
 
 def _build_pipeline(rf_params: dict) -> Pipeline:
@@ -418,7 +454,7 @@ def _build_pipeline(rf_params: dict) -> Pipeline:
     ])
 
 
-def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
+def _tune_hyperparams(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
     """
     Grid search over min_samples_leaf × max_depth using walk-forward CV.
 
@@ -458,7 +494,11 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
                 if len(train_idx) == 0:
                     continue
                 clf = _build_pipeline(params)
-                clf.fit(X.iloc[train_idx], y.iloc[train_idx])
+                # Pipeline routes sample_weight to the RF step via "<step>__sample_weight".
+                clf.fit(
+                    X.iloc[train_idx], y.iloc[train_idx],
+                    rf__sample_weight=sample_weight.iloc[train_idx].to_numpy(),
+                )
                 fold_scores.append(clf.score(X.iloc[test_idx], y.iloc[test_idx]))
             if not fold_scores:
                 continue
@@ -473,15 +513,18 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series) -> dict:
     return best_params
 
 
-def train(X: pd.DataFrame, y: pd.Series) -> dict:
+def train(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
     """
     Tune hyperparameters, then train a Random Forest on X/y with walk-forward CV.
     Saves the model + metadata to ML_MODEL_DIR and returns the metadata dict.
+
+    `sample_weight` is the AFML §4.6 uniqueness weight produced by
+    `build_training_dataset` and is passed to every RF .fit() (tune, CV, final).
     """
     ML_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── Step 1: find best min_samples_leaf + max_depth ───────────
-    best_params = _tune_hyperparams(X, y)
+    best_params = _tune_hyperparams(X, y, sample_weight)
     final_params = {**RF_PARAMS, **best_params}
 
     # ── Step 2: CV with best params (for honest accuracy reporting) ──
@@ -503,14 +546,17 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
             logger.warning("CV fold %d: purged training set empty — skipping", fold)
             continue
         clf_cv = _build_pipeline(final_params)
-        clf_cv.fit(X.iloc[train_idx], y.iloc[train_idx])
+        clf_cv.fit(
+            X.iloc[train_idx], y.iloc[train_idx],
+            rf__sample_weight=sample_weight.iloc[train_idx].to_numpy(),
+        )
         acc = clf_cv.score(X.iloc[test_idx], y.iloc[test_idx])
         cv_accuracies.append(acc)
         logger.info("CV fold %d accuracy: %.3f (purged train n=%d)", fold, acc, len(train_idx))
 
     # ── Step 3: final model trained on the full dataset ──────────
     clf = _build_pipeline(final_params)
-    clf.fit(X, y)
+    clf.fit(X, y, rf__sample_weight=sample_weight.to_numpy())
 
     # Persist (pipeline: imputer + RF — imputer's learned medians are baked in
     # so inference can fill NaN for soft features without silently dropping bars)
@@ -531,6 +577,11 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
         for col, val in zip(FEATURE_COLS, imputer.statistics_)
     }
 
+    # Effective sample size after uniqueness weighting (AFML §4.6).
+    # n_eff = (Σ w_i)² / Σ w_i² — the variance-equivalent unique-obs count.
+    w_arr = sample_weight.to_numpy()
+    n_eff = float((w_arr.sum() ** 2) / (np.square(w_arr).sum())) if w_arr.size else 0.0
+
     metadata = {
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "n_samples": int(len(X)),
@@ -542,6 +593,16 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
         "imputer_medians": imputer_medians,
         "classes": rf_step.classes_.tolist(),
         "rf_params": final_params,
+        "label_method": "triple_barrier",
+        "label_horizon": LABEL_HORIZON,
+        "barrier_vol_mult": BARRIER_VOL_MULT,
+        "round_trip_cost": ROUND_TRIP_COST,
+        "uniqueness_weights": {
+            "mean": round(float(w_arr.mean()), 4) if w_arr.size else None,
+            "min":  round(float(w_arr.min()),  4) if w_arr.size else None,
+            "n_effective": round(n_eff, 1),
+            "n_effective_pct": round(100.0 * n_eff / max(len(w_arr), 1), 1),
+        },
     }
 
     with open(ML_MODEL_DIR / "metadata.json", "w") as fh:
@@ -558,9 +619,9 @@ def train(X: pd.DataFrame, y: pd.Series) -> dict:
 def run_training_pipeline() -> dict:
     """Entry point: build dataset → train → return metadata."""
     logger.info("Building training dataset …")
-    X, y = build_training_dataset()
+    X, y, sample_weight = build_training_dataset()
     logger.info("Training Random Forest …")
-    return train(X, y)
+    return train(X, y, sample_weight)
 
 
 if __name__ == "__main__":

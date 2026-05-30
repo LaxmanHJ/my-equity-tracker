@@ -95,7 +95,26 @@ From López de Prado Ch.14: use Deflated Sharpe Ratio to avoid overfitting when 
 
 ## Sample Weights
 
-**Gap**: All observations treated equally. Should weight by uniqueness (1 / concurrent label count) per López de Prado Ch.4.
+**Current (2026-05-21, P1-c)**: AFML §4.6 uniqueness weights —
+`quant_engine/ml/sample_weights.py::uniqueness_weights` — wired through
+`trainer.build_training_dataset → train` and forwarded to every RF `.fit()`
+call (tune, CV report, final fit) via `Pipeline.fit(rf__sample_weight=…)`.
+
+Per-label weight `u_i = mean over d ∈ [t0_i, t1_i] of (1 / c_d)`, where `c_d`
+is the count of labels alive on master-calendar date `d` (master = union of
+label start dates across all symbols, so concurrency is cross-symbol). The
+`t1_i` comes from `triple_barrier_events.t1_offset` so early barrier touches
+correctly score higher uniqueness than full-horizon timeouts.
+
+Persisted to `metadata.json` as `uniqueness_weights: {mean, min, n_effective,
+n_effective_pct}` where `n_effective = (Σw)² / Σw²`. Expect `n_effective_pct`
+≈ 5–10% on 20d-horizon training: the 24k nominal rows really are ~500–2k
+unique observations, and now the standard errors on every metric reflect that.
+
+Tests: `tests/test_ml_sample_weights.py` (10 deterministic assertions: domain,
+isolated → 1.0, K-coincident → 1/K each, non-overlapping → all 1, monotone
+in concurrency, hand-computed concurrency_count, end-to-end with
+triple_barrier_events).
 
 ## Current Status
 
