@@ -365,33 +365,66 @@ def _purge_train_indices(
     test_idx: np.ndarray,
     dates: pd.DatetimeIndex,
     label_horizon_days: int,
+    embargo_days: int | None = None,
 ) -> np.ndarray:
     """
-    Purge training indices whose label horizon overlaps the test fold start.
+    Purge + embargo a walk-forward / CPCV training set (AFML Ch.10).
 
-    For a walk-forward split (train strictly before test), this means dropping
-    training rows whose date is within `label_horizon_days` unique trading
-    days of the first test date — because their 20d label uses prices that
-    fall inside the test fold.
+    Two reasons a training row leaks into the test set:
 
-    Reference: Lopez de Prado AFML Ch.10.
+      1. Backward overlap (purge): a row dated within `label_horizon_days`
+         trading days BEFORE the test fold has a label whose forward window
+         lands inside the test fold. Drop it.
+      2. Forward overlap (embargo): when the train fold also contains rows
+         AFTER the test fold (only happens in CPCV, never in plain walk-
+         forward), those rows can use features computed from price action
+         shortly after the test set, leaking information backward through
+         autocorrelation. Drop rows within `embargo_days` trading days AFTER
+         the test fold's last date.
+
+    `embargo_days` defaults to `label_horizon_days` (AFML's recommendation —
+    same horizon both sides for symmetric purging). Pass `0` to disable.
+
+    For pure walk-forward (`test_idx > train_idx.max()`) the embargo is a
+    no-op because no train rows live after the test fold; in CPCV it is the
+    AFML §7.4 requirement.
+
+    Returns the surviving train indices (a subset of the input).
     """
     if len(test_idx) == 0 or len(train_idx) == 0:
         return train_idx
 
-    test_start_date = dates[test_idx[0]]
+    if embargo_days is None:
+        embargo_days = label_horizon_days
+
     unique_sorted_dates = sorted(set(dates))
+    n_dates = len(unique_sorted_dates)
+
+    # ── Backward purge: drop train rows in the `label_horizon_days` BEFORE test_start ──
+    test_start_date = dates[test_idx[0]]
     try:
         test_start_pos = unique_sorted_dates.index(test_start_date)
     except ValueError:
         return train_idx
-
     purge_pos = max(0, test_start_pos - label_horizon_days)
     purge_threshold_date = unique_sorted_dates[purge_pos]
-
     train_dates = dates[train_idx]
-    keep = train_dates < purge_threshold_date
-    return train_idx[np.asarray(keep)]
+    keep = np.asarray(train_dates < purge_threshold_date)
+
+    # ── Forward embargo: drop train rows in the `embargo_days` AFTER test_end ──
+    if embargo_days > 0:
+        test_end_date = dates[test_idx[-1]]
+        try:
+            test_end_pos = unique_sorted_dates.index(test_end_date)
+        except ValueError:
+            test_end_pos = n_dates - 1
+        embargo_pos = min(n_dates - 1, test_end_pos + embargo_days)
+        embargo_release_date = unique_sorted_dates[embargo_pos]
+        # Keep rows strictly after the embargo window (they're safe again).
+        after = np.asarray(train_dates > embargo_release_date)
+        keep = keep | after
+
+    return train_idx[keep]
 
 
 # ── Metric computation ───────────────────────────────────────────────────────

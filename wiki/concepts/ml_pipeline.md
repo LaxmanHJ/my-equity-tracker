@@ -48,10 +48,20 @@ Current features (all 7 factor scores):
 
 Purpose: the live signal-quality tracker only has ~470 settled 1-day obs — IC SE ≈ 0.046, which is too noisy to drive model-design decisions. The historical diagnostic gives thousands of out-of-sample observations per horizon instead. Run via `python -m quant_engine.ml.diagnostic` or `POST /api/ml/diagnostic`; results are cached at `data/ml_diagnostic.json` and served by `GET /api/ml/diagnostic`.
 
-**Gap (still open)**: Full Purged K-Fold / CPCV:
-- The diagnostic only purges; it doesn't add the post-test embargo (not needed for walk-forward, needed for CPCV)
-- CPCV would run all C(T,k) splits for a distribution of Sharpe/IC values
-- Required for PSR/DSR (López de Prado Ch.14)
+**Embargo (P1-f, 2026-05-21)**: `_purge_train_indices` now takes an
+`embargo_days` parameter (defaults to `label_horizon_days`) that drops training
+rows in the window *after* the test fold ends, not just *before* the test fold
+starts. For pure walk-forward callers (current trainer, diagnostic, meta_labeler)
+this is a no-op — the embargo only engages when training rows live after the
+test fold, which is the CPCV use case. Tests: `tests/test_ml_purge.py` (9
+assertions including a byte-for-byte legacy-behaviour check with
+`embargo_days=0`).
+
+**Gap (still open)**: Full CPCV:
+- The harness now has purge + embargo, so CPCV becomes a wiring problem
+  (combinatorial fold generation) rather than a methodology gap
+- CPCV would run all C(T, k) splits for a Sharpe/IC distribution
+- Required for PSR/DSR (López de Prado Ch.14) → SIC-46
 
 ```python
 # Next step: quant_engine/ml/purged_cv.py
