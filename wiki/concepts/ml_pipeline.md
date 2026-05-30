@@ -400,3 +400,4 @@ Implementation (2026-05-20):
 - [regime_detection.md](regime_detection.md) — regime features added to ML
 - [backtesting.md](backtesting.md) — ML signal validated in backtest
 - [intraday_features.md](intraday_features.md) — Phase 4 Angel One intraday features
+- [ml_audit_2026_05_21.md](ml_audit_2026_05_21.md) — full ML pipeline audit (2026-05-21)
