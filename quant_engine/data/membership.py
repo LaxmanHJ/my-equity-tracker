@@ -47,6 +47,7 @@ __all__ = [
     "MembershipInterval",
     "MembershipRegistry",
     "CREATE_TABLE_SQL",
+    "apply_pit_row_filter",
     "load_membership_from_csv",
     "validate_intervals",
 ]
@@ -284,3 +285,40 @@ class MembershipRegistry:
         renamed. This is the right universe to query ``price_history`` over.
         """
         return {sym for (idx, sym) in self._by_symbol if idx == index_name}
+
+
+# ── Per-symbol PIT filter for panel-style feature frames ────────────────────
+def apply_pit_row_filter(
+    features,
+    symbol: str,
+    registry: Optional["MembershipRegistry"],
+    index_name: str = "NIFTY200",
+):
+    """Drop rows where ``symbol`` was NOT an ``index_name`` member on that date.
+
+    This is the *survivorship-bias-correction* hook the ML diagnostic / trainer
+    call after building each symbol's feature frame. With ``registry=None`` it
+    is a no-op — preserving bit-identical legacy behaviour when PIT is disabled.
+
+    Parameters
+    ----------
+    features : pd.DataFrame with a DatetimeIndex (one row per trading day).
+    symbol : the symbol whose membership we are checking.
+    registry : MembershipRegistry to consult, or None to skip the filter.
+    index_name : which index the registry should be queried for.
+
+    Returns
+    -------
+    pd.DataFrame restricted to dates on which ``symbol`` was a member.
+    """
+    if registry is None or features is None or len(features) == 0:
+        return features
+    import pandas as pd  # local — keep module import-light for callers that don't need pandas
+    import numpy as np
+    dates = pd.DatetimeIndex(features.index).date  # np.ndarray of python date objects
+    mask = np.fromiter(
+        (registry.contains(symbol, d, index_name) for d in dates),
+        dtype=bool,
+        count=len(dates),
+    )
+    return features.loc[mask]

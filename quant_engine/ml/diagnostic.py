@@ -75,6 +75,7 @@ from sklearn.pipeline import Pipeline
 from quant_engine.ml.trainer import _build_pipeline
 
 from quant_engine.config import FACTOR_WEIGHTS, ML_MODEL_DIR, PROJECT_ROOT
+from quant_engine.data.membership import apply_pit_row_filter
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 
 
@@ -228,6 +229,8 @@ def _compute_linear_composite(df: pd.DataFrame,
 
 def build_dataset_with_horizons(
     required_feature_cols: Optional[list[str]] = None,
+    pit_universe=None,
+    pit_index_name: str = "NIFTY200",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build (X, meta) where:
@@ -319,6 +322,13 @@ def build_dataset_with_horizons(
                 delivery_score_series,
                 fii_fo_score_series,
                 intraday_feats,
+            )
+
+            # Point-in-time membership filter (P2-c follow-up): drop rows on
+            # which `symbol` was NOT an index member. No-op when pit_universe
+            # is None — preserves bit-identical legacy behaviour.
+            features = apply_pit_row_filter(
+                features, symbol, pit_universe, pit_index_name,
             )
 
             # Multi-horizon forward returns (no look-ahead: we shift backward).
@@ -564,16 +574,29 @@ def _horizon_metrics(
 
 
 # ── Main diagnostic run ──────────────────────────────────────────────────────
-def run_diagnostic() -> dict:
+def run_diagnostic(pit_universe=None, pit_index_name: str = "NIFTY200") -> dict:
     """
     Run the full walk-forward purged CV diagnostic and return results.
 
     Writes results to DIAG_OUTPUT_PATH as JSON so the FastAPI endpoint can
     serve cached results without re-running the (slow) walk-forward on
     every request.
+
+    Pass ``pit_universe`` (a ``MembershipRegistry``) to apply the
+    point-in-time membership filter (audit P2-c): every (symbol, date) row
+    where the symbol was NOT an index member on that date is dropped before
+    feature aggregation, so the diagnostic measures only what the strategy
+    would have actually been able to trade. ``None`` (default) preserves
+    legacy behaviour bit-identically.
     """
-    logger.info("Building diagnostic dataset …")
-    X, meta = build_dataset_with_horizons()
+    logger.info(
+        "Building diagnostic dataset … (PIT %s)",
+        "ENABLED" if pit_universe is not None else "disabled",
+    )
+    X, meta = build_dataset_with_horizons(
+        pit_universe=pit_universe,
+        pit_index_name=pit_index_name,
+    )
 
     dates = pd.DatetimeIndex(X.index)
     y = meta["label"].values
@@ -771,6 +794,8 @@ def run_diagnostic() -> dict:
             "sell": SELL_RETURN_THRESHOLD,
         },
         "purge_days": LABEL_HORIZON_DAYS,
+        "pit_universe_active": pit_universe is not None,
+        "pit_index_name": pit_index_name if pit_universe is not None else None,
         "rf_params": rf_params_deployed,
         "rf_params_source": rf_params_source,
         "feature_cols": FEATURE_COLS,
@@ -821,11 +846,40 @@ def load_last_result() -> Optional[dict]:
 
 
 if __name__ == "__main__":
+    import argparse
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument(
+        "--pit", action="store_true",
+        help="Apply point-in-time index-membership filter (audit P2-c). "
+             "Drops (symbol, date) rows where the symbol was NOT a member of "
+             "--pit-index on that date. Loads the registry from Turso's "
+             "index_membership table. Default off — preserves legacy behaviour.",
+    )
+    cli.add_argument(
+        "--pit-index", type=str, default="NIFTY200",
+        help="Which index to apply for the PIT filter (default NIFTY200).",
+    )
+    args = cli.parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
-    result = run_diagnostic()
+
+    pit_registry = None
+    if args.pit:
+        from quant_engine.data.membership import MembershipRegistry
+        from quant_engine.data.turso_client import connect as _t_connect
+        with _t_connect() as _conn:
+            pit_registry = MembershipRegistry.from_turso(_conn, args.pit_index)
+        logger.info(
+            "PIT registry loaded for %s: %d members ever, %d distinct intervals",
+            args.pit_index,
+            len(pit_registry.all_symbols(args.pit_index)),
+            len(pit_registry._all_intervals),
+        )
+
+    result = run_diagnostic(pit_universe=pit_registry, pit_index_name=args.pit_index)
 
     print("\n=== Sicilian Diagnostic — Pooled Aggregate ===")
     print(f"samples={result['n_samples_total']}  folds={result['n_folds_completed']}")

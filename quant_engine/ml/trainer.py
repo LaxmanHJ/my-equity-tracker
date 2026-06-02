@@ -51,6 +51,7 @@ from quant_engine.data.market_regime_loader import (
 )
 from quant_engine.data.sector_indices_loader import load_sector_series
 from quant_engine.data.intraday_features import build_intraday_features
+from quant_engine.data.membership import apply_pit_row_filter
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
 from quant_engine.ml.features import build_feature_frame
 from quant_engine.ml.labels import (
@@ -256,6 +257,8 @@ REQUIRED_FEATURE_COLS_DEFAULT: tuple[str, ...] = (
 
 def build_training_dataset(
     required_feature_cols: tuple[str, ...] | list[str] = REQUIRED_FEATURE_COLS_DEFAULT,
+    pit_universe=None,
+    pit_index_name: str = "NIFTY200",
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
     """
     Iterate over every stock in the DB, compute features + labels, concatenate.
@@ -361,6 +364,13 @@ def build_training_dataset(
                 delivery_score_series,
                 fii_fo_score_series,
                 intraday_feats,
+            )
+
+            # Point-in-time membership filter (P2-c follow-up): drop rows on
+            # which `symbol` was NOT an index member. No-op when pit_universe
+            # is None — preserves bit-identical legacy behaviour.
+            features = apply_pit_row_filter(
+                features, symbol, pit_universe, pit_index_name,
             )
 
             # Triple-barrier events (vol-scaled, cost-aware) — AFML Ch.3.
@@ -522,7 +532,10 @@ def _tune_hyperparams(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -
     return best_params
 
 
-def train(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
+def train(
+    X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series,
+    pit_universe_active: bool = False, pit_index_name: str = "NIFTY200",
+) -> dict:
     """
     Tune hyperparameters, then train a Random Forest on X/y with walk-forward CV.
     Saves the model + metadata to ML_MODEL_DIR and returns the metadata dict.
@@ -606,6 +619,8 @@ def train(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
         "label_horizon": LABEL_HORIZON,
         "barrier_vol_mult": BARRIER_VOL_MULT,
         "round_trip_cost": ROUND_TRIP_COST,
+        "pit_universe_active": bool(pit_universe_active),
+        "pit_index_name": pit_index_name if pit_universe_active else None,
         "uniqueness_weights": {
             "mean": round(float(w_arr.mean()), 4) if w_arr.size else None,
             "min":  round(float(w_arr.min()),  4) if w_arr.size else None,
@@ -625,13 +640,55 @@ def train(X: pd.DataFrame, y: pd.Series, sample_weight: pd.Series) -> dict:
     return metadata
 
 
-def run_training_pipeline() -> dict:
-    """Entry point: build dataset → train → return metadata."""
-    logger.info("Building training dataset …")
-    X, y, sample_weight = build_training_dataset()
+def run_training_pipeline(pit_universe=None, pit_index_name: str = "NIFTY200") -> dict:
+    """Entry point: build dataset → train → return metadata.
+
+    Pass ``pit_universe`` (a ``MembershipRegistry``) to apply the audit P2-c
+    point-in-time filter: every (symbol, date) row where the symbol was NOT
+    an index member on that date is dropped before training. ``None``
+    (default) preserves legacy bit-identical behaviour.
+    """
+    logger.info(
+        "Building training dataset … (PIT %s)",
+        "ENABLED" if pit_universe is not None else "disabled",
+    )
+    X, y, sample_weight = build_training_dataset(
+        pit_universe=pit_universe, pit_index_name=pit_index_name,
+    )
     logger.info("Training Random Forest …")
-    return train(X, y, sample_weight)
+    return train(
+        X, y, sample_weight,
+        pit_universe_active=pit_universe is not None,
+        pit_index_name=pit_index_name,
+    )
 
 
 if __name__ == "__main__":
-    run_training_pipeline()
+    import argparse
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument(
+        "--pit", action="store_true",
+        help="Apply point-in-time index-membership filter (audit P2-c). "
+             "Drops (symbol, date) rows where the symbol was NOT a member "
+             "of --pit-index on that date. Loads the registry from Turso's "
+             "index_membership table. Default off — preserves legacy behaviour.",
+    )
+    cli.add_argument(
+        "--pit-index", type=str, default="NIFTY200",
+        help="Which index to apply for the PIT filter (default NIFTY200).",
+    )
+    args = cli.parse_args()
+
+    pit_registry = None
+    if args.pit:
+        from quant_engine.data.membership import MembershipRegistry
+        from quant_engine.data.turso_client import connect as _t_connect
+        with _t_connect() as _conn:
+            pit_registry = MembershipRegistry.from_turso(_conn, args.pit_index)
+        logger.info(
+            "PIT registry loaded for %s: %d members ever",
+            args.pit_index,
+            len(pit_registry.all_symbols(args.pit_index)),
+        )
+
+    run_training_pipeline(pit_universe=pit_registry, pit_index_name=args.pit_index)
