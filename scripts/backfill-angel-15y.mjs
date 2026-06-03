@@ -7,8 +7,12 @@
  *   node scripts/backfill-angel-15y.mjs --dry-run --symbol INFY   # Single symbol dry run
  *   node scripts/backfill-angel-15y.mjs                           # Full backfill (DELETE + INSERT)
  *   node scripts/backfill-angel-15y.mjs --symbol TATAELXSI        # Single symbol backfill
+ *   node scripts/backfill-angel-15y.mjs --dry-run --symbols A,B,C # Explicit list
+ *   node scripts/backfill-angel-15y.mjs --dry-run --file syms.txt # One symbol per line
+ *   node scripts/backfill-angel-15y.mjs --symbol ARE&M --store-as AMARAJABAT  # rename: fetch new, store old
  */
 import 'dotenv/config';
+import { readFileSync } from 'fs';
 import { fetchDailyOHLC } from '../src/services/angelOneHistorical.js';
 import { initDatabase, savePriceHistory } from '../src/database/db.js';
 import { createClient } from '@libsql/client';
@@ -26,9 +30,27 @@ const ALL_SYMBOLS = [
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
-const singleIdx = args.indexOf('--symbol');
-const SINGLE_SYMBOL = singleIdx !== -1 ? args[singleIdx + 1]?.toUpperCase() : null;
-const symbols = SINGLE_SYMBOL ? [SINGLE_SYMBOL] : ALL_SYMBOLS;
+const argVal = (flag) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : null; };
+
+const SINGLE_SYMBOL = argVal('--symbol')?.toUpperCase() || null;
+const LIST_ARG = argVal('--symbols');
+const FILE_ARG = argVal('--file');
+// For pure renames: fetch under the new ticker, store under the membership symbol.
+// Only valid with a single --symbol (the new ticker).
+const STORE_AS = argVal('--store-as')?.toUpperCase() || null;
+
+// Precedence: --symbol > --symbols > --file > ALL_SYMBOLS
+let symbols;
+if (SINGLE_SYMBOL) {
+    symbols = [SINGLE_SYMBOL];
+} else if (LIST_ARG) {
+    symbols = LIST_ARG.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+} else if (FILE_ARG) {
+    symbols = readFileSync(FILE_ARG, 'utf8')
+        .split(/[\r\n,]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+} else {
+    symbols = ALL_SYMBOLS;
+}
 
 const START_DATE = '2011-01-01';
 const CHUNK_DAYS = 2000;
@@ -115,14 +137,18 @@ function normalizeDate(d) {
         console.log(`  ✓ ${sym.padEnd(12)} — ${String(deduped.length).padStart(5)} candles  (${firstDate} → ${lastDate})  [${ms}ms]`);
 
         if (!DRY_RUN) {
-            // Delete existing rows for this symbol
+            // Pure-rename support: fetched under `sym`, persisted under the
+            // membership symbol when --store-as is given.
+            const storeSym = STORE_AS || sym;
+            // Delete existing rows for the stored symbol
             await db.execute({
                 sql: 'DELETE FROM price_history WHERE symbol = ?',
-                args: [sym]
+                args: [storeSym]
             });
             // Insert fresh data
-            await savePriceHistory(sym, deduped);
-            console.log(`    ↳ DB: deleted old rows, inserted ${deduped.length} fresh rows`);
+            await savePriceHistory(storeSym, deduped);
+            const as = storeSym !== sym ? ` as ${storeSym}` : '';
+            console.log(`    ↳ DB: deleted old rows, inserted ${deduped.length} fresh rows${as}`);
         }
     }
 

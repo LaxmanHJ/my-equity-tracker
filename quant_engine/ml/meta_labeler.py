@@ -74,7 +74,7 @@ from quant_engine.ml.diagnostic import (
     _purge_train_indices,
     build_dataset_with_horizons,
 )
-from quant_engine.ml.trainer import RF_PARAMS
+from quant_engine.ml.trainer import RF_PARAMS, _build_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +248,49 @@ def make_ml_regression_primary_score_fn(
     return score_fn
 
 
+def make_ml_primary_score_fn(rf_params: dict | None = None):
+    """Factory for the ``ml`` primary — fits the 3-class RandomForestClassifier
+    (BUY/HOLD/SELL, identical to diagnostic.py's ``ml`` track and the deployed
+    production model) on the fold's training rows, and uses the signed
+    conviction  ``score = P(BUY) - P(SELL) ∈ [-1, 1]``  as the primary signal.
+
+    Scaling it to [-1, 1] keeps the primary-BUY mask (``score > primary_threshold``)
+    consistent with the linear and ml_regression primaries, so the three are
+    apples-to-apples. Unlike the regressor, the classifier KEEPS ``class_weight``.
+
+    Returns a function suitable for ``run_meta_diagnostic(primary_score_fn=…)``.
+    """
+    if rf_params is None:
+        rf_params, _ = _load_deployed_rf_params(RF_PARAMS)
+
+    def score_fn(
+        X_all: pd.DataFrame,
+        meta_all: pd.DataFrame,
+        dates: pd.DatetimeIndex,
+        train_idx_purged: np.ndarray,
+        test_idx: np.ndarray,
+    ) -> dict:
+        y = meta_all["label"].to_numpy()          # 3-class BUY(1)/HOLD(0)/SELL(-1)
+        y_train = y[train_idx_purged]
+        train_mask = ~pd.isna(y_train)
+        nan = lambda n: np.full(n, np.nan)
+        if train_mask.sum() < MIN_TRAIN_AFTER_PURGE:
+            return {"train_score": nan(len(train_idx_purged)), "test_score": nan(len(test_idx))}
+        X_train = X_all.iloc[train_idx_purged]
+        X_test = X_all.iloc[test_idx]
+        clf = _build_pipeline(rf_params)
+        clf.fit(X_train.iloc[train_mask], y_train[train_mask].astype(int))
+        classes = list(clf.named_steps["rf"].classes_)
+        if 1 not in classes or -1 not in classes:   # fold lacks BUY or SELL — filter
+            return {"train_score": nan(len(train_idx_purged)), "test_score": nan(len(test_idx))}
+        bi, si = classes.index(1), classes.index(-1)
+        signed = lambda P: P[:, bi] - P[:, si]
+        return {"train_score": signed(clf.predict_proba(X_train)),
+                "test_score": signed(clf.predict_proba(X_test))}
+
+    return score_fn
+
+
 def _make_label(fwd_ret: np.ndarray) -> np.ndarray:
     """Binary profitability label: 1 if fwd_ret_20d > 0 else 0."""
     return (fwd_ret > 0).astype(int)
@@ -334,6 +377,8 @@ def run_meta_diagnostic(
     sweep_thresholds: Optional[list[float]] = None,
     primary_score_fn=None,
     primary_name: str = "linear",
+    pit_universe=None,
+    pit_index_name: str = "NIFTY200",
 ) -> dict:
     """
     Walk-forward purged CV of the meta-labeler on primary-BUY subset.
@@ -352,8 +397,12 @@ def run_meta_diagnostic(
         primary_threshold,
         len(META_FEATURE_COLS),
     )
+    logger.info("PIT universe filter: %s",
+                f"ENABLED ({pit_index_name})" if pit_universe is not None else "disabled")
     X_all, meta_all = build_dataset_with_horizons(
         required_feature_cols=META_FEATURE_COLS,
+        pit_universe=pit_universe,
+        pit_index_name=pit_index_name,
     )
 
     if not all(c in X_all.columns for c in META_FEATURE_COLS):
@@ -774,18 +823,38 @@ if __name__ == "__main__":
         "--primary",
         type=str,
         default="linear",
-        choices=["linear", "ml_regression"],
+        choices=["linear", "ml_regression", "ml"],
         help="Which primary signal to gate. 'linear' (default) is the 7-factor "
              "composite — historical behaviour. 'ml_regression' fits an RF "
              "regressor on cs-rank label per fold and uses its prediction as "
              "the primary — P2-e: tests whether the +9.73pp meta-label uplift "
              "survives a different primary signal.",
     )
+    parser.add_argument(
+        "--pit", action="store_true",
+        help="Apply point-in-time index-membership filter (audit P2-c) to the "
+             "meta-labeler dataset — drops (symbol, date) rows where the symbol "
+             "was not a member of --pit-index on that date. Tests whether the "
+             "meta-label uplift survives the survivorship-free universe.",
+    )
+    parser.add_argument(
+        "--pit-index", type=str, default="NIFTY200",
+        help="Index to apply for the PIT filter (default NIFTY200).",
+    )
     args = parser.parse_args()
 
     primary_score_fn = None
     if args.primary == "ml_regression":
         primary_score_fn = make_ml_regression_primary_score_fn()
+    elif args.primary == "ml":
+        primary_score_fn = make_ml_primary_score_fn()
+
+    pit_universe = None
+    if args.pit:
+        from quant_engine.data.membership import MembershipRegistry
+        from quant_engine.data.turso_client import connect as _t_connect
+        with _t_connect() as _conn:
+            pit_universe = MembershipRegistry.from_turso(_conn, args.pit_index)
 
     if args.output:
         DIAG_OUTPUT_PATH = Path(args.output)
@@ -819,6 +888,8 @@ if __name__ == "__main__":
         sweep_thresholds=sweep_thresholds,
         primary_score_fn=primary_score_fn,
         primary_name=args.primary,
+        pit_universe=pit_universe,
+        pit_index_name=args.pit_index,
     )
 
     print("\n=== SIC-42 Meta-Labeler — Walk-forward OOS ===")
