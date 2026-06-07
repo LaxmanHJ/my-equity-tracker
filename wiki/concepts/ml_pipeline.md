@@ -1,5 +1,23 @@
 # ML Pipeline
 
+> **POST-PIT VERDICT (2026-06-04).** The historical headline numbers on
+> this page — `+0.040 IC` for the linear composite, `+3.79 pp` / `+9.73 pp`
+> meta-label uplift, `+0.022 IC` for ml_regression — are **inflated artifacts
+> of survivorship bias and multiple testing in the universes they were
+> measured on**. The 2026 P0–P2 audit closed with **no track passing the
+> ship gate** (DSR > 0.95, PBO < 0.15) on the honest PIT universe. Linear's
+> "high-conviction BUYs" hit only 33.9 % on the PIT panel; the meta-labeler
+> adds 0.00 pp on data-rich folds; CPCV long-short DSR is 0.000 for all
+> three tracks. See **[ml_audit_2026_05_21.md §2026-06-04 Terminal
+> Findings](ml_audit_2026_05_21.md#2026-06-04-terminal-findings)** for the
+> closing record, the production implications, and the open research items.
+>
+> The numbers in this page below are kept for historical reference. They
+> are **not** validated alpha and **not** a basis for live-capital
+> decisions. The current bar to clear on any future signal is **PIT LS
+> Sharpe > ~0.6 with DSR > 0.95 and PBO < 0.15** measured by
+> `quant_engine/ml/cpcv_diagnostic.py --pit`.
+
 ## Architecture
 
 **Framework**: scikit-learn classifier (Random Forest or similar)  

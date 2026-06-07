@@ -1,0 +1,77 @@
+{
+  "computed_at": "2026-06-03T21:49:41.900751+00:00",
+  "pit_universe_active": false,
+  "pit_index_name": null,
+  "n_groups": 6,
+  "n_test_groups": 2,
+  "n_combinations": 15,
+  "n_samples_total": 591308,
+  "n_trials_for_dsr": 100,
+  "rf_params_source": "metadata.json",
+  "leg_quantile": 0.2,
+  "tracks": {
+    "ml": {
+      "long_only_sharpe": {
+        "n": 15,
+        "mean": 1.2877,
+        "std": 0.4059,
+        "median": 1.2582,
+        "q05": 0.6935,
+        "q95": 1.8653
+      },
+      "long_short_sharpe": {
+        "n": 15,
+        "mean": 0.9663,
+        "std": 0.4825,
+        "median": 0.7435,
+        "q05": 0.4121,
+        "q95": 1.6533
+      },
+      "dsr_long_only": 1.0,
+      "dsr_long_short": 0.8212
+    },
+    "linear": {
+      "long_only_sharpe": {
+        "n": 15,
+        "mean": 1.0805,
+        "std": 0.583,
+        "median": 1.0055,
+        "q05": 0.2487,
+        "q95": 1.9582
+      },
+      "long_short_sharpe": {
+        "n": 15,
+        "mean": 0.1524,
+        "std": 0.8961,
+        "median": -0.0424,
+        "q05": -0.9765,
+        "q95": 1.4986
+      },
+      "dsr_long_only": 0.6483,
+      "dsr_long_short": 0.0
+    },
+    "ml_regression": {
+      "long_only_sharpe": {
+        "n": 15,
+        "mean": 1.3788,
+        "std": 0.3854,
+        "median": 1.2858,
+        "q05": 0.8097,
+        "q95": 1.9061
+      },
+      "long_short_sharpe": {
+        "n": 15,
+        "mean": 0.692,
+        "std": 0.5686,
+        "median": 0.6302,
+        "q05": -0.0838,
+        "q95": 1.4937
+      },
+      "dsr_long_only": 1.0,
+      "dsr_long_short": 0.0024
+    }
+  },
+  "pbo_long_short": 0.11484071484071484,
+  "pbo_note": "",
+  "notes": "CPCV (AFML Ch.12) over 3 tracks; per-combination annualized Sharpe for long-only (top-quantile) and long-short (top minus bottom quantile) daily-rebalanced portfolios. DSR (AFML Ch.14) deflates the pooled mean Sharpe by n_trials_for_dsr selection-bias trials. PBO across tracks on long-short returns. DSR > 0.95 AND PBO < 0.15 is the ship gate. long_short >> long_only Sharpe \u21d2 edge is market-neutral-only (argues for P3-d, not the current long-only path)."
+}

@@ -68,9 +68,13 @@ from quant_engine.ml.diagnostic import (
     MIN_TEST_OBS,
     MIN_TRAIN_AFTER_PURGE,
     N_SPLITS,
+    _build_cs_rank_label,
+    _build_regression_pipeline,
+    _load_deployed_rf_params,
     _purge_train_indices,
     build_dataset_with_horizons,
 )
+from quant_engine.ml.trainer import RF_PARAMS, _build_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +166,131 @@ def _build_secondary_pipeline() -> Pipeline:
     ])
 
 
+# ── Primary-signal abstraction (P2-e) ────────────────────────────────────────
+#
+# Pre-P2-e the meta-labeler hard-coded `meta_all["linear_score"]` as the primary
+# signal. After the post-P1 diagnostic showed `ml_regression` beating linear at
+# every horizon (IC 0.0122 vs 0.0090 @20d, ICIR 0.113 vs 0.071), we need to be
+# able to ask "does the +9.73pp meta-label uplift survive when the primary is
+# ml_regression instead of linear?" — so the primary is now a callable.
+#
+# Contract: a primary score fn receives the full dataset + the fold's
+# train/test indices and returns a dict with two arrays of the same length
+# as train_idx / test_idx, holding the primary's score for each row IN THAT
+# FOLD. Returning per-fold predictions is what lets ML primaries respect the
+# train/test boundary — linear can ignore the indices and just return the
+# precomputed score, but ml_regression must fit on train, predict on both.
+
+PrimaryScoreFn = "Callable[..., dict]"  # type alias, kept stringly-typed for Py<3.10
+
+
+def linear_primary_score_fn(
+    X_all: pd.DataFrame,
+    meta_all: pd.DataFrame,
+    dates: pd.DatetimeIndex,
+    train_idx_purged: np.ndarray,
+    test_idx: np.ndarray,
+) -> dict:
+    """Default primary — the deterministic 7-factor linear composite already in
+    ``meta_all``. Ignores train/test boundary since the score is a pure
+    function of the features.
+    """
+    linear_score = meta_all["linear_score"].values
+    return {
+        "train_score": linear_score[train_idx_purged],
+        "test_score": linear_score[test_idx],
+    }
+
+
+def make_ml_regression_primary_score_fn(
+    rf_params_reg: dict | None = None,
+):
+    """Factory for the ``ml_regression`` primary — fits a RandomForestRegressor
+    on the cross-sectional rank label using the fold's training rows, predicts
+    on both train (for the meta-labeler's primary-BUY mask) and test.
+
+    ``rf_params_reg`` defaults to the deployed RF's hyperparams (loaded from
+    ``metadata.json`` via the P2-d helper) with ``class_weight`` removed — same
+    convention diagnostic.py uses for its ``ml_regression`` track so the
+    meta-label-vs-ml_reg comparison is apples-to-apples with the diagnostic.
+
+    Returns a function suitable for ``run_meta_diagnostic(primary_score_fn=…)``.
+    """
+    if rf_params_reg is None:
+        params, _ = _load_deployed_rf_params(RF_PARAMS)
+        rf_params_reg = {k: v for k, v in params.items() if k != "class_weight"}
+
+    def score_fn(
+        X_all: pd.DataFrame,
+        meta_all: pd.DataFrame,
+        dates: pd.DatetimeIndex,
+        train_idx_purged: np.ndarray,
+        test_idx: np.ndarray,
+    ) -> dict:
+        cs_rank_label = _build_cs_rank_label(meta_all)
+        y_train = cs_rank_label.iloc[train_idx_purged].values
+        train_mask = ~np.isnan(y_train)
+        if train_mask.sum() < MIN_TRAIN_AFTER_PURGE:
+            # Insufficient cross-sectional training data — fall through to
+            # NaN scores which downstream will filter the fold.
+            return {
+                "train_score": np.full(len(train_idx_purged), np.nan),
+                "test_score": np.full(len(test_idx), np.nan),
+            }
+        X_train = X_all.iloc[train_idx_purged]
+        X_test = X_all.iloc[test_idx]
+        reg = _build_regression_pipeline(rf_params_reg)
+        reg.fit(X_train.iloc[train_mask], y_train[train_mask])
+        train_score = np.clip(reg.predict(X_train), -1.0, 1.0)
+        test_score = np.clip(reg.predict(X_test), -1.0, 1.0)
+        return {"train_score": train_score, "test_score": test_score}
+
+    return score_fn
+
+
+def make_ml_primary_score_fn(rf_params: dict | None = None):
+    """Factory for the ``ml`` primary — fits the 3-class RandomForestClassifier
+    (BUY/HOLD/SELL, identical to diagnostic.py's ``ml`` track and the deployed
+    production model) on the fold's training rows, and uses the signed
+    conviction  ``score = P(BUY) - P(SELL) ∈ [-1, 1]``  as the primary signal.
+
+    Scaling it to [-1, 1] keeps the primary-BUY mask (``score > primary_threshold``)
+    consistent with the linear and ml_regression primaries, so the three are
+    apples-to-apples. Unlike the regressor, the classifier KEEPS ``class_weight``.
+
+    Returns a function suitable for ``run_meta_diagnostic(primary_score_fn=…)``.
+    """
+    if rf_params is None:
+        rf_params, _ = _load_deployed_rf_params(RF_PARAMS)
+
+    def score_fn(
+        X_all: pd.DataFrame,
+        meta_all: pd.DataFrame,
+        dates: pd.DatetimeIndex,
+        train_idx_purged: np.ndarray,
+        test_idx: np.ndarray,
+    ) -> dict:
+        y = meta_all["label"].to_numpy()          # 3-class BUY(1)/HOLD(0)/SELL(-1)
+        y_train = y[train_idx_purged]
+        train_mask = ~pd.isna(y_train)
+        nan = lambda n: np.full(n, np.nan)
+        if train_mask.sum() < MIN_TRAIN_AFTER_PURGE:
+            return {"train_score": nan(len(train_idx_purged)), "test_score": nan(len(test_idx))}
+        X_train = X_all.iloc[train_idx_purged]
+        X_test = X_all.iloc[test_idx]
+        clf = _build_pipeline(rf_params)
+        clf.fit(X_train.iloc[train_mask], y_train[train_mask].astype(int))
+        classes = list(clf.named_steps["rf"].classes_)
+        if 1 not in classes or -1 not in classes:   # fold lacks BUY or SELL — filter
+            return {"train_score": nan(len(train_idx_purged)), "test_score": nan(len(test_idx))}
+        bi, si = classes.index(1), classes.index(-1)
+        signed = lambda P: P[:, bi] - P[:, si]
+        return {"train_score": signed(clf.predict_proba(X_train)),
+                "test_score": signed(clf.predict_proba(X_test))}
+
+    return score_fn
+
+
 def _make_label(fwd_ret: np.ndarray) -> np.ndarray:
     """Binary profitability label: 1 if fwd_ret_20d > 0 else 0."""
     return (fwd_ret > 0).astype(int)
@@ -246,6 +375,10 @@ def run_meta_diagnostic(
     primary_threshold: float = PRIMARY_BUY_THRESHOLD,
     trade_threshold: float = META_TRADE_THRESHOLD,
     sweep_thresholds: Optional[list[float]] = None,
+    primary_score_fn=None,
+    primary_name: str = "linear",
+    pit_universe=None,
+    pit_index_name: str = "NIFTY200",
 ) -> dict:
     """
     Walk-forward purged CV of the meta-labeler on primary-BUY subset.
@@ -264,8 +397,12 @@ def run_meta_diagnostic(
         primary_threshold,
         len(META_FEATURE_COLS),
     )
+    logger.info("PIT universe filter: %s",
+                f"ENABLED ({pit_index_name})" if pit_universe is not None else "disabled")
     X_all, meta_all = build_dataset_with_horizons(
         required_feature_cols=META_FEATURE_COLS,
+        pit_universe=pit_universe,
+        pit_index_name=pit_index_name,
     )
 
     if not all(c in X_all.columns for c in META_FEATURE_COLS):
@@ -273,20 +410,22 @@ def run_meta_diagnostic(
         raise RuntimeError(f"Missing meta features in dataset: {missing}")
 
     fwd_ret = meta_all["fwd_ret_20d"].values
-    linear_score = meta_all["linear_score"].values
 
     # Meta-label defined only where fwd_ret_20d is valid. The dataset
     # builder already drops rows with NaN fwd_ret_20d — still assert.
     assert not np.isnan(fwd_ret).any(), "fwd_ret_20d should be NaN-free post-build"
 
     label_all = _make_label(fwd_ret)
-    is_primary_buy = linear_score >= primary_threshold
-    logger.info(
-        "Primary-BUY coverage: %d / %d rows (%.1f%%)",
-        int(is_primary_buy.sum()),
-        len(is_primary_buy),
-        is_primary_buy.mean() * 100,
-    )
+
+    # P2-e: the primary signal is now a callable so we can swap in
+    # ml_regression-as-primary to test "does the meta-label uplift survive a
+    # different primary?". The default (`primary_score_fn=None`) is the legacy
+    # behavior — extract linear_score from the dataset — kept bit-identical so
+    # this refactor introduces zero numerical drift in the existing diagnostic.
+    if primary_score_fn is None:
+        primary_score_fn = linear_primary_score_fn
+        primary_name = "linear"
+    logger.info("Primary signal: %s (threshold=%.2f)", primary_name, primary_threshold)
 
     dates = pd.DatetimeIndex(X_all.index)
     tscv = TimeSeriesSplit(n_splits=N_SPLITS)
@@ -311,9 +450,17 @@ def run_meta_diagnostic(
             )
             continue
 
-        # Subset train/test to primary-BUY bars only
-        train_pb_mask = is_primary_buy[train_idx_purged]
-        test_pb_mask = is_primary_buy[test_idx]
+        # P2-e: per-fold primary score (linear ignores indices; ml_regression
+        # fits an RF regressor on train_idx_purged and predicts on both).
+        primary_scores = primary_score_fn(
+            X_all, meta_all, dates, train_idx_purged, test_idx,
+        )
+        train_primary = primary_scores["train_score"]
+        test_primary = primary_scores["test_score"]
+        # NaN scores (e.g. ml_regression couldn't fit) must drop out of the
+        # primary-BUY subset rather than polluting downstream metrics.
+        train_pb_mask = (~np.isnan(train_primary)) & (train_primary >= primary_threshold)
+        test_pb_mask = (~np.isnan(test_primary)) & (test_primary >= primary_threshold)
 
         train_pb_idx = train_idx_purged[train_pb_mask]
         test_pb_idx = test_idx[test_pb_mask]
@@ -417,6 +564,7 @@ def run_meta_diagnostic(
 
         sweep_payload = {
             "computed_at": datetime.now(timezone.utc).isoformat(),
+            "primary_name": primary_name,
             "primary_threshold": primary_threshold,
             "sweep_thresholds": list(sweep_thresholds),
             "meta_features": META_FEATURE_COLS,
@@ -436,6 +584,7 @@ def run_meta_diagnostic(
 
     result = {
         "computed_at": datetime.now(timezone.utc).isoformat(),
+        "primary_name": primary_name,
         "primary_threshold": primary_threshold,
         "trade_threshold": trade_threshold,
         "min_positive_rate": MIN_POSITIVE_RATE,
@@ -670,7 +819,42 @@ if __name__ == "__main__":
              f"{META_MODEL_PATH.relative_to(PROJECT_ROOT)}. Re-run --sweep first "
              "to verify the latest dataset still meets the production gate.",
     )
+    parser.add_argument(
+        "--primary",
+        type=str,
+        default="linear",
+        choices=["linear", "ml_regression", "ml"],
+        help="Which primary signal to gate. 'linear' (default) is the 7-factor "
+             "composite — historical behaviour. 'ml_regression' fits an RF "
+             "regressor on cs-rank label per fold and uses its prediction as "
+             "the primary — P2-e: tests whether the +9.73pp meta-label uplift "
+             "survives a different primary signal.",
+    )
+    parser.add_argument(
+        "--pit", action="store_true",
+        help="Apply point-in-time index-membership filter (audit P2-c) to the "
+             "meta-labeler dataset — drops (symbol, date) rows where the symbol "
+             "was not a member of --pit-index on that date. Tests whether the "
+             "meta-label uplift survives the survivorship-free universe.",
+    )
+    parser.add_argument(
+        "--pit-index", type=str, default="NIFTY200",
+        help="Index to apply for the PIT filter (default NIFTY200).",
+    )
     args = parser.parse_args()
+
+    primary_score_fn = None
+    if args.primary == "ml_regression":
+        primary_score_fn = make_ml_regression_primary_score_fn()
+    elif args.primary == "ml":
+        primary_score_fn = make_ml_primary_score_fn()
+
+    pit_universe = None
+    if args.pit:
+        from quant_engine.data.membership import MembershipRegistry
+        from quant_engine.data.turso_client import connect as _t_connect
+        with _t_connect() as _conn:
+            pit_universe = MembershipRegistry.from_turso(_conn, args.pit_index)
 
     if args.output:
         DIAG_OUTPUT_PATH = Path(args.output)
@@ -702,6 +886,10 @@ if __name__ == "__main__":
         primary_threshold=args.primary_threshold,
         trade_threshold=args.trade_threshold,
         sweep_thresholds=sweep_thresholds,
+        primary_score_fn=primary_score_fn,
+        primary_name=args.primary,
+        pit_universe=pit_universe,
+        pit_index_name=args.pit_index,
     )
 
     print("\n=== SIC-42 Meta-Labeler — Walk-forward OOS ===")

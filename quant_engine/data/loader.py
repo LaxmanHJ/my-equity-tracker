@@ -55,8 +55,32 @@ def load_price_history(symbol: str, limit: int = 365) -> pd.DataFrame:
 BENCHMARK_SYMBOLS = {"^NSEI", "NSEI", "NIFTY", "^NSEBANK", "^BSESN", "BSESN", "SENSEX"}
 
 
-def load_all_symbols() -> List[str]:
-    """Return all symbols that have cached price history, excluding benchmarks."""
+def load_all_symbols(as_of=None, index_name: str = "NIFTY200") -> List[str]:
+    """Return symbols available for research.
+
+    Default behaviour (``as_of=None``): every distinct symbol in
+    ``price_history``, minus benchmarks. This is the historical full-superset
+    universe — appropriate for the ML training/diagnostic pipeline whose
+    per-row PIT filter handles correctness at finer granularity.
+
+    Point-in-time mode (``as_of`` set): restrict to symbols that were
+    ``index_name`` members on that date — uses the ``index_membership`` table.
+    Useful for live-trading screens and "what should I be watching today"
+    style queries where you want a clean current roster rather than the
+    historical superset.
+    """
+    if as_of is not None:
+        # PIT mode: consult the membership registry.
+        from quant_engine.data.membership import MembershipRegistry
+        from datetime import date as _date_cls
+        conn = get_connection()
+        try:
+            registry = MembershipRegistry.from_turso(conn, index_name)
+        finally:
+            conn.close()
+        as_of_date = as_of if isinstance(as_of, _date_cls) else pd.Timestamp(as_of).date()
+        return sorted(registry.members_on(as_of_date, index_name))
+
     conn = get_connection()
     try:
         cursor = conn.execute("SELECT DISTINCT symbol FROM price_history")

@@ -396,12 +396,18 @@ export async function initDatabase() {
  * Save historical price data
  */
 export async function savePriceHistory(symbol, data) {
-  for (const item of data) {
-    await db.execute({
-      sql: `INSERT OR REPLACE INTO price_history (symbol, date, open, high, low, close, volume, adj_close)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  if (!data?.length) return;
+  const sql = `INSERT OR REPLACE INTO price_history (symbol, date, open, high, low, close, volume, adj_close)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  // Batch into transactions instead of one round-trip per row (~100x fewer
+  // network calls for multi-year backfills). Chunked to bound request size.
+  const CHUNK = 1000;
+  for (let i = 0; i < data.length; i += CHUNK) {
+    const stmts = data.slice(i, i + CHUNK).map((item) => ({
+      sql,
       args: nn(symbol, item.date, item.open, item.high, item.low, item.close, item.volume, item.adjClose)
-    });
+    }));
+    await db.batch(stmts, 'write');
   }
 }
 

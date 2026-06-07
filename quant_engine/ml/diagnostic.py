@@ -74,8 +74,41 @@ from sklearn.pipeline import Pipeline
 
 from quant_engine.ml.trainer import _build_pipeline
 
-from quant_engine.config import FACTOR_WEIGHTS, PROJECT_ROOT
+from quant_engine.config import FACTOR_WEIGHTS, ML_MODEL_DIR, PROJECT_ROOT
+from quant_engine.data.membership import apply_pit_row_filter
 from quant_engine.strategies.sicilian_strategy import SicilianStrategy
+
+
+def _load_deployed_rf_params(default: dict) -> tuple[dict, str]:
+    """P2-d: read the hyperparameters of the *deployed* RF from
+    ``ML_MODEL_DIR/metadata.json`` so the diagnostic measures the same model
+    that production serves.
+
+    Falls back to ``default`` (the module-level ``RF_PARAMS`` constant) when
+    metadata is absent / unreadable / missing the ``rf_params`` key — preserving
+    legacy behaviour. The returned ``source`` tag is recorded in the diagnostic
+    output so reviewers can tell at a glance which params drove the numbers.
+    """
+    meta_path = Path(ML_MODEL_DIR) / "metadata.json"
+    if not meta_path.exists():
+        logger.warning(
+            "diagnostic: %s missing — falling back to trainer.RF_PARAMS constant",
+            meta_path,
+        )
+        return dict(default), "trainer.RF_PARAMS (metadata.json missing)"
+    try:
+        with open(meta_path, "r") as fh:
+            meta = json.load(fh)
+        params = meta.get("rf_params")
+        if not isinstance(params, dict):
+            raise ValueError("metadata.rf_params missing or not a dict")
+        return dict(params), "metadata.json"
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        logger.warning(
+            "diagnostic: could not read rf_params from %s (%s) — falling back",
+            meta_path, exc,
+        )
+        return dict(default), f"trainer.RF_PARAMS (metadata parse error: {exc})"
 
 
 def _safe_pearsonr(a, b):
@@ -131,12 +164,6 @@ N_SPLITS = 5                    # walk-forward folds
 MIN_TEST_OBS = 50               # skip horizon if fewer settled obs in a fold
 MIN_TRAIN_AFTER_PURGE = 200     # skip fold if purged training set too small
 MIN_CROSS_N = 5                 # skip per-date group if cross-section is tiny (ml_regression)
-
-# Regression RF params: same as the classifier's RF_PARAMS minus class_weight
-# (not applicable to regression). max_features="sqrt" is retained so the RF's
-# feature sub-sampling matches the classifier — apples-to-apples comparison
-# isolates the change in problem framing (rank-regression vs 3-class).
-RF_PARAMS_REG = {k: v for k, v in RF_PARAMS.items() if k != "class_weight"}
 
 DIAG_OUTPUT_PATH = PROJECT_ROOT / "data" / "ml_diagnostic.json"
 
@@ -202,6 +229,8 @@ def _compute_linear_composite(df: pd.DataFrame,
 
 def build_dataset_with_horizons(
     required_feature_cols: Optional[list[str]] = None,
+    pit_universe=None,
+    pit_index_name: str = "NIFTY200",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build (X, meta) where:
@@ -293,6 +322,13 @@ def build_dataset_with_horizons(
                 delivery_score_series,
                 fii_fo_score_series,
                 intraday_feats,
+            )
+
+            # Point-in-time membership filter (P2-c follow-up): drop rows on
+            # which `symbol` was NOT an index member. No-op when pit_universe
+            # is None — preserves bit-identical legacy behaviour.
+            features = apply_pit_row_filter(
+                features, symbol, pit_universe, pit_index_name,
             )
 
             # Multi-horizon forward returns (no look-ahead: we shift backward).
@@ -538,19 +574,47 @@ def _horizon_metrics(
 
 
 # ── Main diagnostic run ──────────────────────────────────────────────────────
-def run_diagnostic() -> dict:
+def run_diagnostic(pit_universe=None, pit_index_name: str = "NIFTY200") -> dict:
     """
     Run the full walk-forward purged CV diagnostic and return results.
 
     Writes results to DIAG_OUTPUT_PATH as JSON so the FastAPI endpoint can
     serve cached results without re-running the (slow) walk-forward on
     every request.
+
+    Pass ``pit_universe`` (a ``MembershipRegistry``) to apply the
+    point-in-time membership filter (audit P2-c): every (symbol, date) row
+    where the symbol was NOT an index member on that date is dropped before
+    feature aggregation, so the diagnostic measures only what the strategy
+    would have actually been able to trade. ``None`` (default) preserves
+    legacy behaviour bit-identically.
     """
-    logger.info("Building diagnostic dataset …")
-    X, meta = build_dataset_with_horizons()
+    logger.info(
+        "Building diagnostic dataset … (PIT %s)",
+        "ENABLED" if pit_universe is not None else "disabled",
+    )
+    X, meta = build_dataset_with_horizons(
+        pit_universe=pit_universe,
+        pit_index_name=pit_index_name,
+    )
 
     dates = pd.DatetimeIndex(X.index)
     y = meta["label"].values
+
+    # P2-d: measure the *deployed* model, not the trainer's constant. Hyperparams
+    # drift every time `_tune_hyperparams` runs and the pickle gets refreshed; if
+    # we keep using the constant the diagnostic silently characterises a model
+    # different from what production serves.
+    rf_params_deployed, rf_params_source = _load_deployed_rf_params(RF_PARAMS)
+    rf_params_reg_deployed = {
+        k: v for k, v in rf_params_deployed.items() if k != "class_weight"
+    }
+    logger.info(
+        "Diagnostic RF params source=%s  (max_depth=%s, min_samples_leaf=%s)",
+        rf_params_source,
+        rf_params_deployed.get("max_depth"),
+        rf_params_deployed.get("min_samples_leaf"),
+    )
 
     logger.info(
         "Walk-forward CV: %d splits, label horizon=%d, purge=%d days",
@@ -610,7 +674,7 @@ def run_diagnostic() -> dict:
         X_test = X.iloc[test_idx]
         test_meta = meta.iloc[test_idx]
 
-        clf = _build_pipeline(RF_PARAMS)
+        clf = _build_pipeline(rf_params_deployed)
         clf.fit(X_train, y_train)
 
         classes = list(clf.named_steps["rf"].classes_)
@@ -636,7 +700,7 @@ def run_diagnostic() -> dict:
         y_reg_train = cs_rank_label.iloc[train_idx_purged].values
         reg_mask = ~np.isnan(y_reg_train)
         if reg_mask.sum() >= MIN_TRAIN_AFTER_PURGE:
-            reg = _build_regression_pipeline(RF_PARAMS_REG)
+            reg = _build_regression_pipeline(rf_params_reg_deployed)
             reg.fit(X_train.iloc[reg_mask], y_reg_train[reg_mask])
             reg_score = reg.predict(X_test)
             # The regressor output is already in [-1, +1] by training-label
@@ -730,18 +794,22 @@ def run_diagnostic() -> dict:
             "sell": SELL_RETURN_THRESHOLD,
         },
         "purge_days": LABEL_HORIZON_DAYS,
-        "rf_params": RF_PARAMS,
+        "pit_universe_active": pit_universe is not None,
+        "pit_index_name": pit_index_name if pit_universe is not None else None,
+        "rf_params": rf_params_deployed,
+        "rf_params_source": rf_params_source,
         "feature_cols": FEATURE_COLS,
         "folds": fold_details,
         "aggregate_pooled": aggregate,
         "aggregate_fold_means": fold_means,
         "factor_weights": FACTOR_WEIGHTS,
-        "rf_params_reg": RF_PARAMS_REG,
+        "rf_params_reg": rf_params_reg_deployed,
         "cs_rank_min_n": MIN_CROSS_N,
         "notes": (
             "Walk-forward TimeSeriesSplit with label-horizon purging "
             "(Lopez de Prado AFML Ch.10). Three tracks evaluated on identical "
-            "test rows: (1) ml — RF classifier at production RF_PARAMS, signed "
+            "test rows: (1) ml — RF classifier at deployed-model rf_params "
+            "loaded from metadata.json (see rf_params_source), signed "
             "score = P(BUY)-P(SELL); (2) linear — 7-factor Sicilian composite "
             "at production FACTOR_WEIGHTS; (3) ml_regression — SIC-41 "
             "Experiment A: RandomForestRegressor trained on cross-sectional "
@@ -778,11 +846,40 @@ def load_last_result() -> Optional[dict]:
 
 
 if __name__ == "__main__":
+    import argparse
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument(
+        "--pit", action="store_true",
+        help="Apply point-in-time index-membership filter (audit P2-c). "
+             "Drops (symbol, date) rows where the symbol was NOT a member of "
+             "--pit-index on that date. Loads the registry from Turso's "
+             "index_membership table. Default off — preserves legacy behaviour.",
+    )
+    cli.add_argument(
+        "--pit-index", type=str, default="NIFTY200",
+        help="Which index to apply for the PIT filter (default NIFTY200).",
+    )
+    args = cli.parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
-    result = run_diagnostic()
+
+    pit_registry = None
+    if args.pit:
+        from quant_engine.data.membership import MembershipRegistry
+        from quant_engine.data.turso_client import connect as _t_connect
+        with _t_connect() as _conn:
+            pit_registry = MembershipRegistry.from_turso(_conn, args.pit_index)
+        logger.info(
+            "PIT registry loaded for %s: %d members ever, %d distinct intervals",
+            args.pit_index,
+            len(pit_registry.all_symbols(args.pit_index)),
+            len(pit_registry._all_intervals),
+        )
+
+    result = run_diagnostic(pit_universe=pit_registry, pit_index_name=args.pit_index)
 
     print("\n=== Sicilian Diagnostic — Pooled Aggregate ===")
     print(f"samples={result['n_samples_total']}  folds={result['n_folds_completed']}")
