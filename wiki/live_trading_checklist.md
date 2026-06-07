@@ -18,6 +18,31 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
 
 ## CRITICAL — Would cause immediate loss or failure
 
+### C0. PIT CPCV/DSR Ship Gate (2026-06-04 — audit terminal finding)
+- [ ] **No live capital deploys behind any ML or factor track until
+      `python -m quant_engine.ml.cpcv_diagnostic --pit` reports
+      `DSR > 0.95` AND `PBO < 0.15` for at least one track (LO or LS).**
+- [ ] The 2026-06-04 run produced `LO DSR = 0.000` and `LS DSR = 0.000`
+      for all three tracks (`ml`, `linear`, `ml_regression`) and
+      `PBO = 0.585`. Until a new signal or wider universe clears this
+      gate, the long-only signal queue must not size new positions
+      on the legacy linear or RF paths.
+- [ ] Every re-run of this gate must record `pit_universe_active: true`,
+      the exact `n_trials` used for DSR, and `n_combinations` in
+      `data/cpcv_diagnostic.json` — they're the audit trail.
+
+**Why it matters**: The historical "+0.040 IC" and "+9.73 pp meta-label
+uplift" headlines deflated to **no shippable edge** under
+survivorship-corrected, multiple-testing-corrected evaluation. Live
+capital behind any of those configurations is trading a signal that
+wins ~34 % of the time on honest data. See
+[ml_audit_2026_05_21.md §2026-06-04 Terminal Findings](concepts/ml_audit_2026_05_21.md#2026-06-04-terminal-findings).
+**Files**: `quant_engine/ml/cpcv_diagnostic.py`,
+`quant_engine/scoring/composite.py`,
+`src/services/signalQueueService.js`.
+
+---
+
 ### C1. Backtest vs Live Strategy Mismatch
 - [ ] Unify factor set: backtest and live must use the **same 7 technical factors** (no analyst consensus, PE/PB, growth in either path)
 - [ ] Remove analyst consensus from `sicilian/engine.py` live scoring (look-ahead biased — 2026 ratings applied to 2023 backtest bars)
