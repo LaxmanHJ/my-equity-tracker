@@ -91,15 +91,34 @@ wins ~34 % of the time on honest data. See
 
 ---
 
-### C5. ML Model Has Data Leakage
-- [ ] Remove analyst consensus from ML feature set (`quant_engine/ml/trainer.py`)
-- [ ] Fix sector rotation feature: use NSE sector indices (not portfolio peer returns) in all code paths including training
-- [ ] Add holdout set: reserve last 20% of time-ordered data, never used in hyperparameter search
-- [ ] Report per-class precision/recall (not just accuracy); halt deploy if BUY recall < 40%
-- [ ] Document true OOS accuracy separately from CV accuracy
+### C5. ML Model Has Data Leakage — CLOSED 2026-06-04 by audit
+- [x] **2026-06-04**: Item largely superseded by the P0-P2 audit
+      (see [C0](#c0-pit-cpcvdsr-ship-gate-2026-06-04--audit-terminal-finding)
+      and [ml_audit_2026_05_21.md §2026-06-04 Terminal Findings](concepts/ml_audit_2026_05_21.md#2026-06-04-terminal-findings)).
+      Per-line resolution below.
+- [x] *Remove analyst consensus from ML feature set* — done. Audit also
+      removed `pcr_score`, `fii_flow_score`; trainer never used analyst features.
+- [x] *Fix sector rotation feature: use NSE sector indices* — done via P1-e
+      (`quant_engine/ml/features.py :: build_feature_frame` is the single
+      source of truth shared by trainer + strategy).
+- [x] *Add holdout set* — **exceeded.** P2-a (CPCV, `quant_engine/ml/cpcv.py`)
+      + P2-b (DSR, `quant_engine/ml/validation.py`) is the stricter replacement.
+- [x] *Report per-class precision/recall* — `class_distribution` recorded
+      in `metadata.json` on every retrain.
+- [x] *Document true OOS accuracy separately from CV accuracy* — every
+      `ml_diagnostic.json` records `pit_universe_active`, `rf_params_source`,
+      per-fold IC distributions.
+- [x] *Halt deploy if BUY recall < 40%* — **moot.** C0 ship gate
+      (DSR > 0.95 AND PBO < 0.15) is strictly stronger and blocks deploy
+      regardless of any per-class threshold.
 
-**Why it matters**: CV accuracy ~75% is overstated; true out-of-sample likely 55-60%.  
-**Files**: `quant_engine/ml/trainer.py` (lines 75-449), `quant_engine/ml/predictor.py`
+**Why it matters (historical)**: CV accuracy was overstated. **Resolution**:
+the audit found that the deeper problem was survivorship + multiple-testing
+in the universe, not the model. C5's items are obsolete because the audit's
+infrastructure (`cpcv_diagnostic.py --pit`) measures the right thing
+directly. See the closing record in the audit doc.
+**Files**: `quant_engine/ml/trainer.py`, `quant_engine/ml/predictor.py`,
+`quant_engine/ml/diagnostic.py`, `quant_engine/ml/cpcv_diagnostic.py`.
 
 ---
 
@@ -188,6 +207,67 @@ wins ~34 % of the time on honest data. See
 - [ ] Verify `.gitignore` includes `.env` before next commit
 
 **Files**: `.env`, `.gitignore`
+
+---
+
+## RESEARCH PRIORITIES — post-2026-06-04 audit
+
+The audit closed with no track passing the [C0](#c0-pit-cpcvdsr-ship-gate-2026-06-04--audit-terminal-finding)
+ship gate on the honest PIT universe. The path to live capital now runs
+through *finding a signal that clears the gate*, not through productionizing
+the current one. Every R-item below must be evaluated via
+`python -m quant_engine.ml.cpcv_diagnostic --pit` and must meet
+**PIT LS Sharpe > ~0.6, DSR > 0.95, PBO < 0.15** before promotion to
+production routing in `composite.py`. The bar to beat is the audit's
+post-PIT ml_regression LS Sharpe of 0.595 with DSR 0.000.
+
+Ordered by expected lift / cost. See
+[ml_audit_2026_05_21.md §H](concepts/ml_audit_2026_05_21.md#h-open-research-items-post-audit)
+for the full reasoning behind the ranking.
+
+### R1. Alternative horizons (1-3d)
+- [ ] Extend `quant_engine/ml/diagnostic.py` and `cpcv_diagnostic.py`
+      to evaluate 1d, 3d horizons alongside 20d
+- [ ] Cross-sectional momentum/reversal at short horizons has different
+      signal/noise properties from 20d trend-following — the wrong window
+      for our current factor set is itself a hypothesis worth ruling out
+- [ ] ~50 LOC; cheapest possible test of "is the current feature set
+      shippable at any horizon?"
+
+### R2. Universe expansion to Nifty 500 PIT
+- [ ] Source historical Nifty 500 membership (CMIE Prowess preferred,
+      NSE corporate-actions archive + Nifty Indices PDFs fallback)
+- [ ] Backfill OHLCV for the additional ~300 symbols (Bhavcopy fetcher
+      `backfill_bhavcopy.py` already does this — proven on Nifty 200)
+- [ ] Re-run `cpcv_diagnostic --pit --pit-index NIFTY500`
+- [ ] **Expected lift**: ~3× SE shrinkage at same signal strength → a
+      0.6 LS Sharpe at the current N could clear DSR at the larger N
+
+### R3. Fracdiff features (AFML Ch.5)
+- [ ] Add `fracdiff(close, d≈0.35)` to `quant_engine/ml/features.py`
+- [ ] Stationarized prices preserve memory that raw returns destroy
+- [ ] ~40 LOC; expected lift in published benchmarks 2-5 bp IC
+
+### R4. Order-flow / delivery-pct signals
+- [ ] Build delivery-pct rolling z-score features in
+      `quant_engine/factors/delivery.py` (data already in `delivery_data` table)
+- [ ] Add intraday absorption / OBV-style features from existing 15-min bars
+- [ ] Different theory of edge than factor scores — likely complementary
+      diversification even if marginal individually
+
+### R5. Event-driven (earnings, analyst revisions)
+- [ ] Backfill event tables: earnings dates + surprise magnitude, sell-side
+      revision counts
+- [ ] Structural alpha source in EM equities — highest-confidence direction
+      academically; highest data-sourcing cost
+- [ ] Gate the same way as R1-R4 via `cpcv_diagnostic --pit`
+
+### R6. Dollar bars (P3-c — speculative)
+- [ ] Build dollar bars from 15-min intraday data
+- [ ] AFML-recommended bar construction; ~300 LOC
+- [ ] Defer until at least one of R1-R5 produces a passing signal —
+      proves the feature/horizon search isn't the bottleneck before
+      attempting a more expensive bar redesign
 
 ---
 
