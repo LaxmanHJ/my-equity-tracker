@@ -62,6 +62,13 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+# Load .env BEFORE importing quant_engine modules: turso_client caches
+# TURSO_URL/TOKEN at its (transitive) import time, so .env must be loaded first
+# or connect() sees None. cpcv/validation import turso_client before
+# diagnostic's own load_dotenv would run.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
 from quant_engine.config import PROJECT_ROOT
 from quant_engine.ml.cpcv import cpcv_splits
 from quant_engine.ml.validation import (
