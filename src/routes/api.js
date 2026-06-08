@@ -48,7 +48,7 @@ import { createEodPriceProvider } from '../risk/priceProvider.js';
 import { computePositionSizes } from '../risk/positionSizing.js';
 import { riskLimits } from '../config/riskLimits.js';
 import { generateQueue, executeSignal, rejectSignal, evaluateSignal } from '../services/signalQueueService.js';
-import { getMarketMovers } from '../services/angelOneMarketData.js';
+import { getEquityMovers } from '../services/angelOneMarketData.js';
 
 const router = express.Router();
 
@@ -985,13 +985,14 @@ router.get('/sectors/momentum', async (req, res) => {
 
 /**
  * GET /api/market/movers
- * Daily biggest winners and losers from Angel One (F&O NEAR-month futures),
- * up to 5 each, tagged with sector. Query param: limit (default 5, max 10).
+ * Daily biggest winners and losers in the NSE cash/equity segment, computed by
+ * scanning the F&O stock universe via Angel quotes. Up to 5 each, tagged with
+ * sector. Query param: limit (default 5, max 10).
  */
 router.get('/market/movers', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 5, 10);
-    const data = await getMarketMovers(limit);
+    const data = await getEquityMovers(limit);
     res.json(data);
   } catch (error) {
     console.error('Market movers error:', error.message);

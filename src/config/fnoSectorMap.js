@@ -20,7 +20,9 @@ export const FNO_SECTOR_MAP = {
   HDFCLIFE: 'Insurance', SBILIFE: 'Insurance', ICICIPRULI: 'Insurance', ICICIGI: 'Insurance',
   LICI: 'Insurance', HDFCAMC: 'Financial Services', JIOFIN: 'Financial Services',
   IEX: 'Financial Services', BSE: 'Financial Services', ANGELONE: 'Financial Services',
-  CDSL: 'Financial Services', MANAPPURAM: 'Financial Services', M_MFIN: 'Financial Services',
+  CDSL: 'Financial Services', MANAPPURAM: 'Financial Services', 'M&MFIN': 'Financial Services',
+  LTF: 'Financial Services', IIFL: 'Financial Services', PNBHOUSING: 'Housing Finance',
+  PEL: 'Financial Services', ABCAPITAL: 'Financial Services',
 
   // IT Services
   TCS: 'IT Services', INFY: 'IT Services', WIPRO: 'IT Services', HCLTECH: 'IT Services',
@@ -36,7 +38,7 @@ export const FNO_SECTOR_MAP = {
   METROPOLIS: 'Healthcare',
 
   // Auto & Auto Components
-  MARUTI: 'Auto', TATAMOTORS: 'Auto', M_M: 'Auto', BAJAJ_AUTO: 'Auto',
+  MARUTI: 'Auto', TATAMOTORS: 'Auto', 'M&M': 'Auto', 'BAJAJ-AUTO': 'Auto',
   HEROMOTOCO: 'Auto', EICHERMOT: 'Auto', TVSMOTOR: 'Auto', ASHOKLEY: 'Auto',
   BOSCHLTD: 'Auto Components', MOTHERSON: 'Auto Components', BHARATFORG: 'Auto Components',
   BALKRISIND: 'Auto Components', MRF: 'Auto Components', APOLLOTYRE: 'Auto Components',
@@ -45,7 +47,7 @@ export const FNO_SECTOR_MAP = {
   // FMCG & Consumer
   HINDUNILVR: 'FMCG', ITC: 'FMCG', NESTLEIND: 'FMCG', BRITANNIA: 'FMCG',
   DABUR: 'FMCG', MARICO: 'FMCG', GODREJCP: 'FMCG', COLPAL: 'FMCG',
-  TATACONSUM: 'FMCG', UBL: 'FMCG', MCDOWELL_N: 'FMCG', VBL: 'FMCG',
+  TATACONSUM: 'FMCG', UBL: 'FMCG', UNITDSPR: 'FMCG', VBL: 'FMCG',
   PGHH: 'FMCG', EMAMILTD: 'FMCG',
   TITAN: 'Consumer Durables', HAVELLS: 'Consumer Durables', VOLTAS: 'Consumer Durables',
   CROMPTON: 'Consumer Durables', DIXON: 'Consumer Durables', WHIRLPOOL: 'Consumer Durables',
@@ -104,6 +106,20 @@ export const FNO_SECTOR_MAP = {
   CAMS: 'Financial Services', KEI: 'Capital Goods', CGPOWER: 'Capital Goods',
   HFCL: 'Telecom', GODREJIND: 'Diversified', BERGEPAINT: 'Paints', ASIANPAINT: 'Paints',
   KPITTECH: 'IT Services', TATAELXSI: 'IT Services', CYIENT: 'IT Services',
+
+  // Supplementary F&O underlyings (filled from live FUTSTK list)
+  INDIANB: 'Banking', YESBANK: 'Banking', UNIONBANK: 'Banking',
+  BAJAJHLDNG: 'Financial Services', MOTILALOFS: 'Financial Services', KFINTECH: 'Financial Services',
+  'NAM-INDIA': 'Financial Services', SAMMAANCAP: 'Financial Services', MCX: 'Financial Services',
+  '360ONE': 'Financial Services', NUVAMA: 'Financial Services', MFSL: 'Insurance',
+  FORCEMOT: 'Auto', HYUNDAI: 'Auto', TMPV: 'Auto',
+  SONACOMS: 'Auto Components', UNOMINDA: 'Auto Components',
+  MANKIND: 'Pharma', PATANJALI: 'FMCG', RADICO: 'FMCG', GODFRYPHLP: 'FMCG',
+  ADANIGREEN: 'Power & Utilities', WAAREEENER: 'Power & Utilities', PREMIERENE: 'Power & Utilities',
+  POWERINDIA: 'Power & Utilities', 'GVT&D': 'Capital Goods', KAYNES: 'Capital Goods',
+  PGEL: 'Consumer Durables', AMBER: 'Consumer Durables',
+  NAUKRI: 'Internet', ETERNAL: 'Internet', SWIGGY: 'Internet',
+  COCHINSHIP: 'Defence',
 };
 
 /**
@@ -123,11 +139,21 @@ export function baseSymbolFromTrading(tradingSymbol) {
 }
 
 /**
- * Resolve a sector for an Angel trading symbol. Returns "—" when unknown.
+ * Resolve a sector for an Angel derivatives trading symbol. Returns "—" when unknown.
  */
 export function sectorForTradingSymbol(tradingSymbol) {
   const base = baseSymbolFromTrading(tradingSymbol);
   return FNO_SECTOR_MAP[base] || '—';
 }
 
-export default { FNO_SECTOR_MAP, baseSymbolFromTrading, sectorForTradingSymbol };
+/**
+ * Resolve a sector for a plain NSE equity symbol (e.g. "RELIANCE", "M&M",
+ * "BAJAJ-AUTO", "RELIANCE-EQ"). Returns "—" when unknown.
+ */
+export function sectorForSymbol(symbol) {
+  if (!symbol) return '—';
+  const key = String(symbol).toUpperCase().trim().replace(/-EQ$/i, '');
+  return FNO_SECTOR_MAP[key] || '—';
+}
+
+export default { FNO_SECTOR_MAP, baseSymbolFromTrading, sectorForTradingSymbol, sectorForSymbol };

@@ -1254,7 +1254,8 @@ async function loadMarketMovers() {
     const meta = document.getElementById('moversMeta');
     if (meta) {
       const when = new Date(data.asOf).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
-      meta.textContent = `Biggest ${data.segment || 'F&O'} winners & losers · as of ${when} IST`;
+      const scanned = data.universe ? ` · ${data.universe} F&O stocks scanned` : '';
+      meta.textContent = `Biggest ${data.segment || 'NSE equity'} winners & losers${scanned} · as of ${when} IST`;
     }
   } catch (err) {
     console.error('Market movers load failed:', err);

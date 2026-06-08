@@ -1,12 +1,17 @@
 import axios from 'axios';
 import { getSession, getAuthHeaders, refreshSession } from './angelOneAuth.js';
-import { baseSymbolFromTrading, sectorForTradingSymbol } from '../config/fnoSectorMap.js';
+import { sectorForSymbol } from '../config/fnoSectorMap.js';
+import { loadFnoUniverse } from './angelScripMaster.js';
 
 const BASE_URL = 'https://apiconnect.angelone.in/rest/secure/angelbroking/marketData/v1';
 
 const PCR_URL = `${BASE_URL}/putCallRatio`;
 const OI_BUILDUP_URL = `${BASE_URL}/OIBuildup`;
 const GAINERS_LOSERS_URL = `${BASE_URL}/gainersLosers`;
+const QUOTE_URL = 'https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/';
+
+const QUOTE_BATCH_SIZE = 50;       // Angel hard cap: 50 tokens per quote request
+const MOVERS_CACHE_TTL_MS = 60_000; // serve a cached scan for 60s to avoid re-hammering on every page load
 
 const MIN_GAP_MS = 1100;
 const RATE_LIMIT_BACKOFF_MS = 1500;
@@ -100,41 +105,76 @@ export async function fetchGainersLosers(datatype = 'gainers', expirytype = 'NEA
 }
 
 /**
- * Daily biggest winners and losers (F&O segment, NEAR-month futures).
+ * Fetch full-mode quotes for a list of NSE tokens (max 50 per request).
+ * @param {string[]} tokens NSE scrip tokens
+ * @returns {Promise<Array>} the `fetched` rows (tradingSymbol, ltp, netChange, percentChange, …)
+ */
+export async function fetchQuotes(tokens) {
+    if (!tokens?.length) return [];
+    const data = await apiCall('post', QUOTE_URL, {
+        mode: 'FULL',
+        exchangeTokens: { NSE: tokens },
+    });
+    return data?.fetched || [];
+}
+
+let moversCache = { at: 0, limit: 0, data: null };
+
+/**
+ * Daily biggest winners and losers in the NSE cash (equity) segment.
  *
- * Angel exposes movers only for the derivatives segment, so these are the largest
- * percentage movers among NEAR-month stock futures — a solid proxy for the day's
- * biggest winners/losers. Each row is normalised and tagged with a sector.
+ * Angel has no equity movers endpoint, so we compute them: scan the F&O stock
+ * universe (~210 liquid underlyings), pull each name's cash quote in batches of
+ * 50, then rank by intraday % change. Each row is tagged with its sector.
+ * Results are cached for 60s so repeated page loads don't re-run the scan.
  *
  * @param {number} limit max rows per side (default 5)
- * @returns {Promise<{gainers: Array, losers: Array, asOf: string, segment: string}>}
+ * @returns {Promise<{gainers: Array, losers: Array, asOf: string, segment: string, universe: number}>}
  */
-export async function getMarketMovers(limit = 5) {
-    const [rawGainers, rawLosers] = await Promise.all([
-        fetchGainersLosers('PercPriceGainers', 'NEAR').catch(() => []),
-        fetchGainersLosers('PercPriceLosers', 'NEAR').catch(() => []),
-    ]);
+export async function getEquityMovers(limit = 5) {
+    const now = Date.now();
+    if (moversCache.data && moversCache.limit === limit && (now - moversCache.at) < MOVERS_CACHE_TTL_MS) {
+        return moversCache.data;
+    }
 
-    const normalise = (row) => ({
-        symbol: baseSymbolFromTrading(row.tradingSymbol),
-        tradingSymbol: row.tradingSymbol,
-        sector: sectorForTradingSymbol(row.tradingSymbol),
-        ltp: row.ltp,
-        netChange: row.netChange,
-        percentChange: row.percentChange,
-    });
+    const universe = await loadFnoUniverse();
+    const tokens = universe.map(u => u.token);
 
-    const gainers = (Array.isArray(rawGainers) ? rawGainers : [])
-        .map(normalise)
-        .sort((a, b) => b.percentChange - a.percentChange)
-        .slice(0, limit);
+    const quotes = [];
+    for (let i = 0; i < tokens.length; i += QUOTE_BATCH_SIZE) {
+        const batch = tokens.slice(i, i + QUOTE_BATCH_SIZE);
+        try {
+            quotes.push(...await fetchQuotes(batch));
+        } catch (e) {
+            console.warn(`[marketData] quote batch ${i / QUOTE_BATCH_SIZE} failed:`, e.message);
+        }
+    }
 
-    const losers = (Array.isArray(rawLosers) ? rawLosers : [])
-        .map(normalise)
-        .sort((a, b) => a.percentChange - b.percentChange)
-        .slice(0, limit);
+    const rows = quotes
+        .filter(q => Number.isFinite(q.percentChange))
+        .map(q => {
+            const symbol = String(q.tradingSymbol || '').replace(/-EQ$/i, '');
+            return {
+                symbol,
+                sector: sectorForSymbol(symbol),
+                ltp: q.ltp,
+                netChange: q.netChange,
+                percentChange: q.percentChange,
+            };
+        });
 
-    return { gainers, losers, asOf: new Date().toISOString(), segment: 'F&O (NEAR)' };
+    const gainers = [...rows].sort((a, b) => b.percentChange - a.percentChange).slice(0, limit);
+    const losers = [...rows].sort((a, b) => a.percentChange - b.percentChange).slice(0, limit);
+
+    const result = {
+        gainers,
+        losers,
+        asOf: new Date().toISOString(),
+        segment: 'NSE Equity',
+        universe: rows.length,
+    };
+    moversCache = { at: now, limit, data: result };
+    return result;
 }
 
 // CLI: node src/services/angelOneMarketData.js [pcr|oi|gainers|movers]
@@ -158,10 +198,10 @@ if (process.argv[1]?.includes('angelOneMarketData')) {
             const data = await fetchGainersLosers('PercPriceGainers', 'NEAR');
             console.log(JSON.stringify(data, null, 2));
         } else if (cmd === 'movers') {
-            console.log('─── Daily Movers (F&O NEAR, top 5) ───');
-            console.log(JSON.stringify(await getMarketMovers(5), null, 2));
+            console.log('─── Daily Equity Movers (NSE cash, top 5) ───');
+            console.log(JSON.stringify(await getEquityMovers(5), null, 2));
         }
     })().catch(err => { console.error('Error:', err.response?.data || err.message); process.exit(1); });
 }
 
-export default { fetchPCR, fetchOIBuildup, fetchAllOIBuildup, fetchGainersLosers, getMarketMovers };
+export default { fetchPCR, fetchOIBuildup, fetchAllOIBuildup, fetchGainersLosers, fetchQuotes, getEquityMovers };

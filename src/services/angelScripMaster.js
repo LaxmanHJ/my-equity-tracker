@@ -5,16 +5,43 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE = path.resolve(__dirname, '../../data/angel_scrip_master.json');
+const FNO_UNIVERSE_FILE = path.resolve(__dirname, '../../data/angel_fno_universe.json');
 const SCRIP_URL = 'https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json';
 const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 
 let tokenMap = null; // { "RELIANCE": { token: "2885", name, exch_seg, ... } }
+let fnoUniverse = null; // [ { symbol: "RELIANCE", token: "2885" }, ... ] — F&O stock underlyings, cash tokens
 
-function isCacheFresh() {
+function isCacheFresh(file = CACHE_FILE) {
     try {
-        const stat = fs.statSync(CACHE_FILE);
+        const stat = fs.statSync(file);
         return (Date.now() - stat.mtimeMs) < MAX_CACHE_AGE_MS;
     } catch { return false; }
+}
+
+/**
+ * Build the F&O stock universe: every stock-future (FUTSTK) underlying mapped to
+ * its NSE cash (-EQ) token. Test scrips (…NSETEST…) are dropped. Underlyings with
+ * no matching cash listing are skipped.
+ * @param {Array} rows raw scrip-master rows
+ * @param {Object} eqMap token map (base symbol → entry) already built from the same rows
+ */
+function buildFnoUniverse(rows, eqMap) {
+    const names = new Set();
+    for (const row of rows) {
+        if (row.exch_seg === 'NFO' && row.instrumenttype === 'FUTSTK' &&
+            row.name && !/NSETEST/i.test(row.name)) {
+            names.add(row.name);
+        }
+    }
+    const universe = [];
+    for (const name of names) {
+        const entry = eqMap[name];
+        if (entry && entry.instrumenttype === 'EQ') {
+            universe.push({ symbol: name, token: entry.token });
+        }
+    }
+    return universe;
 }
 
 function buildTokenMap(rows) {
@@ -85,6 +112,11 @@ export async function refreshScripMaster() {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(map));
     tokenMap = map;
     console.log(`[scripMaster] Cached ${Object.keys(map).length} NSE-EQ + NSE/BSE index symbols`);
+
+    fnoUniverse = buildFnoUniverse(rows, map);
+    fs.writeFileSync(FNO_UNIVERSE_FILE, JSON.stringify(fnoUniverse));
+    console.log(`[scripMaster] Cached ${fnoUniverse.length} F&O stock underlyings (cash tokens)`);
+
     return map;
 }
 
@@ -100,6 +132,27 @@ export async function loadScripMaster(force = false) {
         }
     }
     return refreshScripMaster();
+}
+
+/**
+ * Load the F&O stock universe (FUTSTK underlyings → NSE cash tokens).
+ * Reads the dedicated cache when fresh; otherwise rebuilds it via a scrip-master
+ * refresh (the universe is produced as a by-product of that same download).
+ * @returns {Promise<Array<{symbol: string, token: string}>>}
+ */
+export async function loadFnoUniverse(force = false) {
+    if (fnoUniverse && !force) return fnoUniverse;
+    if (!force && isCacheFresh(FNO_UNIVERSE_FILE)) {
+        try {
+            fnoUniverse = JSON.parse(fs.readFileSync(FNO_UNIVERSE_FILE, 'utf8'));
+            console.log(`[scripMaster] Loaded ${fnoUniverse.length} F&O underlyings from cache`);
+            return fnoUniverse;
+        } catch (e) {
+            console.warn('[scripMaster] F&O universe cache read failed, re-downloading:', e.message);
+        }
+    }
+    await refreshScripMaster();
+    return fnoUniverse || [];
 }
 
 /**
@@ -146,4 +199,4 @@ if (process.argv[1]?.includes('angelScripMaster')) {
     })();
 }
 
-export default { loadScripMaster, refreshScripMaster, getToken, getTokens };
+export default { loadScripMaster, refreshScripMaster, getToken, getTokens, loadFnoUniverse };
