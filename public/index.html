@@ -122,6 +122,54 @@
           <canvas id="performersChart"></canvas>
         </div>
       </div>
+
+      <!-- Daily Market Movers (F&O) -->
+      <div class="holdings-container glass" style="margin-top:1.5rem;">
+        <div class="section-header">
+          <h2>Daily Market Movers</h2>
+          <span id="moversMeta" style="font-size:0.78rem;color:var(--text-muted);">Biggest F&amp;O winners &amp; losers · loading…</span>
+        </div>
+        <div class="movers-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;padding:0.5rem 0;">
+          <div>
+            <h3 style="font-size:0.95rem;margin:0 0 0.6rem;color:#10b981;">▲ Top Gainers</h3>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Stock</th>
+                    <th>Sector</th>
+                    <th>LTP</th>
+                    <th>Net Chg.</th>
+                    <th>% Chg.</th>
+                  </tr>
+                </thead>
+                <tbody id="gainersBody">
+                  <tr><td colspan="5" class="loading-cell"><div class="loading-spinner"></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h3 style="font-size:0.95rem;margin:0 0 0.6rem;color:#ef4444;">▼ Top Losers</h3>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Stock</th>
+                    <th>Sector</th>
+                    <th>LTP</th>
+                    <th>Net Chg.</th>
+                    <th>% Chg.</th>
+                  </tr>
+                </thead>
+                <tbody id="losersBody">
+                  <tr><td colspan="5" class="loading-cell"><div class="loading-spinner"></div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Analysis Section -->

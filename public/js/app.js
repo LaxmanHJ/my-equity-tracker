@@ -16,10 +16,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initNavigation();
   initModals();
   loadPortfolio();
+  loadMarketMovers();
   checkMarketStatus();
 
   // Auto-refresh every 5 minutes
   setInterval(loadPortfolio, 5 * 60 * 1000);
+  setInterval(loadMarketMovers, 5 * 60 * 1000);
 });
 
 // =============================================
@@ -1237,6 +1239,55 @@ function checkMarketStatus() {
 // =============================================
 // Utilities
 // =============================================
+
+// =============================================
+// Daily Market Movers (F&O winners / losers)
+// =============================================
+
+async function loadMarketMovers() {
+  try {
+    const res = await fetch(`${API_BASE}/market/movers?limit=5`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderMovers('gainersBody', data.gainers);
+    renderMovers('losersBody', data.losers);
+    const meta = document.getElementById('moversMeta');
+    if (meta) {
+      const when = new Date(data.asOf).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      meta.textContent = `Biggest ${data.segment || 'F&O'} winners & losers · as of ${when} IST`;
+    }
+  } catch (err) {
+    console.error('Market movers load failed:', err);
+    const msg = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1.2rem;">Unavailable</td></tr>`;
+    ['gainersBody', 'losersBody'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = msg;
+    });
+    const meta = document.getElementById('moversMeta');
+    if (meta) meta.textContent = 'Market movers unavailable';
+  }
+}
+
+function renderMovers(bodyId, rows) {
+  const tbody = document.getElementById(bodyId);
+  if (!tbody) return;
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1.2rem;">No data</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const cls = r.percentChange >= 0 ? 'change-positive' : 'change-negative';
+    const sign = r.percentChange >= 0 ? '+' : '';
+    return `
+      <tr>
+        <td><span class="stock-symbol">${r.symbol}</span></td>
+        <td style="font-size:0.82rem;color:var(--text-muted);">${r.sector || '—'}</td>
+        <td>${formatCurrency(r.ltp)}</td>
+        <td class="${cls}" style="font-size:0.85rem;">${sign}${(r.netChange ?? 0).toFixed(2)}</td>
+        <td class="${cls}">${sign}${(r.percentChange ?? 0).toFixed(2)}%</td>
+      </tr>`;
+  }).join('');
+}
 
 function formatCurrency(amount) {
   if (amount === null || amount === undefined) return '₹0';

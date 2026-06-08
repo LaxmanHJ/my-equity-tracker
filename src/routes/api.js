@@ -48,6 +48,7 @@ import { createEodPriceProvider } from '../risk/priceProvider.js';
 import { computePositionSizes } from '../risk/positionSizing.js';
 import { riskLimits } from '../config/riskLimits.js';
 import { generateQueue, executeSignal, rejectSignal, evaluateSignal } from '../services/signalQueueService.js';
+import { getMarketMovers } from '../services/angelOneMarketData.js';
 
 const router = express.Router();
 
@@ -975,6 +976,26 @@ router.get('/sectors/momentum', async (req, res) => {
   } catch (error) {
     console.error('Sector momentum error:', error);
     res.status(500).json({ error: 'Failed to get sector momentum' });
+  }
+});
+
+// ============================================
+// Market Movers (daily winners / losers)
+// ============================================
+
+/**
+ * GET /api/market/movers
+ * Daily biggest winners and losers from Angel One (F&O NEAR-month futures),
+ * up to 5 each, tagged with sector. Query param: limit (default 5, max 10).
+ */
+router.get('/market/movers', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5, 10);
+    const data = await getMarketMovers(limit);
+    res.json(data);
+  } catch (error) {
+    console.error('Market movers error:', error.message);
+    res.status(502).json({ error: 'Failed to fetch market movers' });
   }
 });
 
