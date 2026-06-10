@@ -886,6 +886,10 @@ body::before {
   border-left-color: var(--danger);
 }
 
+.toast.warning {
+  border-left-color: var(--warning, #f0ad4e);
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;

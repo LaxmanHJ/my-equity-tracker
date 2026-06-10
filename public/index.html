@@ -170,6 +170,71 @@
           </div>
         </div>
       </div>
+
+      <!-- VRP / IV Collection Progress (SIC-92) -->
+      <div class="holdings-container glass" style="margin-top:1.5rem;">
+        <div class="section-header">
+          <h2>VRP Data Collection</h2>
+          <span id="ivMeta" style="font-size:0.78rem;color:var(--text-muted);">NIFTY option-chain snapshots toward the 60-day decision gate · loading…</span>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:1.2rem;align-items:center;padding:0.6rem 0;">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:0.35rem;">
+              <span>Collected trading days</span>
+              <span id="ivProgressLabel">–</span>
+            </div>
+            <div style="height:10px;border-radius:6px;background:var(--bg-tertiary);overflow:hidden;">
+              <div id="ivProgressBar" style="height:100%;width:0%;border-radius:6px;background:linear-gradient(90deg,#6366f1,#10b981);transition:width 0.4s;"></div>
+            </div>
+            <div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem;">Pre-registered gate: capped net Sharpe &gt; 0.5 at 60 days. Until then: collect, don't trade.</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:0.75rem;color:var(--text-muted);">ATM IV (~30d)</div>
+            <div id="ivAtm" style="font-size:1.5rem;font-weight:700;">–</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:0.75rem;color:var(--text-muted);">25Δ Skew (RR)</div>
+            <div id="ivSkew" style="font-size:1.5rem;font-weight:700;">–</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:0.75rem;color:var(--text-muted);">Tracked expiry</div>
+            <div id="ivExpiry" style="font-size:1.05rem;font-weight:600;">–</div>
+            <div id="ivDte" style="font-size:0.72rem;color:var(--text-muted);"></div>
+          </div>
+        </div>
+
+        <!-- Paper condor book — simulated, no broker orders -->
+        <div style="border-top:1px solid var(--bg-tertiary);margin-top:0.8rem;padding-top:0.9rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem;">
+            <div>
+              <span style="font-size:0.95rem;font-weight:600;">Paper Condor Book</span>
+              <span style="font-size:0.74rem;color:var(--text-muted);margin-left:0.6rem;">simulated only — model-priced entries, exact settlement at expiry</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.9rem;">
+              <span id="paperPnlTotal" style="font-size:0.85rem;font-weight:600;"></span>
+              <button class="btn btn-secondary" id="openCondorBtn" style="font-size:0.78rem;padding:0.35rem 0.8rem;">📓 Open paper condor</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" style="font-size:0.82rem;">
+              <thead>
+                <tr>
+                  <th>Opened</th>
+                  <th>Expiry</th>
+                  <th>Structure (P-wing / sell P / sell C / C-wing)</th>
+                  <th>Credit (₹)</th>
+                  <th>Max loss (₹)</th>
+                  <th>Status</th>
+                  <th>P&amp;L (₹)</th>
+                </tr>
+              </thead>
+              <tbody id="paperBookBody">
+                <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:1rem;">No paper positions yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Analysis Section -->

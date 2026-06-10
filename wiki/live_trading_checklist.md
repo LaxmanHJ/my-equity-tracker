@@ -124,6 +124,34 @@ directly. See the closing record in the audit doc.
 
 ## DATA BOTTLENECKS — Specific to this project's data setup
 
+### D0. Self-Healing Force Sync + Freshness Alerting — SHIPPED 2026-06-10
+Built after the staleness incident where `sector_indices` and `delivery_data`
+sat frozen at 2026-03-27 for 2.5 months while `ml/features.py` silently
+ffilled the last values into live scoring.
+
+- [x] `POST /api/sync/eod` (Python, `quant_engine/routers/data_sync.py`) —
+  gap-fills sector_indices + delivery_data from each table's MAX(date)+1 →
+  today via NSE archives; idempotent, capped at 30 days per press.
+- [x] `GET /api/data/freshness` — max date + business-day lag + stale flag
+  (> 2 business days) for 9 monitored tables.
+- [x] `src/services/intradaySync.js` — trailing-5-day 15-min candle top-up
+  from Angel One (portfolio + NIFTY), wired into the sync route.
+- [x] Node `/api/portfolio/sync` runs both new sub-syncs and returns the
+  freshness report; `pcrOi` sub-sync now reports partial PCR/OI status
+  truthfully instead of swallowing PCR failures.
+- [x] Frontend Force Sync button shows a warning toast listing stale tables
+  (8s) instead of a blanket success.
+
+This partially covers D2's "freshness SLA", D4's "VIX freshness check"
+(india_vix is monitored), and OPS "Price data > 2 days stale" alert below.
+First run immediately caught a true positive: `pcr_history` stale since
+2026-06-01 — Angel's PCR endpoint returns "No data available" outside
+market hours, so evening-only syncs never capture it. Open question: press
+Force Sync once during market hours to confirm PCR works, else treat the
+Angel PCR endpoint as dead.
+
+---
+
 ### D1. FII/DII Data Is Unreliable (NSE Scraping)
 - [ ] Replace NSE HTML scraping with a reliable paid source OR remove FII from regime score
 - [ ] Backfill FII/DII history from NSE CSV archives (cover at least 2 years)

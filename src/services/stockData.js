@@ -403,16 +403,23 @@ export async function fetchBulkDealsToday() {
  */
 export async function fetchPCRAndOIBuildup() {
   const today = new Date().toISOString().slice(0, 10);
+  const status = { pcr: { ok: false, error: null }, oi: { ok: false, entries: 0, error: null } };
 
-  // PCR
+  // PCR — Angel returns "No data available" outside market hours, so a
+  // failure here is expected on evening syncs; the freshness report tracks
+  // whether pcr_history actually falls behind.
   try {
     const pcrData = await fetchPCR();
     if (pcrData) {
       await savePCR(today, pcrData);
       console.log(`[PCR] ${today} — saved`);
+      status.pcr.ok = true;
+    } else {
+      status.pcr.error = 'empty response';
     }
   } catch (err) {
     console.warn('[PCR] Fetch failed (non-critical):', err.message);
+    status.pcr.error = err.message;
   }
 
   // OI Buildup — all 4 categories
@@ -426,9 +433,13 @@ export async function fetchPCRAndOIBuildup() {
       }
     }
     if (total > 0) console.log(`[OI Buildup] ${today} — ${total} entries across 4 categories`);
+    status.oi = { ok: total > 0, entries: total, error: total > 0 ? null : 'no rows returned' };
   } catch (err) {
     console.warn('[OI Buildup] Fetch failed (non-critical):', err.message);
+    status.oi.error = err.message;
   }
+
+  return status;
 }
 
 // Export for testing

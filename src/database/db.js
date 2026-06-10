@@ -368,6 +368,72 @@ export async function initDatabase() {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_date ON oi_buildup(date)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_oi_symbol ON oi_buildup(symbol)`);
 
+  // NIFTY option-chain daily snapshots (SIC-92 phase 2 feed) — per-strike
+  // greeks for the ~30-DTE expiry, captured by Force Sync via optionChainService
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS option_chain_daily (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      date        TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      expiry      TEXT NOT NULL,
+      strike      REAL NOT NULL,
+      option_type TEXT NOT NULL,
+      iv          REAL,
+      delta       REAL,
+      gamma       REAL,
+      theta       REAL,
+      vega        REAL,
+      volume      INTEGER,
+      UNIQUE(date, name, expiry, strike, option_type)
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_chain_date ON option_chain_daily(date)`);
+
+  // One summary row per (date, name): ATM IV + 25-delta risk-reversal skew
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS iv_daily (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      date       TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      expiry     TEXT,
+      dte        INTEGER,
+      atm_iv     REAL,
+      rr25_skew  REAL,
+      n_strikes  INTEGER,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(date, name)
+    )
+  `);
+
+  // Paper iron condors (SIC-92 education/validation book) — model-priced from
+  // collected chain IVs, settled automatically at expiry from ^NSEI close.
+  // NO broker orders ever originate from this table.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS paper_condors (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      name              TEXT NOT NULL,
+      opened_date       TEXT NOT NULL,
+      expiry            TEXT NOT NULL,
+      expiry_iso        TEXT NOT NULL,
+      dte_at_open       INTEGER,
+      spot_at_open      REAL,
+      atm_iv_at_open    REAL,
+      lot_size          INTEGER NOT NULL DEFAULT 75,
+      short_call_strike REAL, short_call_prem REAL,
+      short_put_strike  REAL, short_put_prem  REAL,
+      long_call_strike  REAL, long_call_prem  REAL,
+      long_put_strike   REAL, long_put_prem   REAL,
+      net_credit_pts    REAL,
+      credit_rupees     REAL,
+      max_loss_rupees   REAL,
+      status            TEXT NOT NULL DEFAULT 'OPEN',
+      settled_date      TEXT,
+      settle_spot       REAL,
+      pnl_rupees        REAL,
+      UNIQUE(name, expiry_iso)
+    )
+  `);
+
   // 15-min intraday candles from Angel One — primary consumer is intraday feature engineering
   // ts stored as ISO-8601 with +05:30 offset exactly as Angel returns it
   await db.execute(`
@@ -1068,6 +1134,129 @@ export async function saveIntradayCandles(symbol, bars) {
     written += slice.length;
   }
   return written;
+}
+
+// ═══════════════════════════════════════════════════════
+// Option chain snapshots (SIC-92 IV collection)
+// ═══════════════════════════════════════════════════════
+
+export async function saveOptionChainSnapshot(date, name, expiry, rows) {
+  if (!rows || rows.length === 0) return 0;
+  const sql = `INSERT INTO option_chain_daily
+                 (date, name, expiry, strike, option_type, iv, delta, gamma, theta, vega, volume)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(date, name, expiry, strike, option_type) DO UPDATE SET
+                 iv = excluded.iv, delta = excluded.delta, gamma = excluded.gamma,
+                 theta = excluded.theta, vega = excluded.vega, volume = excluded.volume`;
+  const stmts = rows.map(r => ({
+    sql,
+    args: [date, name, expiry, r.strike, r.optionType,
+           r.iv ?? null, r.delta ?? null, r.gamma ?? null,
+           r.theta ?? null, r.vega ?? null, r.volume ?? null]
+  }));
+  await db.batch(stmts, 'write');
+  return rows.length;
+}
+
+export async function saveIVDaily({ date, name, expiry, dte, atmIv, rr25Skew, nStrikes }) {
+  await db.execute({
+    sql: `INSERT INTO iv_daily (date, name, expiry, dte, atm_iv, rr25_skew, n_strikes)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(date, name) DO UPDATE SET
+            expiry = excluded.expiry, dte = excluded.dte, atm_iv = excluded.atm_iv,
+            rr25_skew = excluded.rr25_skew, n_strikes = excluded.n_strikes`,
+    args: [date, name, expiry ?? null, dte ?? null, atmIv ?? null, rr25Skew ?? null, nStrikes ?? null]
+  });
+  return 1;
+}
+
+export async function getLatestChainSnapshot(name = 'NIFTY') {
+  const latest = await db.execute({
+    sql: `SELECT date, expiry FROM option_chain_daily WHERE name = ?
+          ORDER BY date DESC LIMIT 1`,
+    args: [name]
+  });
+  if (!latest.rows.length) return null;
+  const { date, expiry } = latest.rows[0];
+  const rows = await db.execute({
+    sql: `SELECT strike, option_type, iv, delta FROM option_chain_daily
+          WHERE name = ? AND date = ? AND expiry = ?`,
+    args: [name, date, expiry]
+  });
+  return { date, expiry, rows: rows.rows };
+}
+
+export async function insertPaperCondor(c) {
+  await db.execute({
+    sql: `INSERT INTO paper_condors
+            (name, opened_date, expiry, expiry_iso, dte_at_open, spot_at_open,
+             atm_iv_at_open, lot_size,
+             short_call_strike, short_call_prem, short_put_strike, short_put_prem,
+             long_call_strike, long_call_prem, long_put_strike, long_put_prem,
+             net_credit_pts, credit_rupees, max_loss_rupees)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [c.name, c.openedDate, c.expiry, c.expiryIso, c.dte, c.spot,
+           c.atmIv, c.lotSize,
+           c.shortCallStrike, c.shortCallPrem, c.shortPutStrike, c.shortPutPrem,
+           c.longCallStrike, c.longCallPrem, c.longPutStrike, c.longPutPrem,
+           c.netCreditPts, c.creditRupees, c.maxLossRupees]
+  });
+}
+
+export async function getPaperCondors() {
+  const result = await db.execute(
+    `SELECT * FROM paper_condors ORDER BY opened_date DESC`
+  );
+  return result.rows;
+}
+
+export async function getOpenPaperCondors() {
+  const result = await db.execute(
+    `SELECT * FROM paper_condors WHERE status = 'OPEN' ORDER BY expiry_iso ASC`
+  );
+  return result.rows;
+}
+
+export async function settlePaperCondor(id, settledDate, settleSpot, pnlRupees) {
+  await db.execute({
+    sql: `UPDATE paper_condors
+          SET status = 'SETTLED', settled_date = ?, settle_spot = ?, pnl_rupees = ?
+          WHERE id = ?`,
+    args: [settledDate, settleSpot, pnlRupees, id]
+  });
+}
+
+export async function getNiftyCloseOnOrAfter(dateIso) {
+  const result = await db.execute({
+    sql: `SELECT date, close FROM price_history
+          WHERE symbol = '^NSEI' AND date >= ? ORDER BY date ASC LIMIT 1`,
+    args: [dateIso]
+  });
+  return result.rows[0] || null;
+}
+
+export async function getIVCollectionStatus(name = 'NIFTY', limit = 90) {
+  const summary = await db.execute({
+    sql: `SELECT COUNT(*) AS n_days, MIN(date) AS first_date, MAX(date) AS last_date
+          FROM iv_daily WHERE name = ?`,
+    args: [name]
+  });
+  const recent = await db.execute({
+    sql: `SELECT date, expiry, dte, atm_iv, rr25_skew, n_strikes
+          FROM iv_daily WHERE name = ? ORDER BY date DESC LIMIT ?`,
+    args: [name, limit]
+  });
+  const s = summary.rows[0] || {};
+  return {
+    name,
+    nDays: Number(s.n_days) || 0,
+    firstDate: s.first_date || null,
+    lastDate: s.last_date || null,
+    series: recent.rows.map(r => ({
+      date: r.date, expiry: r.expiry, dte: r.dte,
+      atmIv: r.atm_iv, rr25Skew: r.rr25_skew, nStrikes: r.n_strikes
+    })).reverse(),
+  };
 }
 
 export async function getLatestIntradayTs(symbol) {

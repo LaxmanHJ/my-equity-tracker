@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initModals();
   loadPortfolio();
   loadMarketMovers();
+  loadIVCollection();
+  loadPaperBook();
+  const condorBtn = document.getElementById('openCondorBtn');
+  if (condorBtn) condorBtn.addEventListener('click', openPaperCondor);
   checkMarketStatus();
 
   // Auto-refresh every 5 minutes
@@ -149,7 +153,18 @@ async function forceSyncPortfolio() {
       await loadQuantScores();
     }
 
-    showToast('Successfully synchronized all pages from latest market data', 'success');
+    // Freshness alerting: warn when any feature table is still stale after the
+    // sync (live features would be running on forward-filled frozen values).
+    const fresh = syncData.freshness;
+    if (fresh && fresh.any_stale) {
+      const staleNames = Object.entries(fresh.tables)
+        .filter(([, t]) => t.stale)
+        .map(([name, t]) => `${name} (last: ${t.max_date ?? 'empty'})`);
+      console.warn('[ForceSync] Stale tables:', staleNames);
+      showToast(`Synced, but stale data: ${staleNames.join(', ')}`, 'warning');
+    } else {
+      showToast('Successfully synchronized all pages from latest market data', 'success');
+    }
 
   } catch (error) {
     console.error('Error force syncing portfolio:', error);
@@ -1269,6 +1284,109 @@ async function loadMarketMovers() {
   }
 }
 
+async function loadIVCollection() {
+  try {
+    const res = await fetch(`${API_BASE}/iv-collection`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const pct = Math.min((d.nDays / d.gateDays) * 100, 100);
+    const bar = document.getElementById('ivProgressBar');
+    if (bar) bar.style.width = `${pct.toFixed(0)}%`;
+    const label = document.getElementById('ivProgressLabel');
+    if (label) label.textContent = `${d.nDays} / ${d.gateDays}`;
+
+    const latest = d.series && d.series.length ? d.series[d.series.length - 1] : null;
+    const meta = document.getElementById('ivMeta');
+    if (meta) {
+      meta.textContent = latest
+        ? `NIFTY ~30-DTE chain · last snapshot ${latest.date} (${latest.nStrikes} strikes)`
+        : 'No snapshots yet — press Force Sync during market hours to start collecting';
+    }
+    if (latest) {
+      const atm = document.getElementById('ivAtm');
+      if (atm) atm.textContent = latest.atmIv != null ? latest.atmIv.toFixed(2) : '–';
+      const skew = document.getElementById('ivSkew');
+      if (skew) {
+        skew.textContent = latest.rr25Skew != null
+          ? `${latest.rr25Skew >= 0 ? '+' : ''}${latest.rr25Skew.toFixed(2)}` : '–';
+        skew.title = 'Put IV at 25Δ minus call IV at 25Δ — positive = downside protection bid up';
+      }
+      const exp = document.getElementById('ivExpiry');
+      if (exp) exp.textContent = latest.expiry || '–';
+      const dte = document.getElementById('ivDte');
+      if (dte) dte.textContent = latest.dte != null ? `${latest.dte} days to expiry` : '';
+    }
+  } catch (err) {
+    console.error('IV collection load failed:', err);
+    const meta = document.getElementById('ivMeta');
+    if (meta) meta.textContent = 'IV collection status unavailable';
+  }
+}
+
+async function loadPaperBook() {
+  try {
+    const res = await fetch(`${API_BASE}/paper-condor`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const book = await res.json();
+    const tbody = document.getElementById('paperBookBody');
+    const totalEl = document.getElementById('paperPnlTotal');
+    if (totalEl) {
+      const t = book.settledPnlRupees || 0;
+      totalEl.textContent = book.positions.some(p => p.status === 'SETTLED')
+        ? `Settled P&L: ${t >= 0 ? '+' : ''}₹${t.toLocaleString('en-IN')}` : '';
+      totalEl.style.color = t >= 0 ? '#10b981' : '#ef4444';
+    }
+    if (!tbody) return;
+    if (!book.positions.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:1rem;">No paper positions yet — open one to start learning the mechanics</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = book.positions.map(p => {
+      const structure = `${p.long_put_strike} / ${p.short_put_strike} / ${p.short_call_strike} / ${p.long_call_strike}`;
+      const pnl = p.status === 'SETTLED'
+        ? `<span style="color:${p.pnl_rupees >= 0 ? '#10b981' : '#ef4444'};font-weight:600;">${p.pnl_rupees >= 0 ? '+' : ''}₹${Number(p.pnl_rupees).toLocaleString('en-IN')}</span>`
+        : '<span style="color:var(--text-muted);">open</span>';
+      const status = p.status === 'SETTLED'
+        ? `SETTLED @ ${Number(p.settle_spot).toFixed(0)}`
+        : `OPEN`;
+      return `
+        <tr>
+          <td>${p.opened_date}</td>
+          <td>${p.expiry}</td>
+          <td style="font-family:monospace;">${structure}</td>
+          <td style="color:#10b981;">+₹${Number(p.credit_rupees).toLocaleString('en-IN')}</td>
+          <td style="color:var(--text-muted);">−₹${Number(p.max_loss_rupees).toLocaleString('en-IN')}</td>
+          <td style="font-size:0.78rem;">${status}</td>
+          <td>${pnl}</td>
+        </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('Paper book load failed:', err);
+  }
+}
+
+async function openPaperCondor() {
+  const btn = document.getElementById('openCondorBtn');
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Opening…';
+    const res = await fetch(`${API_BASE}/paper-condor/open`, { method: 'POST' });
+    const d = await res.json();
+    if (d.ok) {
+      showToast(`Paper condor opened for ${d.expiry}: credit ₹${d.creditRupees.toLocaleString('en-IN')}, max loss ₹${d.maxLossRupees.toLocaleString('en-IN')}`, 'success');
+      loadPaperBook();
+    } else {
+      showToast(`Could not open: ${d.error}`, 'warning');
+    }
+  } catch (err) {
+    console.error('Open paper condor failed:', err);
+    showToast('Failed to open paper condor', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '📓 Open paper condor';
+  }
+}
+
 function renderMovers(bodyId, rows) {
   const tbody = document.getElementById(bodyId);
   if (!tbody) return;
@@ -1313,7 +1431,8 @@ function showToast(message, type = 'info') {
   toast.textContent = message;
   container.appendChild(toast);
 
-  setTimeout(() => toast.remove(), 3000);
+  // Warnings carry table lists the user should actually read
+  setTimeout(() => toast.remove(), type === 'warning' ? 8000 : 3000);
 }
 
 // Make functions available globally

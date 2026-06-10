@@ -42,6 +42,7 @@ import {
   acknowledgeRiskAlert,
   getPendingSignals,
   getAllSignals,
+  getIVCollectionStatus,
 } from '../database/db.js';
 import { runRiskChecks } from '../risk/riskManager.js';
 import { createEodPriceProvider } from '../risk/priceProvider.js';
@@ -49,6 +50,9 @@ import { computePositionSizes } from '../risk/positionSizing.js';
 import { riskLimits } from '../config/riskLimits.js';
 import { generateQueue, executeSignal, rejectSignal, evaluateSignal } from '../services/signalQueueService.js';
 import { getEquityMovers } from '../services/angelOneMarketData.js';
+import { syncRecentIntraday } from '../services/intradaySync.js';
+import { collectIVSnapshot } from '../services/optionChainService.js';
+import { openPaperCondor, settleDuePaperCondors, getPaperBook } from '../services/paperCondorService.js';
 
 const router = express.Router();
 
@@ -448,6 +452,9 @@ router.post('/portfolio/sync', async (req, res) => {
     pcrOi:     { ok: false, detail: null },
     vix:       { ok: false, detail: null },
     sentiment: { ok: false, detail: null },
+    eod:       { ok: false, detail: null },
+    intraday:  { ok: false, detail: null },
+    ivChain:   { ok: false, detail: null },
   };
 
   try {
@@ -480,10 +487,12 @@ router.post('/portfolio/sync', async (req, res) => {
       subSyncs.bulkDeals = { ok: false, detail: { error: e.message } };
     }
 
-    // Fetch PCR + OI Buildup from Angel One
+    // Fetch PCR + OI Buildup from Angel One. PCR routinely fails outside
+    // market hours ("No data available") — partial status is reported so the
+    // response doesn't claim ok while pcr_history quietly falls behind.
     try {
-      await fetchPCRAndOIBuildup();
-      subSyncs.pcrOi = { ok: true, detail: null };
+      const pcrOiStatus = await fetchPCRAndOIBuildup();
+      subSyncs.pcrOi = { ok: pcrOiStatus.pcr.ok && pcrOiStatus.oi.ok, detail: pcrOiStatus };
     } catch (e) {
       subSyncs.pcrOi = { ok: false, detail: { error: e.message } };
     }
@@ -544,11 +553,72 @@ router.post('/portfolio/sync', async (req, res) => {
       subSyncs.sentiment = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
     }
 
+    // Gap-fill sector_indices + delivery_data from each table's max(date) → today.
+    // Self-healing: skipped days are caught up on the next press (2026-06-10
+    // staleness incident — these tables sat frozen for 2.5 months unnoticed).
+    try {
+      const eodRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/eod`, { method: 'POST' });
+      const eodData = await eodRes.json();
+      subSyncs.eod = { ok: !!eodData.success, detail: eodData.tables };
+      console.log(`[ForceSync] ${eodData.success ? '✅' : '⚠️'} EOD gap-fill:`, JSON.stringify(eodData.tables));
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ EOD gap-fill skipped (quant engine unavailable):', e.message);
+      subSyncs.eod = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
+    }
+
+    // Top up trailing 15-min candles from Angel One (portfolio + NIFTY).
+    try {
+      const intradayResult = await syncRecentIntraday();
+      subSyncs.intraday = { ok: intradayResult.errors.length === 0, detail: intradayResult };
+      console.log(`[ForceSync] ✅ Intraday top-up: ${intradayResult.saved} candles, ${intradayResult.errors.length} errors`);
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ Intraday top-up failed:', e.message);
+      subSyncs.intraday = { ok: false, detail: { error: e.message } };
+    }
+
+    // NIFTY ~30-DTE option-chain IV snapshot (SIC-92 forward collection).
+    // Angel serves greeks only around market hours — failures are expected
+    // on late-evening presses and reported truthfully, not swallowed.
+    try {
+      const ivResult = await collectIVSnapshot('NIFTY');
+      subSyncs.ivChain = { ok: !!ivResult.ok, detail: ivResult };
+      console.log(`[ForceSync] ${ivResult.ok ? '✅' : '⚠️'} IV chain:`, JSON.stringify(ivResult));
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ IV chain snapshot failed:', e.message);
+      subSyncs.ivChain = { ok: false, detail: { error: e.message } };
+    }
+
+    // Settle any paper condors whose expiry has passed (needs the expiry-day
+    // ^NSEI bar, which the holdings sync above just refreshed).
+    try {
+      const settled = await settleDuePaperCondors();
+      if (settled.length) console.log('[ForceSync] ✅ Paper condors settled:', JSON.stringify(settled));
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ Paper condor settlement failed:', e.message);
+    }
+
+    // Freshness report — surfaces any table still running on stale data so
+    // the frontend can warn instead of silently ffilling frozen features.
+    let freshness = null;
+    try {
+      const freshRes = await fetch(`${QUANT_ENGINE_URL}/api/data/freshness`);
+      freshness = await freshRes.json();
+      if (freshness.any_stale) {
+        const staleNames = Object.entries(freshness.tables)
+          .filter(([, t]) => t.stale)
+          .map(([name, t]) => `${name} (${t.max_date ?? 'empty'})`);
+        console.warn(`[ForceSync] ⚠️ STALE TABLES: ${staleNames.join(', ')}`);
+      }
+    } catch (e) {
+      console.warn('[ForceSync] ⚠️ Freshness check skipped:', e.message);
+    }
+
     res.json({
       success: true,
       synced: quotes.length,
       message: `Refreshed ${quotes.length} holdings in database`,
       subSyncs,
+      freshness,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -997,6 +1067,46 @@ router.get('/market/movers', async (req, res) => {
   } catch (error) {
     console.error('Market movers error:', error.message);
     res.status(502).json({ error: 'Failed to fetch market movers' });
+  }
+});
+
+/**
+ * Paper condor book (SIC-92) — simulated defined-risk monthly structure.
+ * POST opens one for the currently tracked expiry (idempotent per expiry);
+ * GET returns all positions + settled P&L. No broker orders, ever.
+ */
+router.post('/paper-condor/open', async (req, res) => {
+  try {
+    const result = await openPaperCondor('NIFTY');
+    res.status(result.ok ? 200 : 409).json(result);
+  } catch (error) {
+    console.error('Paper condor open error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+router.get('/paper-condor', async (req, res) => {
+  try {
+    res.json(await getPaperBook());
+  } catch (error) {
+    console.error('Paper book error:', error.message);
+    res.status(500).json({ error: 'Failed to read paper book' });
+  }
+});
+
+/**
+ * GET /api/iv-collection
+ * SIC-92 VRP phase-2 data-collection progress: how many daily NIFTY chain
+ * snapshots exist, the latest ATM IV / 25Δ skew, and the recent series for
+ * the dashboard progress card. Gate runs at 60 collected trading days.
+ */
+router.get('/iv-collection', async (req, res) => {
+  try {
+    const status = await getIVCollectionStatus('NIFTY');
+    res.json({ ...status, gateDays: 60 });
+  } catch (error) {
+    console.error('IV collection status error:', error.message);
+    res.status(500).json({ error: 'Failed to read IV collection status' });
   }
 });
 
