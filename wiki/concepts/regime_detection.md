@@ -85,8 +85,43 @@ Foreign Institutional Investor net buying/selling in NSE. Positive FII → bulli
 | No look-ahead validation of regime calls | Low |
 | VIX thresholds hardcoded, not adaptive | Low |
 
+## 2026-06-10 Regime-Timing Backtest — NO ALPHA, real drawdown control
+
+The "portfolio alpha came from regime calls" hypothesis (SIC-91 closure) was
+formalized and tested: `quant_engine/research/regime_timing.py`, results in
+`data/regime_timing_backtest.json`. NIFTY daily was backfilled 2011→2026
+(3,782 bars, Angel One, stored as `^NSEI` in price_history) to enable a
+15-year sample.
+
+**Declared rule (zero fitted parameters):** w = clip(0.5 + regime_score, 0, 1)
+NIFTY weight, production score formulas (trend SMA50/200 blend + 60d Markov;
+VIX rolling-percentile leg in the 2022+ variant; FII leg dropped —
+insufficient history), next-day-close execution, 5bp one-way costs, cash @6%.
+
+| Variant | Strategy CAGR / Sharpe / maxDD | B&H CAGR / Sharpe / maxDD | Jensen α | Up/Down capture |
+|---|---|---|---|---|
+| trend+markov 2011–26 (15y) | 6.5% / 0.06 / **−12.8%** | 9.3% / 0.20 / −38.4% | **−1.2%/yr** (t=−0.9) | 56.9% / 55.8% |
+| full incl. VIX 2022–26 | 5.2% / −0.11 / −10.1% | 7.5% / 0.12 / −15.8% | −1.7%/yr (t=−0.8) | 56.6% / 55.6% |
+
+**Verdict — no timing skill.** Up-capture ≈ down-capture (ratio ~1.02) is
+the definitive diagnostic: the dial dilutes exposure symmetrically rather
+than asymmetrically avoiding bad days. Jensen alpha is negative in both
+variants. The SIC-91 "+969% alpha from regime calls" figure does not
+replicate under a clean, costed test — treat it as an in-sample artifact.
+Episodic wins exist (2020: +26.6% vs +14.9%; 2026 YTD: −5.5% vs −11.1%)
+but 15 years of them net to negative alpha.
+
+**What survives: drawdown control.** Calmar doubles (0.51 vs 0.24), vol
+halves, max drawdown −38% → −13%. The regime score is a legitimate
+*risk-sizing overlay* (e.g., scaling gross exposure of the stock book),
+priced at ~1.2%/yr of expected return — insurance, not alpha. Do NOT
+re-run threshold/weight variants hunting for alpha — declared-rule
+discipline applies.
+
 ## Related Concepts
 - [momentum.md](momentum.md) — BULL regime strategy
 - [mean_reversion.md](mean_reversion.md) — BEAR regime strategy
 - [factor_scoring.md](factor_scoring.md) — regime adjusts weights
 - [ml_pipeline.md](ml_pipeline.md) — VIX/Nifty trend as ML features
+- [short_horizon_reversal.md](short_horizon_reversal.md) — the other two
+  2026-06-10 declared-rule experiments (both also negative)

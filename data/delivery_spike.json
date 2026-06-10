@@ -1,0 +1,75 @@
+{
+  "computed_at": "2026-06-10T08:08:34.525005+00:00",
+  "pit": true,
+  "rule": {
+    "z_min": 2.0,
+    "z_window": 60,
+    "ret_confirm": 0.01
+  },
+  "n_events": 4985,
+  "cohorts": {
+    "SPIKE_DOWN": {
+      "n_events": 3178,
+      "1d": {
+        "mean_ar_bp": -3.3,
+        "median_ar_bp": -0.7,
+        "hit_pct": 49.8,
+        "t_monthly": -0.02,
+        "n_months": 87
+      },
+      "5d": {
+        "mean_ar_bp": -27.7,
+        "median_ar_bp": -18.1,
+        "hit_pct": 48.1,
+        "t_monthly": -0.72,
+        "n_months": 87
+      },
+      "10d": {
+        "mean_ar_bp": -44.5,
+        "median_ar_bp": -41.8,
+        "hit_pct": 46.9,
+        "t_monthly": -0.95,
+        "n_months": 87
+      },
+      "20d": {
+        "mean_ar_bp": -33.6,
+        "median_ar_bp": -59.0,
+        "hit_pct": 47.1,
+        "t_monthly": -0.25,
+        "n_months": 87
+      }
+    },
+    "SPIKE_UP": {
+      "n_events": 1807,
+      "1d": {
+        "mean_ar_bp": 0.9,
+        "median_ar_bp": -12.1,
+        "hit_pct": 46.8,
+        "t_monthly": 0.36,
+        "n_months": 87
+      },
+      "5d": {
+        "mean_ar_bp": 12.2,
+        "median_ar_bp": -10.4,
+        "hit_pct": 48.4,
+        "t_monthly": 0.91,
+        "n_months": 87
+      },
+      "10d": {
+        "mean_ar_bp": 38.0,
+        "median_ar_bp": -20.9,
+        "hit_pct": 48.2,
+        "t_monthly": 1.13,
+        "n_months": 87
+      },
+      "20d": {
+        "mean_ar_bp": 23.9,
+        "median_ar_bp": -33.0,
+        "hit_pct": 48.4,
+        "t_monthly": 0.55,
+        "n_months": 87
+      }
+    }
+  },
+  "ship_bar": "|t_monthly| > 3 AND drift > 40bp, either cohort"
+}

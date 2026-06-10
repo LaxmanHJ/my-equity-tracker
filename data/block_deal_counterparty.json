@@ -1,0 +1,119 @@
+{
+  "computed_at": "2026-06-10T07:17:44.984087+00:00",
+  "taxonomy_classes": [
+    "PASSIVE",
+    "DESK",
+    "ACTIVE",
+    "OTHER"
+  ],
+  "n_raw_events": 656,
+  "n_covered_events": 360,
+  "cohorts": {
+    "ACTIVE_BUY": {
+      "n_events": 141,
+      "1d": {
+        "mean_ar_bp": 6.0,
+        "median_ar_bp": 1.5,
+        "hit_pct": 51.1,
+        "t_monthly": -1.27,
+        "n_months": 40
+      },
+      "5d": {
+        "mean_ar_bp": 59.5,
+        "median_ar_bp": -44.8,
+        "hit_pct": 46.8,
+        "t_monthly": -0.55,
+        "n_months": 40
+      },
+      "10d": {
+        "mean_ar_bp": 33.2,
+        "median_ar_bp": 5.1,
+        "hit_pct": 50.4,
+        "t_monthly": -0.07,
+        "n_months": 40
+      },
+      "20d": {
+        "mean_ar_bp": 97.3,
+        "median_ar_bp": 19.6,
+        "hit_pct": 51.1,
+        "t_monthly": 0.06,
+        "n_months": 40
+      }
+    },
+    "ACTIVE_SELL": {
+      "n_events": 39,
+      "note": "insufficient"
+    },
+    "DESK_BUY": {
+      "n_events": 97,
+      "1d": {
+        "mean_ar_bp": -27.4,
+        "median_ar_bp": -27.5,
+        "hit_pct": 44.3,
+        "t_monthly": -1.83,
+        "n_months": 38
+      },
+      "5d": {
+        "mean_ar_bp": 55.9,
+        "median_ar_bp": -10.4,
+        "hit_pct": 49.5,
+        "t_monthly": -0.72,
+        "n_months": 38
+      },
+      "10d": {
+        "mean_ar_bp": 34.0,
+        "median_ar_bp": 7.2,
+        "hit_pct": 50.5,
+        "t_monthly": -0.61,
+        "n_months": 38
+      },
+      "20d": {
+        "mean_ar_bp": 83.2,
+        "median_ar_bp": 45.9,
+        "hit_pct": 54.6,
+        "t_monthly": -0.59,
+        "n_months": 38
+      }
+    },
+    "DESK_SELL": {
+      "n_events": 62,
+      "1d": {
+        "mean_ar_bp": 102.8,
+        "median_ar_bp": 90.0,
+        "hit_pct": 80.6,
+        "t_monthly": 0.47,
+        "n_months": 9
+      },
+      "5d": {
+        "mean_ar_bp": 190.9,
+        "median_ar_bp": 169.1,
+        "hit_pct": 62.9,
+        "t_monthly": 2.41,
+        "n_months": 9
+      },
+      "10d": {
+        "mean_ar_bp": 68.2,
+        "median_ar_bp": 93.6,
+        "hit_pct": 51.6,
+        "t_monthly": 1.2,
+        "n_months": 9
+      },
+      "20d": {
+        "mean_ar_bp": 213.3,
+        "median_ar_bp": 158.9,
+        "hit_pct": 58.1,
+        "t_monthly": 2.04,
+        "n_months": 9
+      }
+    },
+    "PASSIVE_BUY": {
+      "n_events": 19,
+      "note": "insufficient"
+    },
+    "PASSIVE_SELL": {
+      "n_events": 2,
+      "note": "insufficient"
+    }
+  },
+  "ship_bar": "ACTIVE_BUY: |t_monthly| > 3 AND drift > 40bp"
+}

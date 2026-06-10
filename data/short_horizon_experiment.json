@@ -1,0 +1,230 @@
+{
+  "computed_at": "2026-06-09T20:32:51.436248+00:00",
+  "from_date": "2016-01-01",
+  "n_rows": 411385,
+  "n_dates": 2092,
+  "n_symbols": 332,
+  "min_cross_n": 30,
+  "n_trials": 24,
+  "ic": {
+    "rev1": {
+      "1d": {
+        "mean_ic": 0.0125,
+        "icir": 0.093,
+        "t_overlap_adj": 4.24,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0199,
+        "icir": 0.157,
+        "t_overlap_adj": 5.05,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0192,
+        "icir": 0.153,
+        "t_overlap_adj": 4.01,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0157,
+        "icir": 0.125,
+        "t_overlap_adj": 2.53,
+        "n_dates": 2062
+      }
+    },
+    "rev3": {
+      "1d": {
+        "mean_ic": 0.0195,
+        "icir": 0.14,
+        "t_overlap_adj": 6.35,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0222,
+        "icir": 0.16,
+        "t_overlap_adj": 5.14,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0218,
+        "icir": 0.158,
+        "t_overlap_adj": 4.15,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0231,
+        "icir": 0.169,
+        "t_overlap_adj": 3.43,
+        "n_dates": 2062
+      }
+    },
+    "rev5": {
+      "1d": {
+        "mean_ic": 0.0163,
+        "icir": 0.115,
+        "t_overlap_adj": 5.22,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0217,
+        "icir": 0.154,
+        "t_overlap_adj": 4.94,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0226,
+        "icir": 0.162,
+        "t_overlap_adj": 4.25,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0233,
+        "icir": 0.167,
+        "t_overlap_adj": 3.39,
+        "n_dates": 2062
+      }
+    },
+    "rev5_vs": {
+      "1d": {
+        "mean_ic": 0.0149,
+        "icir": 0.115,
+        "t_overlap_adj": 5.22,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0197,
+        "icir": 0.152,
+        "t_overlap_adj": 4.9,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0204,
+        "icir": 0.159,
+        "t_overlap_adj": 4.17,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0201,
+        "icir": 0.156,
+        "t_overlap_adj": 3.16,
+        "n_dates": 2062
+      }
+    },
+    "mom21_skip5": {
+      "1d": {
+        "mean_ic": 0.0031,
+        "icir": 0.022,
+        "t_overlap_adj": 1.02,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0056,
+        "icir": 0.039,
+        "t_overlap_adj": 1.26,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0065,
+        "icir": 0.045,
+        "t_overlap_adj": 1.19,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0061,
+        "icir": 0.043,
+        "t_overlap_adj": 0.88,
+        "n_dates": 2062
+      }
+    },
+    "lowvol": {
+      "1d": {
+        "mean_ic": 0.0177,
+        "icir": 0.104,
+        "t_overlap_adj": 4.72,
+        "n_dates": 2066
+      },
+      "2d": {
+        "mean_ic": 0.0164,
+        "icir": 0.095,
+        "t_overlap_adj": 3.06,
+        "n_dates": 2065
+      },
+      "3d": {
+        "mean_ic": 0.0155,
+        "icir": 0.09,
+        "t_overlap_adj": 2.35,
+        "n_dates": 2064
+      },
+      "5d": {
+        "mean_ic": 0.0153,
+        "icir": 0.088,
+        "t_overlap_adj": 1.79,
+        "n_dates": 2062
+      }
+    }
+  },
+  "ls_fwd1": {
+    "rev1": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.78,
+      "gross_ann_sharpe": -1.18,
+      "gross_ann_ret_pct": -16.5,
+      "net15bp_ann_sharpe": -5.41,
+      "net15bp_ann_ret_pct": -75.5,
+      "net30bp_ann_sharpe": -9.61,
+      "net30bp_ann_ret_pct": -134.5
+    },
+    "rev3": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.453,
+      "gross_ann_sharpe": 0.35,
+      "gross_ann_ret_pct": 5.0,
+      "net15bp_ann_sharpe": -2.01,
+      "net15bp_ann_ret_pct": -29.2,
+      "net30bp_ann_sharpe": -4.37,
+      "net30bp_ann_ret_pct": -63.4
+    },
+    "rev5": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.352,
+      "gross_ann_sharpe": 0.1,
+      "gross_ann_ret_pct": 1.5,
+      "net15bp_ann_sharpe": -1.71,
+      "net15bp_ann_ret_pct": -25.1,
+      "net30bp_ann_sharpe": -3.53,
+      "net30bp_ann_ret_pct": -51.7
+    },
+    "rev5_vs": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.357,
+      "gross_ann_sharpe": 0.2,
+      "gross_ann_ret_pct": 2.5,
+      "net15bp_ann_sharpe": -1.89,
+      "net15bp_ann_ret_pct": -24.5,
+      "net30bp_ann_sharpe": -3.97,
+      "net30bp_ann_ret_pct": -51.5
+    },
+    "mom21_skip5": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.199,
+      "gross_ann_sharpe": 0.08,
+      "gross_ann_ret_pct": 1.1,
+      "net15bp_ann_sharpe": -1.02,
+      "net15bp_ann_ret_pct": -14.0,
+      "net30bp_ann_sharpe": -2.11,
+      "net30bp_ann_ret_pct": -29.1
+    },
+    "lowvol": {
+      "n_days": 2066,
+      "avg_daily_turnover": 0.093,
+      "gross_ann_sharpe": 0.07,
+      "gross_ann_ret_pct": 1.2,
+      "net15bp_ann_sharpe": -0.34,
+      "net15bp_ann_ret_pct": -5.8,
+      "net30bp_ann_sharpe": -0.76,
+      "net30bp_ann_ret_pct": -12.8
+    }
+  },
+  "notes": "PIT-filtered Nifty200, daily-cadence rows only. 24 declared trials; under the null the expected max |t| is ~2.9 \u2014 require |t| > 3 AND net-of-cost Sharpe > 0 to consider a follow-up CPCV+DSR run."
+}

@@ -1,0 +1,88 @@
+{
+  "computed_at": "2026-06-10T09:12:52.997396+00:00",
+  "pit": true,
+  "n_events": 6298,
+  "horizons_days": [
+    5,
+    20,
+    60
+  ],
+  "cohorts": {
+    "T1_neg": {
+      "n_events": 2110,
+      "mean_reaction_bp": -348.4,
+      "5d": {
+        "mean_ar_bp": -58.3,
+        "median_ar_bp": -60.2,
+        "hit_pct": 43.0,
+        "t_monthly": -3.46,
+        "n_months": 81
+      },
+      "20d": {
+        "mean_ar_bp": -43.4,
+        "median_ar_bp": -77.7,
+        "hit_pct": 44.9,
+        "t_monthly": -1.34,
+        "n_months": 81
+      },
+      "60d": {
+        "mean_ar_bp": 25.5,
+        "median_ar_bp": -96.0,
+        "hit_pct": 46.7,
+        "t_monthly": 0.33,
+        "n_months": 81
+      }
+    },
+    "T2_mid": {
+      "n_events": 2088,
+      "mean_reaction_bp": -24.9,
+      "5d": {
+        "mean_ar_bp": -11.2,
+        "median_ar_bp": -28.2,
+        "hit_pct": 46.8,
+        "t_monthly": -0.14,
+        "n_months": 81
+      },
+      "20d": {
+        "mean_ar_bp": 37.1,
+        "median_ar_bp": -2.3,
+        "hit_pct": 49.8,
+        "t_monthly": 0.34,
+        "n_months": 81
+      },
+      "60d": {
+        "mean_ar_bp": 95.5,
+        "median_ar_bp": -38.1,
+        "hit_pct": 48.6,
+        "t_monthly": 0.57,
+        "n_months": 81
+      }
+    },
+    "T3_pos": {
+      "n_events": 2100,
+      "mean_reaction_bp": 358.3,
+      "5d": {
+        "mean_ar_bp": 7.7,
+        "median_ar_bp": -23.8,
+        "hit_pct": 47.5,
+        "t_monthly": -0.44,
+        "n_months": 81
+      },
+      "20d": {
+        "mean_ar_bp": 83.2,
+        "median_ar_bp": 18.1,
+        "hit_pct": 51.0,
+        "t_monthly": 2.25,
+        "n_months": 81
+      },
+      "60d": {
+        "mean_ar_bp": 91.7,
+        "median_ar_bp": -3.4,
+        "hit_pct": 49.9,
+        "t_monthly": -0.17,
+        "n_months": 81
+      }
+    }
+  },
+  "ship_bar": "T3_pos: |t_monthly| > 3 AND drift > 40bp. 9 cells reported jointly; null expected max |t| ~ 2.5."
+}

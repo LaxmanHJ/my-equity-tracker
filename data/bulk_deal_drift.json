@@ -1,0 +1,72 @@
+{
+  "computed_at": "2026-06-10T07:02:01.243883+00:00",
+  "from_date": "2019-01-01",
+  "dominance_min": 0.5,
+  "n_raw_events": 13579,
+  "n_covered_events": 606,
+  "cohorts": {
+    "BULK_BUY": {
+      "n_events": 186,
+      "1d": {
+        "mean_ar_bp": 43.7,
+        "median_ar_bp": 0.7,
+        "hit_pct": 50.0,
+        "t_monthly": 1.3,
+        "n_months": 65
+      },
+      "5d": {
+        "mean_ar_bp": -64.2,
+        "median_ar_bp": -77.7,
+        "hit_pct": 41.9,
+        "t_monthly": 0.37,
+        "n_months": 65
+      },
+      "10d": {
+        "mean_ar_bp": -121.5,
+        "median_ar_bp": -91.5,
+        "hit_pct": 43.5,
+        "t_monthly": 0.1,
+        "n_months": 65
+      },
+      "20d": {
+        "mean_ar_bp": -139.2,
+        "median_ar_bp": -89.5,
+        "hit_pct": 45.2,
+        "t_monthly": 0.37,
+        "n_months": 65
+      }
+    },
+    "BULK_SELL": {
+      "n_events": 420,
+      "1d": {
+        "mean_ar_bp": 2.1,
+        "median_ar_bp": 4.8,
+        "hit_pct": 51.7,
+        "t_monthly": -0.04,
+        "n_months": 82
+      },
+      "5d": {
+        "mean_ar_bp": 26.2,
+        "median_ar_bp": -20.1,
+        "hit_pct": 48.3,
+        "t_monthly": 0.68,
+        "n_months": 82
+      },
+      "10d": {
+        "mean_ar_bp": 25.6,
+        "median_ar_bp": -42.6,
+        "hit_pct": 46.2,
+        "t_monthly": 0.45,
+        "n_months": 82
+      },
+      "20d": {
+        "mean_ar_bp": 24.7,
+        "median_ar_bp": -68.8,
+        "hit_pct": 46.4,
+        "t_monthly": 0.92,
+        "n_months": 82
+      }
+    }
+  },
+  "ship_bar": "BUY side: |t_monthly| > 3 AND mean drift > 40bp at the horizon"
+}

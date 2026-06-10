@@ -1,0 +1,586 @@
+{
+  "computed_at": "2026-06-09T21:15:05.002252+00:00",
+  "rule": "w = clip(0.5 + regime_score, 0, 1); cost 5bp one-way; production score formulas",
+  "variants": {
+    "trend_markov_2011": {
+      "nextday_exec_cash0": {
+        "strategy": {
+          "n_days": 3780,
+          "years": 15.0,
+          "cagr_pct": 4.18,
+          "ann_vol_pct": 9.09,
+          "sharpe_rf6": -0.2,
+          "max_dd_pct": -16.3,
+          "calmar": 0.26
+        },
+        "buy_hold": {
+          "n_days": 3780,
+          "years": 15.0,
+          "cagr_pct": 9.27,
+          "ann_vol_pct": 16.48,
+          "sharpe_rf6": 0.2,
+          "max_dd_pct": -38.4,
+          "calmar": 0.24
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 18.3,
+        "up_capture_pct": 55.7,
+        "down_capture_pct": 57.1,
+        "beta": 0.45,
+        "jensen_alpha_ann_pct": -3.4,
+        "alpha_t": -2.52,
+        "_beta_se": 0.005,
+        "by_year_pct": {
+          "2011": {
+            "strategy": -14.4,
+            "nifty": -24.8
+          },
+          "2012": {
+            "strategy": 7.8,
+            "nifty": 27.7
+          },
+          "2013": {
+            "strategy": -6.5,
+            "nifty": 6.8
+          },
+          "2014": {
+            "strategy": 21.9,
+            "nifty": 31.4
+          },
+          "2015": {
+            "strategy": -5.8,
+            "nifty": -4.1
+          },
+          "2016": {
+            "strategy": -0.7,
+            "nifty": 3.0
+          },
+          "2017": {
+            "strategy": 16.7,
+            "nifty": 28.6
+          },
+          "2018": {
+            "strategy": -2.6,
+            "nifty": 3.2
+          },
+          "2019": {
+            "strategy": 2.5,
+            "nifty": 12.0
+          },
+          "2020": {
+            "strategy": 23.9,
+            "nifty": 14.9
+          },
+          "2021": {
+            "strategy": 14.2,
+            "nifty": 24.1
+          },
+          "2022": {
+            "strategy": -2.5,
+            "nifty": 4.3
+          },
+          "2023": {
+            "strategy": 13.0,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 7.0,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 4.0,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -6.9,
+            "nifty": -11.1
+          }
+        }
+      },
+      "nextday_exec_cash6": {
+        "strategy": {
+          "n_days": 3780,
+          "years": 15.0,
+          "cagr_pct": 6.5,
+          "ann_vol_pct": 9.09,
+          "sharpe_rf6": 0.06,
+          "max_dd_pct": -12.8,
+          "calmar": 0.51
+        },
+        "buy_hold": {
+          "n_days": 3780,
+          "years": 15.0,
+          "cagr_pct": 9.27,
+          "ann_vol_pct": 16.48,
+          "sharpe_rf6": 0.2,
+          "max_dd_pct": -38.4,
+          "calmar": 0.24
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 18.3,
+        "up_capture_pct": 56.9,
+        "down_capture_pct": 55.8,
+        "beta": 0.45,
+        "jensen_alpha_ann_pct": -1.2,
+        "alpha_t": -0.89,
+        "_beta_se": 0.005,
+        "by_year_pct": {
+          "2011": {
+            "strategy": -11.2,
+            "nifty": -24.8
+          },
+          "2012": {
+            "strategy": 10.1,
+            "nifty": 27.7
+          },
+          "2013": {
+            "strategy": -4.7,
+            "nifty": 6.8
+          },
+          "2014": {
+            "strategy": 23.2,
+            "nifty": 31.4
+          },
+          "2015": {
+            "strategy": -3.1,
+            "nifty": -4.1
+          },
+          "2016": {
+            "strategy": 1.9,
+            "nifty": 3.0
+          },
+          "2017": {
+            "strategy": 18.2,
+            "nifty": 28.6
+          },
+          "2018": {
+            "strategy": -0.4,
+            "nifty": 3.2
+          },
+          "2019": {
+            "strategy": 5.0,
+            "nifty": 12.0
+          },
+          "2020": {
+            "strategy": 26.6,
+            "nifty": 14.9
+          },
+          "2021": {
+            "strategy": 15.1,
+            "nifty": 24.1
+          },
+          "2022": {
+            "strategy": -0.1,
+            "nifty": 4.3
+          },
+          "2023": {
+            "strategy": 15.2,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 8.4,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 6.7,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -5.5,
+            "nifty": -11.1
+          }
+        }
+      },
+      "sameclose_exec_cash0": {
+        "strategy": {
+          "n_days": 3781,
+          "years": 15.0,
+          "cagr_pct": 4.22,
+          "ann_vol_pct": 9.06,
+          "sharpe_rf6": -0.2,
+          "max_dd_pct": -16.2,
+          "calmar": 0.26
+        },
+        "buy_hold": {
+          "n_days": 3781,
+          "years": 15.0,
+          "cagr_pct": 9.26,
+          "ann_vol_pct": 16.48,
+          "sharpe_rf6": 0.2,
+          "max_dd_pct": -38.4,
+          "calmar": 0.24
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 18.3,
+        "up_capture_pct": 55.5,
+        "down_capture_pct": 56.9,
+        "beta": 0.45,
+        "jensen_alpha_ann_pct": -3.36,
+        "alpha_t": -2.5,
+        "_beta_se": 0.005,
+        "by_year_pct": {
+          "2011": {
+            "strategy": -12.2,
+            "nifty": -24.9
+          },
+          "2012": {
+            "strategy": 8.3,
+            "nifty": 27.7
+          },
+          "2013": {
+            "strategy": -4.5,
+            "nifty": 6.8
+          },
+          "2014": {
+            "strategy": 23.7,
+            "nifty": 31.4
+          },
+          "2015": {
+            "strategy": -8.1,
+            "nifty": -4.1
+          },
+          "2016": {
+            "strategy": -0.8,
+            "nifty": 3.0
+          },
+          "2017": {
+            "strategy": 18.3,
+            "nifty": 28.6
+          },
+          "2018": {
+            "strategy": -2.1,
+            "nifty": 3.2
+          },
+          "2019": {
+            "strategy": 2.8,
+            "nifty": 12.0
+          },
+          "2020": {
+            "strategy": 23.3,
+            "nifty": 14.9
+          },
+          "2021": {
+            "strategy": 14.1,
+            "nifty": 24.1
+          },
+          "2022": {
+            "strategy": -2.6,
+            "nifty": 4.3
+          },
+          "2023": {
+            "strategy": 12.5,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 3.2,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 4.5,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -8.3,
+            "nifty": -11.1
+          }
+        }
+      },
+      "sameclose_exec_cash6": {
+        "strategy": {
+          "n_days": 3781,
+          "years": 15.0,
+          "cagr_pct": 6.54,
+          "ann_vol_pct": 9.06,
+          "sharpe_rf6": 0.06,
+          "max_dd_pct": -13.3,
+          "calmar": 0.49
+        },
+        "buy_hold": {
+          "n_days": 3781,
+          "years": 15.0,
+          "cagr_pct": 9.26,
+          "ann_vol_pct": 16.48,
+          "sharpe_rf6": 0.2,
+          "max_dd_pct": -38.4,
+          "calmar": 0.24
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 18.3,
+        "up_capture_pct": 56.7,
+        "down_capture_pct": 55.6,
+        "beta": 0.45,
+        "jensen_alpha_ann_pct": -1.15,
+        "alpha_t": -0.86,
+        "_beta_se": 0.005,
+        "by_year_pct": {
+          "2011": {
+            "strategy": -8.8,
+            "nifty": -24.9
+          },
+          "2012": {
+            "strategy": 10.7,
+            "nifty": 27.7
+          },
+          "2013": {
+            "strategy": -2.6,
+            "nifty": 6.8
+          },
+          "2014": {
+            "strategy": 25.0,
+            "nifty": 31.4
+          },
+          "2015": {
+            "strategy": -5.4,
+            "nifty": -4.1
+          },
+          "2016": {
+            "strategy": 1.7,
+            "nifty": 3.0
+          },
+          "2017": {
+            "strategy": 19.8,
+            "nifty": 28.6
+          },
+          "2018": {
+            "strategy": 0.1,
+            "nifty": 3.2
+          },
+          "2019": {
+            "strategy": 5.2,
+            "nifty": 12.0
+          },
+          "2020": {
+            "strategy": 26.0,
+            "nifty": 14.9
+          },
+          "2021": {
+            "strategy": 15.1,
+            "nifty": 24.1
+          },
+          "2022": {
+            "strategy": -0.1,
+            "nifty": 4.3
+          },
+          "2023": {
+            "strategy": 14.7,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 4.6,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 7.2,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -6.9,
+            "nifty": -11.1
+          }
+        }
+      }
+    },
+    "full_2022": {
+      "nextday_exec_cash0": {
+        "strategy": {
+          "n_days": 1040,
+          "years": 4.1,
+          "cagr_pct": 2.87,
+          "ann_vol_pct": 7.61,
+          "sharpe_rf6": -0.41,
+          "max_dd_pct": -12.5,
+          "calmar": 0.23
+        },
+        "buy_hold": {
+          "n_days": 1040,
+          "years": 4.1,
+          "cagr_pct": 7.53,
+          "ann_vol_pct": 13.32,
+          "sharpe_rf6": 0.12,
+          "max_dd_pct": -15.8,
+          "calmar": 0.48
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 15.9,
+        "up_capture_pct": 55.2,
+        "down_capture_pct": 57.0,
+        "beta": 0.47,
+        "jensen_alpha_ann_pct": -3.88,
+        "alpha_t": -1.79,
+        "_beta_se": 0.01,
+        "by_year_pct": {
+          "2022": {
+            "strategy": 4.3,
+            "nifty": 5.1
+          },
+          "2023": {
+            "strategy": 12.6,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": -0.0,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 1.7,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -5.8,
+            "nifty": -11.1
+          }
+        }
+      },
+      "nextday_exec_cash6": {
+        "strategy": {
+          "n_days": 1040,
+          "years": 4.1,
+          "cagr_pct": 5.19,
+          "ann_vol_pct": 7.61,
+          "sharpe_rf6": -0.11,
+          "max_dd_pct": -10.1,
+          "calmar": 0.51
+        },
+        "buy_hold": {
+          "n_days": 1040,
+          "years": 4.1,
+          "cagr_pct": 7.53,
+          "ann_vol_pct": 13.32,
+          "sharpe_rf6": 0.12,
+          "max_dd_pct": -15.8,
+          "calmar": 0.48
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 15.9,
+        "up_capture_pct": 56.6,
+        "down_capture_pct": 55.6,
+        "beta": 0.47,
+        "jensen_alpha_ann_pct": -1.66,
+        "alpha_t": -0.76,
+        "_beta_se": 0.01,
+        "by_year_pct": {
+          "2022": {
+            "strategy": 5.9,
+            "nifty": 5.1
+          },
+          "2023": {
+            "strategy": 13.6,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 2.9,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 3.8,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -4.1,
+            "nifty": -11.1
+          }
+        }
+      },
+      "sameclose_exec_cash0": {
+        "strategy": {
+          "n_days": 1041,
+          "years": 4.1,
+          "cagr_pct": 2.0,
+          "ann_vol_pct": 7.49,
+          "sharpe_rf6": -0.53,
+          "max_dd_pct": -13.9,
+          "calmar": 0.14
+        },
+        "buy_hold": {
+          "n_days": 1041,
+          "years": 4.1,
+          "cagr_pct": 7.63,
+          "ann_vol_pct": 13.32,
+          "sharpe_rf6": 0.12,
+          "max_dd_pct": -15.8,
+          "calmar": 0.48
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 15.9,
+        "up_capture_pct": 54.3,
+        "down_capture_pct": 57.3,
+        "beta": 0.46,
+        "jensen_alpha_ann_pct": -4.77,
+        "alpha_t": -2.25,
+        "_beta_se": 0.01,
+        "by_year_pct": {
+          "2022": {
+            "strategy": 3.6,
+            "nifty": 5.6
+          },
+          "2023": {
+            "strategy": 12.8,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": -1.6,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 0.8,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -6.4,
+            "nifty": -11.1
+          }
+        }
+      },
+      "sameclose_exec_cash6": {
+        "strategy": {
+          "n_days": 1041,
+          "years": 4.1,
+          "cagr_pct": 4.3,
+          "ann_vol_pct": 7.49,
+          "sharpe_rf6": -0.23,
+          "max_dd_pct": -10.9,
+          "calmar": 0.39
+        },
+        "buy_hold": {
+          "n_days": 1041,
+          "years": 4.1,
+          "cagr_pct": 7.63,
+          "ann_vol_pct": 13.32,
+          "sharpe_rf6": 0.12,
+          "max_dd_pct": -15.8,
+          "calmar": 0.48
+        },
+        "avg_exposure": 0.63,
+        "ann_turnover_x": 15.9,
+        "up_capture_pct": 55.7,
+        "down_capture_pct": 55.8,
+        "beta": 0.46,
+        "jensen_alpha_ann_pct": -2.54,
+        "alpha_t": -1.2,
+        "_beta_se": 0.01,
+        "by_year_pct": {
+          "2022": {
+            "strategy": 5.2,
+            "nifty": 5.6
+          },
+          "2023": {
+            "strategy": 13.8,
+            "nifty": 20.0
+          },
+          "2024": {
+            "strategy": 1.3,
+            "nifty": 8.8
+          },
+          "2025": {
+            "strategy": 2.9,
+            "nifty": 10.5
+          },
+          "2026": {
+            "strategy": -4.7,
+            "nifty": -11.1
+          }
+        }
+      }
+    }
+  }
+}

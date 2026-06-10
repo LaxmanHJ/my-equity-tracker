@@ -33,6 +33,11 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [covariance_estimation.md](concepts/covariance_estimation.md) | Portfolio risk — shrinkage, HRP |
 | [claude_final_gate.md](concepts/claude_final_gate.md) | Claude (opus-4-7) as final execution-plan gate before broker (SIC-31) |
 | [sentiment.md](concepts/sentiment.md) | News/event sentiment pipeline — sources, scorer chain, sentiment_daily table |
+| [short_horizon_reversal.md](concepts/short_horizon_reversal.md) | 1–5d cross-sectional signals (2026-06-10) — reversal real (rev3 t=6.3) but dies on costs; entry-timing overlay also tested and FAILED (−54bp/trade). Closes audit item H.1; thread closed |
+| [bulk_deal_drift.md](concepts/bulk_deal_drift.md) | Bulk/block-deal drift + counterparty studies (2026-06-10) — both FAIL; 124k deals backfilled 2019–2026; DESK_SELL curiosity noted but not promoted |
+| [delivery_spike.md](concepts/delivery_spike.md) | Delivery-spike events (2026-06-10) — FAIL after PIT: +85bp/t=3.3 collapses to +12bp/t=0.9; survivorship lesson reproduced live. 509k delivery rows backfilled 2019–2026; PIT now mandatory for event studies |
+| [pead.md](concepts/pead.md) | PEAD (SIC-93, 2026-06-10) — CLOSED, FAIL: two data extensions (integrated 2025+, legacy 2018) resolved the marginal t AGAINST the long side (2.6→2.9→2.2); effect is regime-dependent. 96k earnings broadcasts 2018→2026 remain as a permanent event table |
+| [vol_risk_premium.md](concepts/vol_risk_premium.md) | NIFTY VRP (SIC-92, 2026-06-10) — premium CONFIRMED (t=5.84, 15y incl COVID via Yahoo VIX backfill); naive harvest fails (one 2020 cycle = 11yrs of carry); phase 2 = defined-risk structures, daily chain collection LIVE in Force Sync |
 
 ## Live Trading
 

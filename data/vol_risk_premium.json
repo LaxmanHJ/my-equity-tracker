@@ -1,0 +1,112 @@
+{
+  "computed_at": "2026-06-10T11:16:32.187914+00:00",
+  "n_days": 3617,
+  "span": [
+    "2011-06-10",
+    "2026-05-08"
+  ],
+  "rv_window_days": 21,
+  "cost_vol_pts_round_trip": 0.8,
+  "vrp_daily": {
+    "mean_vol_pts": 2.8,
+    "median_vol_pts": 3.44,
+    "pct_positive": 80.3,
+    "t_overlap_adj": 5.84,
+    "by_year_mean": {
+      "2011": 3.43,
+      "2012": 5.42,
+      "2013": 1.81,
+      "2014": 4.32,
+      "2015": 1.99,
+      "2016": 2.29,
+      "2017": 3.53,
+      "2018": 2.77,
+      "2019": 3.41,
+      "2020": 1.83,
+      "2021": 3.16,
+      "2022": 2.98,
+      "2023": 2.93,
+      "2024": 1.42,
+      "2025": 2.52,
+      "2026": -1.75
+    }
+  },
+  "harvest_cycles": {
+    "n_cycles": 173,
+    "gross": {
+      "mean_vol_pts_per_cycle": 1.72,
+      "ann_sharpe": 0.59,
+      "hit_pct": 80.3,
+      "worst_cycle_vol_pts": -119.0,
+      "max_dd_vol_pts": -124.1,
+      "ann_harvest_vol_pts": 20.6
+    },
+    "net": {
+      "mean_vol_pts_per_cycle": 0.92,
+      "ann_sharpe": 0.31,
+      "hit_pct": 76.3,
+      "worst_cycle_vol_pts": -119.8,
+      "max_dd_vol_pts": -128.5,
+      "ann_harvest_vol_pts": 11.0
+    },
+    "by_vix_tercile_net": {
+      "low_vix": {
+        "mean_vol_pts_per_cycle": 0.69,
+        "ann_sharpe": 0.79,
+        "hit_pct": 69.0,
+        "worst_cycle_vol_pts": -11.3,
+        "max_dd_vol_pts": -15.1,
+        "ann_harvest_vol_pts": 8.3
+      },
+      "mid_vix": {
+        "mean_vol_pts_per_cycle": 1.13,
+        "ann_sharpe": 0.99,
+        "hit_pct": 77.2,
+        "worst_cycle_vol_pts": -15.5,
+        "max_dd_vol_pts": -19.7,
+        "ann_harvest_vol_pts": 13.6
+      },
+      "high_vix": {
+        "mean_vol_pts_per_cycle": 0.94,
+        "ann_sharpe": 0.19,
+        "hit_pct": 82.8,
+        "worst_cycle_vol_pts": -119.8,
+        "max_dd_vol_pts": -119.8,
+        "ann_harvest_vol_pts": 11.3
+      }
+    },
+    "worst_5_cycles": [
+      {
+        "date": "2020-03-02",
+        "vix": 25.2,
+        "fwd_rv": 81.44585000015452,
+        "pnl_net": -119.8156048065014
+      },
+      {
+        "date": "2015-07-30",
+        "vix": 15.33,
+        "fwd_rv": 26.16227935529467,
+        "pnl_net": -15.459359460680943
+      },
+      {
+        "date": "2013-08-06",
+        "vix": 22.73,
+        "fwd_rv": 32.20814965917785,
+        "pnl_net": -12.254289583545935
+      },
+      {
+        "date": "2024-05-15",
+        "vix": 20.2725,
+        "fwd_rv": 29.199506618218447,
+        "pnl_net": -11.69251277586343
+      },
+      {
+        "date": "2019-08-23",
+        "vix": 17.35,
+        "fwd_rv": 25.801567891860184,
+        "pnl_net": -11.31004050946024
+      }
+    ]
+  },
+  "gate": "mean VRP > 0 with overlap-adj |t| > 3 AND net Sharpe > 0.5; worst cycle reported vs capped-loss feasibility"
+}
