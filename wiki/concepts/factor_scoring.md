@@ -23,6 +23,8 @@ Calibrated against ML feature importances (per `quant_engine/config.py`):
 
 **IC-adaptive.** All 8 factors are listed in `IC_ADAPTIVE_FACTORS` and have their weights daily-rebalanced by `quant_engine/scoring/ic_weights.py` over the full **100% budget**. The IC panel builder (`_panel_row`) left-joins per-day `sentiment_daily.sent_score` onto each symbol's price history, so sentiment competes for weight on exactly the same Spearman-rank-IC criterion as the price factors. Until enough historical sentiment rows accumulate (≥ `MIN_IC_OBS = 20` valid date observations with ≥ `MIN_CROSS_N = 5` stocks each), sentiment's IC falls below the floor and it receives **0% live weight** — same gating Phase 3 envisaged, now expressed through the IC engine itself. The `reserved` mechanism in `IC_ADAPTIVE_FACTORS` is kept for any future hard-static factor we deliberately want the IC engine to leave alone (empty set today).
 
+**Cap fix (2026-06-10).** The 2026-05-13 cap-vs-renormalise bug (a single factor above `IC_FLOOR` bounced back to 100% weight because the post-cap renormalisation divided by its own capped weight) is fixed. `_constrain_weights()` in `ic_weights.py` now water-fills: offenders are capped at `IC_MAX_W × budget`, their excess spills onto uncapped positive-IC factors proportional to weight, and when *every* positive-IC factor is at the cap the residual is distributed across the below-floor factors pro-rata to their static `FACTOR_WEIGHTS` (diversification fallback instead of concentration). Covered by `quant_engine/tests/test_ic_weights.py` (8 tests).
+
 ## Signal Thresholds
 
 ```

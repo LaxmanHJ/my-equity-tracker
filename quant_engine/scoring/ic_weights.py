@@ -201,6 +201,51 @@ def _ic_from_panel(panel: pd.DataFrame, factor: str) -> tuple[float, int]:
     return float(np.mean(ics)), len(ics)
 
 
+def _constrain_weights(clipped: dict, adaptive_budget: float) -> dict:
+    """
+    Turn floored/long-only ICs into weights where the IC_MAX_W cap actually holds.
+
+    The previous implementation capped then renormalised, which undid the cap
+    whenever the capped factors held most of the mass — in the degenerate
+    single-survivor case the lone factor bounced back to 100% of the adaptive
+    budget (the 2026-05-13 "Active Factor Weights shows one factor at 100%" bug).
+
+    Water-fill instead: cap offenders, spill their excess onto uncapped
+    positive-IC factors proportional to weight, repeat until stable. If every
+    positive-IC factor is at the cap, the residual goes to the below-floor
+    factors pro-rata to their static FACTOR_WEIGHTS — diversification fallback
+    rather than concentration.
+    """
+    total = sum(clipped.values())
+    adaptive_cap = IC_MAX_W * adaptive_budget if adaptive_budget > 0 else IC_MAX_W
+    weights = {k: (v / total) * adaptive_budget for k, v in clipped.items()}
+
+    for _ in range(len(weights)):
+        excess = {k: w - adaptive_cap for k, w in weights.items() if w > adaptive_cap + 1e-12}
+        if not excess:
+            break
+        spill = sum(excess.values())
+        weights = {k: min(w, adaptive_cap) for k, w in weights.items()}
+        uncapped = {
+            k: w for k, w in weights.items()
+            if clipped[k] > 0 and w < adaptive_cap - 1e-12
+        }
+        pool = sum(uncapped.values())
+        if pool > 1e-12:
+            weights.update({k: w + spill * (w / pool) for k, w in uncapped.items()})
+            continue
+        # All positive-IC factors sit at the cap — give the residual to the
+        # zero-IC factors pro-rata to their static weights so the portfolio
+        # of factors stays diversified instead of concentrated.
+        zeroed = {k: FACTOR_WEIGHTS.get(k, 0.0) for k in weights if clipped[k] <= 0}
+        zpool = sum(zeroed.values())
+        if zpool > 1e-12:
+            weights.update({k: spill * (v / zpool) for k, v in zeroed.items()})
+        break
+
+    return weights
+
+
 def compute_ic_weights(
     lookback: int = IC_LOOKBACK,
     horizon:  int = IC_HORIZON,
@@ -271,15 +316,7 @@ def compute_ic_weights(
         _cache["method"] = "static_fallback"
         return dict(FACTOR_WEIGHTS)
 
-    # Normalise within the adaptive budget, cap per-factor at IC_MAX_W of the
-    # adaptive share, then re-normalise. The cap prevents a single dominant
-    # factor from absorbing the entire adaptive share when most others zero.
-    adaptive_cap = IC_MAX_W * adaptive_budget if adaptive_budget > 0 else IC_MAX_W
-    weights = {k: (v / total) * adaptive_budget for k, v in clipped.items()}
-    weights = {k: min(v, adaptive_cap) for k, v in weights.items()}
-    total2  = sum(weights.values())
-    if total2 > 1e-9:
-        weights = {k: (v / total2) * adaptive_budget for k, v in weights.items()}
+    weights = _constrain_weights(clipped, adaptive_budget)
 
     # Re-attach reserved factors at their static weight, then round.
     weights.update(reserved)
