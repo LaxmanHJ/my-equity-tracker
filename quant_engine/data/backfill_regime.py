@@ -21,7 +21,7 @@ import argparse
 import logging
 import os
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -176,6 +176,76 @@ def fetch_and_upsert_from_nse(conn, from_date: date, to_date: date) -> int:
     return len(bars)
 
 
+def fetch_and_fill_from_yahoo(conn, max_abs_diff_pct: float = 2.0) -> int:
+    """
+    Fill PRE-EXISTING gaps in india_vix from Yahoo Finance (^INDIAVIX).
+
+    NSE's own VIX history API only serves ~4 trailing years (pre-2022 windows
+    return 503 as of 2026-06-10), but Yahoo carries ^INDIAVIX back to 2011-06
+    — including the 2020 COVID spike, which any short-vol study needs in
+    sample. NSE stays authoritative: only dates with NO existing india_vix
+    row are inserted, and the Yahoo series must first cross-validate against
+    the NSE overlap (median |diff| within `max_abs_diff_pct`%) or nothing is
+    written.
+
+    Returns rows inserted.
+    """
+    import requests as _rq
+
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX"
+    resp = _rq.get(url, params={"range": "15y", "interval": "1d"},
+                   headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+    resp.raise_for_status()
+    result = resp.json()["chart"]["result"][0]
+    ts = result["timestamp"]
+    closes = result["indicators"]["quote"][0]["close"]
+    yahoo = {
+        datetime.utcfromtimestamp(t).date().isoformat(): round(float(c), 2)
+        for t, c in zip(ts, closes) if c is not None
+    }
+    logger.info("Yahoo ^INDIAVIX: %d rows (%s → %s)",
+                len(yahoo), min(yahoo), max(yahoo))
+
+    rows = conn.execute(
+        "SELECT date, india_vix FROM market_regime WHERE india_vix IS NOT NULL"
+    ).fetchall()
+    nse = {r[0]: float(r[1]) for r in rows}
+
+    overlap = [(d, yahoo[d], nse[d]) for d in yahoo.keys() & nse.keys()]
+    if len(overlap) < 100:
+        logger.warning("Only %d overlap days — refusing to cross-validate", len(overlap))
+        return 0
+    diffs = sorted(abs(y - n) / n * 100 for _, y, n in overlap)
+    median_diff = diffs[len(diffs) // 2]
+    logger.info("Cross-validation on %d overlap days: median |diff| %.3f%%, p95 %.2f%%",
+                len(overlap), median_diff, diffs[int(len(diffs) * 0.95)])
+    if median_diff > max_abs_diff_pct:
+        logger.error("Yahoo/NSE divergence too high (%.2f%%) — aborting", median_diff)
+        return 0
+
+    missing = sorted(d for d in yahoo if d not in nse)
+    if not missing:
+        logger.info("No gaps to fill.")
+        return 0
+    CHUNK = 1500
+    inserted = 0
+    for i in range(0, len(missing), CHUNK):
+        chunk = missing[i:i + CHUNK]
+        placeholders = ",".join(["(?,?)"] * len(chunk))
+        params = []
+        for d in chunk:
+            params.extend([d, yahoo[d]])
+        conn.execute(
+            "INSERT OR IGNORE INTO market_regime (date, india_vix) VALUES " + placeholders,
+            params,
+        )
+        inserted += len(chunk)
+    conn.commit()
+    logger.info("Filled %d missing VIX dates from Yahoo (%s → %s)",
+                inserted, missing[0], missing[-1])
+    return inserted
+
+
 # ── Entry point ───────────────────────────────────────────────────
 
 def main():
@@ -192,11 +262,22 @@ def main():
         "--from", metavar="DATE", dest="from_date",
         help="Full backfill start date YYYY-MM-DD (used with NSE API, default 2019-01-01).",
     )
+    parser.add_argument(
+        "--from-yahoo", action="store_true",
+        help="Fill pre-2022 gaps from Yahoo ^INDIAVIX (cross-validated vs NSE overlap).",
+    )
     args = parser.parse_args()
 
     conn = _get_rw_connection()
     conn.execute(CREATE_TABLE_SQL)
     conn.commit()
+
+    # ── Mode 0: Yahoo gap-fill (deep history NSE no longer serves) ─
+    if args.from_yahoo:
+        count = fetch_and_fill_from_yahoo(conn)
+        logger.info("Done — %d rows from Yahoo.", count)
+        conn.close()
+        return
 
     # ── Mode 1: CSV import (manual download from NSE website) ─────
     if args.from_csv:
