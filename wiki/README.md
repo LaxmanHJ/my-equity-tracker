@@ -38,6 +38,7 @@ LLM-maintained knowledge base (Karpathy wiki pattern). Every paper, concept, and
 | [delivery_spike.md](concepts/delivery_spike.md) | Delivery-spike events (2026-06-10) — FAIL after PIT: +85bp/t=3.3 collapses to +12bp/t=0.9; survivorship lesson reproduced live. 509k delivery rows backfilled 2019–2026; PIT now mandatory for event studies |
 | [pead.md](concepts/pead.md) | PEAD (SIC-93, 2026-06-10) — CLOSED, FAIL: two data extensions (integrated 2025+, legacy 2018) resolved the marginal t AGAINST the long side (2.6→2.9→2.2); effect is regime-dependent. 96k earnings broadcasts 2018→2026 remain as a permanent event table |
 | [vol_risk_premium.md](concepts/vol_risk_premium.md) | NIFTY VRP (SIC-92, 2026-06-10) — premium CONFIRMED (t=5.84, 15y incl COVID via Yahoo VIX backfill); naive harvest fails (one 2020 cycle = 11yrs of carry); phase 2 = defined-risk structures, daily chain collection LIVE in Force Sync |
+| [fund_design.md](concepts/fund_design.md) | Multi-sleeve fund book (2026-07-25) — beta core + factor fund + VRP + LS pilot; ledger-driven, fund_* tables, GH Actions sync; Study A (monthly 12-1 momentum) FAILED its gate → FACTOR_EQ via Momentum 30 index fund |
 
 ## Live Trading
 

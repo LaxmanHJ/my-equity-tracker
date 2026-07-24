@@ -45,7 +45,42 @@ From Asness et al. (2013): combining value + momentum at −0.4 correlation achi
 | January effect not handled | J&T (1993) | Low |
 | No IC tracking | Grinold & Kahn | Medium |
 
+## Study A — monthly 12-1 momentum on NIFTY200 PIT (2026-07-25) — FAIL
+
+The one cost-survivable frequency band never previously tested. Pre-registered
+declared rule in `quant_engine/research/monthly_momentum.py` (docstring is the
+registration); results in `data/monthly_momentum_study.json`.
+
+Rule: mom_12_1 = close[t−21]/close[t−252] − 1, NIFTY200 PIT universe (2018→,
+333 symbols, avg 194 eligible/month), month-end rebalance, 99 months, 30bp
+one-way costs on replaced names.
+
+| Portfolio | Gross | Net | Sharpe (net) | Turnover/mo |
+|---|---|---|---|---|
+| Long-only top-15 EW | 24.8%/yr | 22.6%/yr | 0.91 | 30.1% |
+| LS decile EW | 15.2%/yr | 10.9%/yr | 0.42 | 29.7% |
+
+Long-only net excess vs ^NSEI: +11.65%/yr, IR 0.74, monthly hit 54.5%.
+
+**Gates (declared before run): G1 LS net Sharpe > 0.6 → FAIL (0.42).
+G2 PSR > 0.95 → FAIL (0.878). G3 LO net excess > 0 → pass. Verdict: FAIL.**
+
+Interpretation: the momentum premium exists on NSE at monthly cadence (gross
+LS Sharpe 0.59, strong long-only cell) but the alpha does not clear the
+C0-consistent bar net of costs; the long-only excess is substantially
+beta/small-sample and was not the declared gate. Per the pre-registered
+decision rule, the fund's FACTOR_EQ sleeve is implemented via the **Nifty200
+Momentum 30 index fund** (captures the same premium with institutional
+execution), not a self-managed book. Thread closed — no variants, no
+threshold shopping.
+
+## Project Usage
+- `quant_engine/factors/momentum.py` — 1/3/6-month weighted factor score (legacy composite)
+- `quant_engine/research/monthly_momentum.py` — Study A (12-1 monthly, PIT, pre-registered)
+- `src/services/fundService.js` — reads the study verdict as the sleeve-2 gate on the Fund page
+
 ## Related Concepts
 - [factor_scoring.md](factor_scoring.md) — how momentum score is combined with others
 - [mean_reversion.md](mean_reversion.md) — mean reversion is the "opposite" strategy; regime determines which to use
 - [regime_detection.md](regime_detection.md) — BULL → momentum, BEAR → mean reversion
+- [fund_design.md](fund_design.md) — the multi-sleeve book this study gated

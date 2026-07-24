@@ -109,7 +109,9 @@ class TestWeightsSum(unittest.TestCase):
         self.assertAlmostEqual(total, 1.0)
 
     def test_weight_count(self):
-        self.assertEqual(len(SICILIAN_WEIGHTS), 11)
+        # 8 technical + 5 cross-stock/regime + 3 fundamental (added in the
+        # fundamentals expansion — this assertion had gone stale at 11)
+        self.assertEqual(len(SICILIAN_WEIGHTS), 16)
 
 
 class TestThresholds(unittest.TestCase):
