@@ -72,14 +72,32 @@ jobs:
           # the step's stdout pipe open makes the job hang until timeout.
           python -m uvicorn quant_engine.main:app --host 127.0.0.1 --port 5001 \
             > /tmp/quant-engine.log 2>&1 &
-          echo $! > /tmp/quant-engine.pid
-          for i in $(seq 1 30); do
+          ENGINE_PID=$!
+          echo $ENGINE_PID > /tmp/quant-engine.pid
+
+          # The FastAPI startup event runs an IC-weight computation against
+          # Turso before /health answers — measured at ~23s locally with warm
+          # imports and a nearby DB. A cold runner (first import of pandas /
+          # sklearn / scipy, plus datacenter->Turso latency) needs materially
+          # more than that; a 30s budget is what failed run 30130881196.
+          for i in $(seq 1 150); do
+            # Distinguish "still booting" from "died" — no point waiting out
+            # the full window on a process that already crashed.
+            if ! kill -0 "$ENGINE_PID" 2>/dev/null; then
+              echo "quant engine process exited after ${i}s — log follows:"
+              cat /tmp/quant-engine.log
+              exit 1
+            fi
             if curl -sf http://127.0.0.1:5001/health > /dev/null; then
-              echo "quant engine up after ${i}s"; exit 0
+              echo "quant engine up after ${i}s"
+              exit 0
+            fi
+            if [ $((i % 15)) -eq 0 ]; then
+              echo "  ...still waiting for /health (${i}s)"
             fi
             sleep 1
           done
-          echo "quant engine failed to start — log follows:"
+          echo "quant engine did not answer /health within 150s — log follows:"
           cat /tmp/quant-engine.log
           exit 1
 
