@@ -1,15 +1,11 @@
 import express from 'express';
 import { portfolio, getStocksBySector } from '../config/portfolio.js';
 import {
-  getAllQuotes,
   getHistoricalData,
   getPortfolioSummary,
   getQuote,
   getBenchmarkData,
-  fetchIndexData,
-  fetchFiiDiiToday,
-  fetchBulkDealsToday,
-  fetchPCRAndOIBuildup
+  fetchIndexData
 } from '../services/stockData.js';
 import { getFullAnalysis, generateSignals } from '../analysis/technicals.js';
 import {
@@ -50,9 +46,8 @@ import { computePositionSizes } from '../risk/positionSizing.js';
 import { riskLimits } from '../config/riskLimits.js';
 import { generateQueue, executeSignal, rejectSignal, evaluateSignal } from '../services/signalQueueService.js';
 import { getEquityMovers } from '../services/angelOneMarketData.js';
-import { syncRecentIntraday } from '../services/intradaySync.js';
-import { collectIVSnapshot } from '../services/optionChainService.js';
-import { openPaperCondor, settleDuePaperCondors, getPaperBook } from '../services/paperCondorService.js';
+import { openPaperCondor, getPaperBook } from '../services/paperCondorService.js';
+import { runEodSync } from '../services/syncOrchestrator.js';
 
 const router = express.Router();
 
@@ -443,187 +438,18 @@ function isMarketOpen() {
  * quant engine will read today's prices from the same up-to-date DB.
  */
 router.post('/portfolio/sync', async (req, res) => {
-  // Track each sub-sync so the response body tells the caller exactly what
-  // happened, instead of forcing them to read server console logs.
-  const subSyncs = {
-    holdings:  { ok: false, detail: null },
-    fii:       { ok: false, detail: null },
-    bulkDeals: { ok: false, detail: null },
-    pcrOi:     { ok: false, detail: null },
-    vix:       { ok: false, detail: null },
-    sentiment: { ok: false, detail: null },
-    eod:       { ok: false, detail: null },
-    intraday:  { ok: false, detail: null },
-    ivChain:   { ok: false, detail: null },
-  };
-
   try {
-    console.log('[ForceSync] Starting full portfolio + index data refresh into SQLite...');
-    const quotes = await getAllQuotes(true); // fetches from RapidAPI/AlphaVantage → writes to SQLite
-    console.log(`[ForceSync] ✅ Synced ${quotes.length} holdings to SQLite`);
-    subSyncs.holdings = { ok: true, detail: { synced: quotes.length } };
-
-    // Fetch today's FII/DII cash flows via Python engine (session-based, more reliable)
-    try {
-      const fiiRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/fii`, { method: 'POST' });
-      const fiiData = await fiiRes.json();
-      if (fiiData.success) {
-        console.log(`[ForceSync] ✅ FII/DII synced`);
-        subSyncs.fii = { ok: true, detail: fiiData };
-      } else {
-        console.warn(`[ForceSync] ⚠️ FII/DII sync: ${fiiData.error}`);
-        subSyncs.fii = { ok: false, detail: { error: fiiData.error } };
-      }
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ FII/DII sync skipped (quant engine unavailable):', e.message);
-      subSyncs.fii = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
-    }
-
-    // Fetch today's bulk/block deals — accumulates institutional activity data over time
-    try {
-      await fetchBulkDealsToday();
-      subSyncs.bulkDeals = { ok: true, detail: null };
-    } catch (e) {
-      subSyncs.bulkDeals = { ok: false, detail: { error: e.message } };
-    }
-
-    // Fetch PCR + OI Buildup from Angel One. PCR routinely fails outside
-    // market hours ("No data available") — partial status is reported so the
-    // response doesn't claim ok while pcr_history quietly falls behind.
-    try {
-      const pcrOiStatus = await fetchPCRAndOIBuildup();
-      subSyncs.pcrOi = { ok: pcrOiStatus.pcr.ok && pcrOiStatus.oi.ok, detail: pcrOiStatus };
-    } catch (e) {
-      subSyncs.pcrOi = { ok: false, detail: { error: e.message } };
-    }
-
-    // Fetch today's India VIX from NSE and upsert into market_regime
-    try {
-      const vixRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/vix`, { method: 'POST' });
-      const vixData = await vixRes.json();
-      if (vixData.success) {
-        console.log(`[ForceSync] ✅ VIX synced: ${vixData.date} = ${vixData.india_vix}`);
-        subSyncs.vix = { ok: true, detail: { date: vixData.date, india_vix: vixData.india_vix } };
-      } else {
-        console.warn(`[ForceSync] ⚠️ VIX sync failed: ${vixData.error}`);
-        subSyncs.vix = { ok: false, detail: { error: vixData.error } };
-      }
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ VIX sync skipped (quant engine unavailable):', e.message);
-      subSyncs.vix = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
-    }
-
-    // Score today's sentiment from stock_news (and NewsAPI if configured)
-    // and upsert into sentiment_daily. Runs after stock_news is populated by
-    // getAllQuotes above, so the same force-sync picks up news → score in
-    // one pass. Idempotent: UPSERT on (symbol, date).
-    try {
-      const sentRes = await fetch(
-        `${QUANT_ENGINE_URL}/api/sync/sentiment?days=1`,
-        { method: 'POST' },
-      );
-      const sentData = await sentRes.json();
-      if (sentData.success) {
-        console.log(
-          `[ForceSync] ✅ Sentiment synced: ${sentData.symbols} symbols, ` +
-          `${sentData.articles} articles, ${sentData.rows_written} rows ` +
-          `(scorers: ${(sentData.available_scorers || []).join(',') || 'none'})`,
-        );
-        subSyncs.sentiment = {
-          ok: true,
-          detail: {
-            symbols:           sentData.symbols,
-            articles:          sentData.articles,
-            rows_written:      sentData.rows_written,
-            available_scorers: sentData.available_scorers,
-          },
-        };
-      } else {
-        console.warn(`[ForceSync] ⚠️ Sentiment sync failed: ${sentData.error}`);
-        subSyncs.sentiment = {
-          ok: false,
-          detail: {
-            error:             sentData.error,
-            available_scorers: sentData.available_scorers,
-          },
-        };
-      }
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ Sentiment sync skipped (quant engine unavailable):', e.message);
-      subSyncs.sentiment = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
-    }
-
-    // Gap-fill sector_indices + delivery_data from each table's max(date) → today.
-    // Self-healing: skipped days are caught up on the next press (2026-06-10
-    // staleness incident — these tables sat frozen for 2.5 months unnoticed).
-    try {
-      const eodRes = await fetch(`${QUANT_ENGINE_URL}/api/sync/eod`, { method: 'POST' });
-      const eodData = await eodRes.json();
-      subSyncs.eod = { ok: !!eodData.success, detail: eodData.tables };
-      console.log(`[ForceSync] ${eodData.success ? '✅' : '⚠️'} EOD gap-fill:`, JSON.stringify(eodData.tables));
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ EOD gap-fill skipped (quant engine unavailable):', e.message);
-      subSyncs.eod = { ok: false, detail: { error: `quant engine unavailable: ${e.message}` } };
-    }
-
-    // Top up trailing 15-min candles from Angel One (portfolio + NIFTY).
-    try {
-      const intradayResult = await syncRecentIntraday();
-      subSyncs.intraday = { ok: intradayResult.errors.length === 0, detail: intradayResult };
-      console.log(`[ForceSync] ✅ Intraday top-up: ${intradayResult.saved} candles, ${intradayResult.errors.length} errors`);
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ Intraday top-up failed:', e.message);
-      subSyncs.intraday = { ok: false, detail: { error: e.message } };
-    }
-
-    // NIFTY ~30-DTE option-chain IV snapshot (SIC-92 forward collection).
-    // Angel serves greeks only around market hours — failures are expected
-    // on late-evening presses and reported truthfully, not swallowed.
-    try {
-      const ivResult = await collectIVSnapshot('NIFTY');
-      subSyncs.ivChain = { ok: !!ivResult.ok, detail: ivResult };
-      console.log(`[ForceSync] ${ivResult.ok ? '✅' : '⚠️'} IV chain:`, JSON.stringify(ivResult));
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ IV chain snapshot failed:', e.message);
-      subSyncs.ivChain = { ok: false, detail: { error: e.message } };
-    }
-
-    // Settle any paper condors whose expiry has passed (needs the expiry-day
-    // ^NSEI bar, which the holdings sync above just refreshed).
-    try {
-      const settled = await settleDuePaperCondors();
-      if (settled.length) console.log('[ForceSync] ✅ Paper condors settled:', JSON.stringify(settled));
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ Paper condor settlement failed:', e.message);
-    }
-
-    // Freshness report — surfaces any table still running on stale data so
-    // the frontend can warn instead of silently ffilling frozen features.
-    let freshness = null;
-    try {
-      const freshRes = await fetch(`${QUANT_ENGINE_URL}/api/data/freshness`);
-      freshness = await freshRes.json();
-      if (freshness.any_stale) {
-        const staleNames = Object.entries(freshness.tables)
-          .filter(([, t]) => t.stale)
-          .map(([name, t]) => `${name} (${t.max_date ?? 'empty'})`);
-        console.warn(`[ForceSync] ⚠️ STALE TABLES: ${staleNames.join(', ')}`);
-      }
-    } catch (e) {
-      console.warn('[ForceSync] ⚠️ Freshness check skipped:', e.message);
-    }
-
+    // Full pipeline lives in syncOrchestrator so the GH Actions worker and the
+    // in-process cron run the exact same code path as this button.
+    const result = await runEodSync();
     res.json({
-      success: true,
-      synced: quotes.length,
-      message: `Refreshed ${quotes.length} holdings in database`,
-      subSyncs,
-      freshness,
+      ...result,
+      message: `Refreshed ${result.synced} holdings in database`,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('[ForceSync] Error:', error);
-    res.status(500).json({ success: false, error: 'Failed to sync portfolio data', subSyncs });
+    res.status(500).json({ success: false, error: 'Failed to sync portfolio data' });
   }
 });
 

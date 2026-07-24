@@ -1,5 +1,9 @@
 fastapi==0.109.2
 uvicorn==0.27.1
+# Direct dependency of data/turso_client.py — the DB layer everything reads
+# through. It resolved transitively via newsapi-python; pinned explicitly so a
+# change to that package can't silently break every Turso read.
+requests>=2.31.0
 pandas==2.2.0
 numpy==1.26.4
 scipy==1.12.0
