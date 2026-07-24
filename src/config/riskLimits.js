@@ -100,4 +100,24 @@ export const riskLimits = {
   paperTrading: process.env.PAPER_TRADING !== 'false',
 };
 
+/**
+ * Fund (new multi-sleeve book) limits — 2026-07-25.
+ *
+ * Motivated directly by the legacy book's failure mode: TATAELXSI was 38.7%
+ * of capital at cost and its −50% move accounted for the entire −19.9% book
+ * loss. A 15% cap would have held that damage to ~40% of what it was.
+ * Measurement and alerting only — nothing here places or blocks orders.
+ */
+export const fundRiskLimits = {
+  // Single position as % of fund NAV
+  maxPositionPct: 15,        // warning
+  hardPositionPct: 25,       // critical
+
+  // Per-position drawdown from entry (%) before an alert fires
+  maxDrawdownAlertPct: 20,
+
+  // How far a sleeve may drift above its budget (% of NAV, absolute) before flagging
+  sleeveBudgetTolerancePct: 5,
+};
+
 export default riskLimits;

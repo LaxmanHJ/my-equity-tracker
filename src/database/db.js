@@ -451,6 +451,51 @@ export async function initDatabase() {
   `);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_intraday_symbol_ts ON intraday_candles(symbol, ts)`);
 
+  // ── Fund (new multi-sleeve book, 2026-07-25) ─────────────────────────
+  // Namespaced fund_* so the legacy 15-stock portfolio (config/portfolio.js)
+  // and the new book never share state. The ledger is the source of truth;
+  // positions/NAV are derived, never stored ad hoc.
+
+  // Every fill the user records, one row per execution.
+  // sleeve: BETA_CORE | FACTOR_EQ | VRP | LS_FUT | CASH
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS fund_ledger (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      sleeve      TEXT NOT NULL,
+      trade_date  TEXT NOT NULL,
+      instrument  TEXT NOT NULL,
+      side        TEXT NOT NULL CHECK (side IN ('BUY','SELL','DEPOSIT','WITHDRAW')),
+      qty         REAL NOT NULL,
+      price       REAL NOT NULL,
+      fees        REAL DEFAULT 0,
+      note        TEXT,
+      created_at  TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_fund_ledger_sleeve ON fund_ledger(sleeve, trade_date)`);
+
+  // Daily NAV per sleeve (written by the overview endpoint when called on a new day)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS fund_nav_daily (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      date          TEXT NOT NULL,
+      sleeve        TEXT NOT NULL,
+      market_value  REAL NOT NULL,
+      created_at    TEXT DEFAULT (datetime('now')),
+      UNIQUE(date, sleeve)
+    )
+  `);
+
+  // Key/value config: sleeve budgets, tranche schedule, chosen instruments.
+  // Values are JSON strings.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS fund_config (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   console.log('Database initialized');
 }
 
@@ -1283,6 +1328,84 @@ export async function getIntradayCandles(symbol, fromTs = null, toTs = null) {
   if (toTs)   { sql += ` AND ts <= ?`; args.push(toTs); }
   sql += ` ORDER BY ts ASC`;
   const result = await db.execute({ sql, args });
+  return result.rows;
+}
+
+// ═══════════════════════════════════════════════════════
+// Fund (multi-sleeve book) CRUD
+// ═══════════════════════════════════════════════════════
+
+export async function addFundLedgerEntry({ sleeve, trade_date, instrument, side, qty, price, fees = 0, note = null }) {
+  const result = await db.execute({
+    sql: `INSERT INTO fund_ledger (sleeve, trade_date, instrument, side, qty, price, fees, note)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: nn(sleeve, trade_date, instrument, side, qty, price, fees, note),
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export async function getFundLedger({ sleeve = null } = {}) {
+  const sql = sleeve
+    ? `SELECT * FROM fund_ledger WHERE sleeve = ? ORDER BY trade_date ASC, id ASC`
+    : `SELECT * FROM fund_ledger ORDER BY trade_date ASC, id ASC`;
+  const result = await db.execute({ sql, args: sleeve ? [sleeve] : [] });
+  return result.rows;
+}
+
+export async function deleteFundLedgerEntry(id) {
+  const result = await db.execute({
+    sql: `DELETE FROM fund_ledger WHERE id = ?`,
+    args: [id],
+  });
+  return result.rowsAffected > 0;
+}
+
+/** Distinct tradeable instruments in the fund ledger with their latest cached price date. */
+export async function getFundInstrumentsWithLastDate() {
+  const result = await db.execute(`
+    SELECT l.instrument, MAX(p.date) AS last_date
+    FROM (SELECT DISTINCT instrument FROM fund_ledger WHERE side IN ('BUY','SELL')) l
+    LEFT JOIN price_history p ON p.symbol = l.instrument
+    GROUP BY l.instrument
+  `);
+  return result.rows.map(r => ({ instrument: r.instrument, lastDate: r.last_date || null }));
+}
+
+export async function getFundConfig() {
+  const result = await db.execute(`SELECT key, value FROM fund_config`);
+  const config = {};
+  for (const row of result.rows) {
+    try { config[row.key] = JSON.parse(row.value); }
+    catch { config[row.key] = row.value; }
+  }
+  return config;
+}
+
+export async function setFundConfig(key, value) {
+  await db.execute({
+    sql: `INSERT INTO fund_config (key, value, updated_at) VALUES (?, ?, datetime('now'))
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    args: nn(key, JSON.stringify(value)),
+  });
+}
+
+export async function saveFundNav(date, sleeveValues) {
+  // sleeveValues: { BETA_CORE: 123456.0, ... }
+  for (const [sleeve, market_value] of Object.entries(sleeveValues)) {
+    await db.execute({
+      sql: `INSERT INTO fund_nav_daily (date, sleeve, market_value) VALUES (?, ?, ?)
+            ON CONFLICT(date, sleeve) DO UPDATE SET market_value = excluded.market_value`,
+      args: nn(date, sleeve, market_value),
+    });
+  }
+}
+
+export async function getFundNavHistory(days = 365) {
+  const result = await db.execute({
+    sql: `SELECT date, sleeve, market_value FROM fund_nav_daily
+          WHERE date >= date('now', ?) ORDER BY date ASC`,
+    args: [`-${days} days`],
+  });
   return result.rows;
 }
 

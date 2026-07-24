@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockAnalyzer | Fund</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .fund-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
+    .fund-card { background: var(--bg-secondary); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 12px; padding: 1.25rem 1.5rem; }
+    .fund-card h3 { margin: 0 0 1rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; }
+
+    .nav-stat { font-size: 1.9rem; font-weight: 700; }
+    .nav-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+    .sleeve-row { margin-bottom: 0.9rem; }
+    .sleeve-head { display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.3rem; }
+    .sleeve-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.06); position: relative; overflow: hidden; }
+    .sleeve-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--accent-primary); opacity: 0.85; }
+    .sleeve-budget-mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-muted); }
+
+    .fund-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    .fund-table th { text-align: left; padding: 0.55rem 0.8rem; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .fund-table td { padding: 0.6rem 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .fund-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .pos { color: var(--success); } .neg { color: var(--danger); }
+
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    .pill-ok { background: var(--success-bg); color: var(--success); }
+    .pill-warn { background: var(--warning-bg); color: var(--warning); }
+    .pill-crit { background: var(--danger-bg); color: var(--danger); }
+    .pill-info { background: rgba(59,130,246,0.15); color: var(--info); }
+    .pill-muted { background: rgba(255,255,255,0.06); color: var(--text-muted); }
+
+    .gate-row { display: flex; justify-content: space-between; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.84rem; }
+    .gate-row:last-child { border-bottom: none; }
+
+    .progress-outer { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); margin-top: 0.4rem; }
+    .progress-inner { height: 6px; border-radius: 3px; background: var(--accent-gradient); }
+
+    .risk-flag { padding: 0.55rem 0.8rem; border-radius: 8px; font-size: 0.82rem; margin-bottom: 0.5rem; }
+    .risk-flag.warning { background: var(--warning-bg); color: var(--warning); }
+    .risk-flag.critical { background: var(--danger-bg); color: var(--danger); }
+
+    /* Ledger form */
+    .ledger-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0.6rem; align-items: end; margin-bottom: 1rem; }
+    .ledger-form label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .ledger-form input, .ledger-form select { width: 100%; box-sizing: border-box; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 0.45rem 0.6rem; font-size: 0.82rem; font-family: inherit; }
+    .btn-add { background: var(--accent-gradient); color: #0a0a0f; border: none; border-radius: 6px; padding: 0.5rem 1.1rem; font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+    .btn-del { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 0.8rem; }
+
+    .disclaimer { font-size: 0.72rem; color: var(--text-muted); margin-top: 2rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span style="font-weight:700;">📈 StockAnalyzer</span>
+    </div>
+    <div class="nav-links">
+      <a href="index.html#dashboard" class="nav-link">Dashboard</a>
+      <a href="risk.html" class="nav-link">Trade Triggers</a>
+      <a href="backtest.html" class="nav-link">Backtesting</a>
+      <a href="#" class="nav-link active">Fund</a>
+    </div>
+  </nav>
+
+  <main class="container" style="max-width: 1200px; margin: 0 auto; padding: 1.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
+      <div>
+        <h1 style="margin:0; font-size:1.4rem;">Fund — Multi-Sleeve Book</h1>
+        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;">
+          Ledger-driven · manual execution only · design rule: no holding period under 1 month
+        </div>
+      </div>
+      <div id="asOf" style="font-size:0.75rem; color:var(--text-muted);"></div>
+    </div>
+
+    <!-- Row 1: NAV + sleeves + tranche -->
+    <div class="fund-grid">
+      <div class="fund-card">
+        <h3>Net Asset Value</h3>
+        <div class="nav-stat" id="navValue">—</div>
+        <div class="nav-sub" id="navBreakdown">—</div>
+      </div>
+
+      <div class="fund-card">
+        <h3>Sleeve Allocation vs Budget</h3>
+        <div id="sleeveBars"><span style="color:var(--text-muted); font-size:0.82rem;">Loading…</span></div>
+      </div>
+
+      <div class="fund-card">
+        <h3>Beta Core — Staged Entry</h3>
+        <div id="trancheCard"><span style="color:var(--text-muted); font-size:0.82rem;">Loading…</span></div>
+      </div>
+    </div>
+
+    <!-- Row 2: gates + risk -->
+    <div class="fund-grid">
+      <div class="fund-card">
+        <h3>Strategy Gates</h3>
+        <div id="gatesCard"></div>
+      </div>
+      <div class="fund-card">
+        <h3>Risk Flags</h3>
+        <div id="riskCard"><span style="color:var(--text-muted); font-size:0.82rem;">Loading…</span></div>
+      </div>
+    </div>
+
+    <!-- Positions -->
+    <div class="fund-card" style="margin-bottom:1.5rem;">
+      <h3>Positions</h3>
+      <div class="table-wrapper" style="overflow-x:auto;">
+        <table class="fund-table" id="positionsTable">
+          <thead>
+            <tr>
+              <th>Sleeve</th><th>Instrument</th>
+              <th class="num">Qty</th><th class="num">Avg Cost</th>
+              <th class="num">Last</th><th class="num">Value</th>
+              <th class="num">P&amp;L</th><th class="num">P&amp;L %</th><th class="num">Weight</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="9" style="color:var(--text-muted);">No positions yet — record your first fill below.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Ledger -->
+    <div class="fund-card">
+      <h3>Ledger — Record a Fill</h3>
+      <form class="ledger-form" id="ledgerForm">
+        <div>
+          <label>Sleeve</label>
+          <select name="sleeve">
+            <option value="BETA_CORE">BETA_CORE</option>
+            <option value="FACTOR_EQ">FACTOR_EQ</option>
+            <option value="VRP">VRP</option>
+            <option value="LS_FUT">LS_FUT</option>
+            <option value="CASH">CASH</option>
+          </select>
+        </div>
+        <div>
+          <label>Side</label>
+          <select name="side">
+            <option>BUY</option><option>SELL</option>
+            <option>DEPOSIT</option><option>WITHDRAW</option>
+          </select>
+        </div>
+        <div><label>Date</label><input name="trade_date" type="date" required /></div>
+        <div><label>Instrument</label><input name="instrument" placeholder="NIFTYBEES" required /></div>
+        <div><label>Qty</label><input name="qty" type="number" step="any" min="0" required /></div>
+        <div><label>Price ₹</label><input name="price" type="number" step="any" min="0" required /></div>
+        <div><label>Fees ₹</label><input name="fees" type="number" step="any" min="0" value="0" /></div>
+        <div><button type="submit" class="btn-add">Add</button></div>
+      </form>
+      <div id="ledgerMsg" style="font-size:0.78rem; margin-bottom:0.75rem;"></div>
+      <div class="table-wrapper" style="overflow-x:auto;">
+        <table class="fund-table" id="ledgerTable">
+          <thead>
+            <tr><th>Date</th><th>Sleeve</th><th>Instrument</th><th>Side</th>
+                <th class="num">Qty</th><th class="num">Price</th><th class="num">Fees</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="disclaimer">
+      DEPOSIT/WITHDRAW rows track cash (qty × price = amount). The system never places broker orders —
+      it measures, alerts, and enforces process. Sleeve strategies unlock only behind their
+      pre-registered gates (see Strategy Gates above). Cap rule motivated by the legacy book:
+      one 38.7% position produced the entire −19.9% loss.
+    </p>
+  </main>
+
+  <script src="js/fund.js"></script>
+</body>
+</html>
