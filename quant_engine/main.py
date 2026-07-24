@@ -48,15 +48,32 @@ def _warm_ic_weights():
     cache instead of paying the ~2-3s panel-build cost. Failures are logged
     but swallowed so a transient Turso outage at boot doesn't crash the
     process.
+
+    Runs on a background thread. Starlette calls a non-async startup handler
+    inline, so doing this work here directly blocked the event loop and the
+    server could not answer /health until it finished — measured at ~20s
+    against a real Turso instance, which is what timed out the GitHub Actions
+    health probe (run 30130881196). The warm-up is a latency optimisation, not
+    a correctness requirement, so nothing should wait on it.
+
+    _cache in ic_weights.py is already guarded by a threading.Lock, so a
+    request arriving mid-warm-up is safe: it either reads the warm value or
+    computes its own and last-write-wins on an identical result.
     """
     import logging
+    import threading
     log = logging.getLogger(__name__)
-    try:
-        from quant_engine.scoring.ic_weights import get_active_weights
-        get_active_weights()
-        log.info("IC weights pre-warmed at startup")
-    except Exception as exc:
-        log.warning("IC weights warmup failed: %s", exc)
+
+    def _warm():
+        try:
+            from quant_engine.scoring.ic_weights import get_active_weights
+            get_active_weights()
+            log.info("IC weights pre-warmed at startup")
+        except Exception as exc:
+            log.warning("IC weights warmup failed: %s", exc)
+
+    # daemon=True so a hung Turso call can never hold up interpreter shutdown
+    threading.Thread(target=_warm, name="ic-weights-warmup", daemon=True).start()
 
 
 if __name__ == "__main__":
