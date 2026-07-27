@@ -1,14 +1,23 @@
 """
 Backfill FII/DII cash market daily net flows.
 
-Two modes:
+Three modes:
   1. --from-csv <path>  One-time import of the NSE historical CSV
                         (Download from nseindia.com → Reports → FII/DII Trading Activity)
   2. --today            Fetch today's data from the live NSE API
+  3. --recent           Gap-fill the trailing ~30 sessions from the mirror feed
 
 The live API endpoint:
   https://www.nseindia.com/api/fiidiiTradeReact
-  Returns only the current trading day. Run daily (e.g. via cron at 18:00 IST).
+  Returns only the current trading day — the date query params it accepts are
+  ignored, so it can never fill a gap. Miss a day and that day is gone.
+
+The mirror feed (--recent) exists to close that hole: Moneycontrol republishes
+the same NSE daily release and keeps a rolling ~30-session window, embedded as
+JSON in the page's __NEXT_DATA__ blob. Verified byte-identical to NSE on
+2026-07-27 and to the 8 dates already stored from NSE, so it is a true mirror,
+not a re-estimate. NSE stays the primary source; the mirror only backfills
+dates the primary missed.
 
 CSV format expected from NSE download (columns may vary slightly):
   Date | Buy Value (FII) | Sell Value (FII) | Net Value (FII) | Buy Value (DII) | Sell Value (DII) | Net Value (DII)
@@ -20,8 +29,10 @@ Stored in market_regime table columns:
 Run:
     python3 -m quant_engine.data.backfill_fii_dii --from-csv ~/Downloads/fiidiiTradeReact.csv
     python3 -m quant_engine.data.backfill_fii_dii --today
+    python3 -m quant_engine.data.backfill_fii_dii --recent
 """
 import argparse
+import json
 import logging
 import re
 from datetime import datetime
@@ -44,6 +55,10 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 LIVE_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
+
+# Rolling ~30-session mirror of the same NSE release — see module docstring.
+MIRROR_URL = "https://www.moneycontrol.com/markets/fii-dii-data/cash/"
+MIRROR_HEADERS = {"User-Agent": HEADERS["User-Agent"]}
 
 ALTER_SQLS = [
     "ALTER TABLE market_regime ADD COLUMN fii_net_cash REAL",
@@ -138,7 +153,88 @@ def fetch_today(conn) -> int:
     return 1
 
 
-# ── Mode 2: historical CSV import ─────────────────────────────
+# ── Mode 2: rolling mirror window (gap-fill) ──────────────────
+
+def _extract_next_data(html: str) -> dict:
+    """Pull the __NEXT_DATA__ JSON blob out of a Next.js page."""
+    m = re.search(
+        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S
+    )
+    if not m:
+        raise ValueError("__NEXT_DATA__ blob not found — mirror page layout changed")
+    return json.loads(m.group(1))
+
+
+def parse_mirror_rows(html: str) -> list[dict]:
+    """
+    Parse the mirror page into [{date, fii, dii}, ...], newest first.
+
+    Raises ValueError if the page no longer carries the expected structure —
+    a silent empty list would look identical to "no new data" and let the
+    table go stale again without anyone noticing.
+    """
+    blob = _extract_next_data(html)
+    try:
+        raw = blob["props"]["pageProps"]["FiiDiiData"]["fiiDiiData"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"mirror JSON shape changed: {exc}") from exc
+
+    rows = []
+    for item in raw:
+        try:
+            d = _parse_date(item["date"])
+        except (ValueError, KeyError):
+            continue
+        rows.append({
+            "date": d,
+            "fii": _parse_float(item.get("fiiNet")),
+            "dii": _parse_float(item.get("diiNet")),
+        })
+
+    if not rows:
+        raise ValueError("mirror returned zero parseable rows")
+    return rows
+
+
+def fetch_recent(conn, only_missing: bool = True) -> int:
+    """
+    Gap-fill the trailing mirror window into market_regime.
+
+    Args:
+        conn:         DB connection.
+        only_missing: When True (default) dates that already hold an FII value
+                      are left untouched, so NSE-sourced rows always win over
+                      the mirror. Pass False to re-import the whole window.
+
+    Returns:
+        Number of rows upserted.
+    """
+    resp = requests.get(MIRROR_URL, headers=MIRROR_HEADERS, timeout=25)
+    resp.raise_for_status()
+    rows = parse_mirror_rows(resp.text)
+
+    if only_missing:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT date FROM market_regime "
+            "WHERE fii_net_cash IS NOT NULL AND date >= ?",
+            (min(r["date"] for r in rows),),
+        )
+        have = {str(r[0])[:10] for r in cur.fetchall()}
+        rows = [r for r in rows if r["date"] not in have]
+
+    if not rows:
+        logger.info("Mirror window already complete — nothing to fill")
+        return 0
+
+    conn.executemany(UPSERT_SQL, rows)
+    conn.commit()
+    logger.info("Gap-filled %d FII/DII rows from mirror (%s → %s)",
+                len(rows), min(r["date"] for r in rows), max(r["date"] for r in rows))
+    return len(rows)
+
+
+# ── Mode 3: historical CSV import ─────────────────────────────
 
 def _find_columns(df: pd.DataFrame):
     """
@@ -222,6 +318,11 @@ def main():
                        help="Path to NSE historical CSV download")
     group.add_argument("--today", action="store_true",
                        help="Fetch today's data from the live NSE API")
+    group.add_argument("--recent", action="store_true",
+                       help="Gap-fill the trailing ~30 sessions from the mirror feed")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="With --recent: re-import the window instead of "
+                             "only filling dates that have no FII value yet")
     args = parser.parse_args()
 
     conn = connect()
@@ -230,6 +331,9 @@ def main():
     if args.today:
         count = fetch_today(conn)
         logger.info("Done — %d row upserted", count)
+    elif args.recent:
+        count = fetch_recent(conn, only_missing=not args.overwrite)
+        logger.info("Done — %d rows gap-filled", count)
     else:
         count = import_csv(conn, args.csv_path)
         logger.info("Done — %d rows imported from CSV", count)

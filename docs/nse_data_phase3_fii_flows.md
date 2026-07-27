@@ -47,7 +47,21 @@ python3 -m quant_engine.data.backfill_fii_dii --today
 ```
 Uses: `https://www.nseindia.com/api/fiidiiTradeReact` (User-Agent header only, no auth)
 
-> **Why the historical CSV is manual:** `www.nseindia.com` is behind Cloudflare — headless requests are blocked for the date-range API. The archives subdomain (`nsearchives`) doesn't host FII/DII daily files. The one-time CSV download is the only way to get history; daily updates are fully automated after that.
+**Gap-fill after a missed run (added 2026-07-27):**
+```bash
+python3 -m quant_engine.data.backfill_fii_dii --recent            # fill dates with no FII value
+python3 -m quant_engine.data.backfill_fii_dii --recent --overwrite # re-import the whole window
+```
+Pulls a rolling ~30-session mirror of the same NSE release from the
+Moneycontrol cash page (`__NEXT_DATA__` JSON blob). `/api/sync/fii` runs this
+automatically as a second step after the live fetch, so the pipeline
+self-heals instead of losing a day permanently.
+
+> **Why `--today` alone is not enough:** `fiidiiTradeReact` returns only the current trading day. It *accepts* `date=` / `from=` / `to=` params but ignores them — every variant returns the same latest-day payload. Miss one evening's run and that day is unrecoverable from NSE. The `fii_stats_<DD-Mon-YYYY>.xls` archive file is derivatives-only (FII DERIVATIVES STATISTICS) and carries no cash-segment numbers.
+
+> **Why the historical CSV is still manual:** `www.nseindia.com` is behind Cloudflare — headless requests are blocked for the date-range API. The archives subdomain (`nsearchives`) doesn't host FII/DII daily files. The mirror covers ~30 sessions; anything older than that still needs the one-time CSV download.
+
+> **Mirror trust check (2026-07-27):** mirror vs NSE live agreed exactly for 2026-07-27 (FII −1,688.23 / DII +2,329.14), and mirror vs the 8 dates already stored from NSE agreed on every one. It republishes the NSE release rather than re-estimating it. NSE stays primary — `--recent` only writes dates that have no FII value yet.
 
 ### Source 2 — F&O Participant OI (fully automated)
 
@@ -139,8 +153,32 @@ python3 -m quant_engine.ml.trainer
 **Daily automation (add to cron at 18:30 IST):**
 ```bash
 python3 -m quant_engine.data.backfill_fii_dii --today
+python3 -m quant_engine.data.backfill_fii_dii --recent   # heal any missed day
 python3 -m quant_engine.data.backfill_fo_oi --date $(date +%Y-%m-%d)
 ```
+The EOD sync (Force Sync button / GitHub Actions cron) already does the first
+two via `POST /api/sync/fii`.
+
+---
+
+## 2026-07-27 — Staleness Incident
+
+`fii_net_cash` last advanced on 2026-07-07 and tripped the EOD sync freshness
+gate 20 days later. Root causes and fixes are written up in
+`wiki/concepts/regime_detection.md` → *"market_regime writers must not clobber
+each other"*. Short version:
+
+- `INSERT OR REPLACE INTO market_regime (date, india_vix)` deleted and
+  reinserted the row, NULLing `fii_net_cash` / `dii_net_cash` /
+  `fii_fo_net_long` right after the FII step wrote them. Fixed in
+  `quant_engine/routers/scores.py` and `quant_engine/data/backfill_regime.py`
+  (column-scoped `ON CONFLICT DO UPDATE`).
+- No gap-fill existed, so nothing recovered the lost days. Fixed by the
+  `--recent` mirror window above.
+
+Refill: 22 rows written, `fii_net_cash` contiguous across every trading day
+from 2026-06-15 to 2026-07-27. Regression tests in
+`quant_engine/tests/test_market_regime_upsert.py`.
 
 ---
 

@@ -91,8 +91,14 @@ def sync_vix_today():
         today     = str(date.today())
 
         conn = connect()
+        # Must be a column-scoped upsert, never INSERT OR REPLACE: REPLACE
+        # deletes the conflicting row and reinserts it, so every other column
+        # on that date (fii_net_cash, dii_net_cash, fii_fo_net_long) is reset
+        # to NULL. That is what silently wiped the FII flows written moments
+        # earlier by the /sync/fii step of the same force-sync pass.
         conn.execute(
-            "INSERT OR REPLACE INTO market_regime (date, india_vix) VALUES (?, ?)",
+            "INSERT INTO market_regime (date, india_vix) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET india_vix = excluded.india_vix",
             (today, vix_value),
         )
         conn.commit()
@@ -109,24 +115,63 @@ def sync_vix_today():
 @router.post("/sync/fii")
 def sync_fii_today():
     """
-    Fetch today's FII/DII cash flows from NSE and upsert into market_regime.
+    Sync FII/DII cash flows into market_regime.
 
-    Uses the Python session-based fetcher which handles NSE cookie requirements
-    reliably. Called by the Node.js Force Sync handler.
+    Two steps, because NSE's live endpoint only ever returns the current
+    trading day and ignores date params — one missed run used to mean that
+    day's flows were lost for good:
+      1. NSE live (authoritative) for today.
+      2. Mirror gap-fill for any earlier date in the rolling window that has
+         no FII value yet. This is what makes the step self-healing after an
+         outage, and what keeps it working from GitHub Actions runners, whose
+         datacenter IPs NSE intermittently blocks.
+
+    Reports success if either step wrote a row.
     """
-    from quant_engine.data.backfill_fii_dii import fetch_today
+    from quant_engine.data.backfill_fii_dii import fetch_recent, fetch_today
     from quant_engine.data.turso_client import connect
+
+    conn = None
+    live_rows = filled_rows = 0
+    mirror_ok = False
+    warnings = []
 
     try:
         conn = connect()
-        count = fetch_today(conn)
-        conn.commit()
-        conn.close()
 
-        if count:
-            return {"success": True, "rows": count}
-        return {"success": False, "error": "NSE returned no FII/DII data (market may be closed)"}
+        try:
+            live_rows = fetch_today(conn)
+            conn.commit()
+            if not live_rows:
+                warnings.append("live: NSE returned no FII/DII data (market may be closed)")
+        except Exception as exc:            # never let the primary sink the gap-fill
+            logger.warning("FII live fetch failed: %s", exc)
+            warnings.append(f"live: {exc}")
+
+        try:
+            filled_rows = fetch_recent(conn)
+            mirror_ok = True
+        except Exception as exc:
+            logger.warning("FII mirror gap-fill failed: %s", exc)
+            warnings.append(f"mirror: {exc}")
+
+        # A clean mirror pass that wrote nothing means the whole rolling window
+        # is already stored — that is up-to-date, not a failure.
+        if live_rows or filled_rows or mirror_ok:
+            return {
+                "success": True,
+                "rows": live_rows + filled_rows,
+                "live_rows": live_rows,
+                "gap_filled_rows": filled_rows,
+                # A working gap-fill after a failed live call is still a
+                # success, but the caller should see why it was needed.
+                "warnings": warnings or None,
+            }
+        return {"success": False, "error": "; ".join(warnings) or "no FII/DII rows written"}
 
     except Exception as exc:
         logger.error("FII sync failed: %s", exc)
         return {"success": False, "error": str(exc)}
+    finally:
+        if conn is not None:
+            conn.close()

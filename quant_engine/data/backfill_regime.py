@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS market_regime (
 )
 """
 
+# Column-scoped upsert — never INSERT OR REPLACE. REPLACE deletes the
+# conflicting row before reinserting, which resets every column this statement
+# does not name (fii_net_cash, dii_net_cash, fii_fo_net_long) back to NULL.
+VIX_UPSERT_SQL = (
+    "INSERT INTO market_regime (date, india_vix) VALUES (:date, :vix) "
+    "ON CONFLICT(date) DO UPDATE SET india_vix = excluded.india_vix"
+)
+
 
 def _get_rw_connection() -> TursoConnection:
     return connect()
@@ -119,10 +127,7 @@ def import_from_csv(conn: TursoConnection, csv_path: str) -> int:
         logger.error("No valid rows parsed from %s", csv_path)
         return 0
 
-    conn.executemany(
-        "INSERT OR REPLACE INTO market_regime (date, india_vix) VALUES (:date, :vix)",
-        rows,
-    )
+    conn.executemany(VIX_UPSERT_SQL, rows)
     conn.commit()
     logger.info("Upserted %d VIX rows from CSV (%s → %s)",
                 len(rows), rows[0]["date"], rows[-1]["date"])
@@ -167,10 +172,7 @@ def fetch_and_upsert_from_nse(conn, from_date: date, to_date: date) -> int:
         logger.warning("NSE returned no VIX data for %s → %s", from_date, to_date)
         return 0
 
-    conn.executemany(
-        "INSERT OR REPLACE INTO market_regime (date, india_vix) VALUES (:date, :vix)",
-        bars,
-    )
+    conn.executemany(VIX_UPSERT_SQL, bars)
     conn.commit()
     logger.info("Upserted %d VIX rows (%s → %s)", len(bars), bars[0]["date"], bars[-1]["date"])
     return len(bars)

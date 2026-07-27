@@ -65,6 +65,29 @@ From Hurst et al. (2017): trend-following exhibits "smile" pattern — works bes
 
 Foreign Institutional Investor net buying/selling in NSE. Positive FII → bullish signal. Currently partially implemented.
 
+### 2026-07-27 — `market_regime` writers must not clobber each other
+
+`fii_net_cash` went 20 days stale (last row 2026-07-07) and failed the EOD
+sync gate. Two independent causes, both now fixed:
+
+1. **Destructive upsert.** The VIX writers used
+   `INSERT OR REPLACE INTO market_regime (date, india_vix)`. SQLite REPLACE
+   *deletes* the conflicting row and reinserts it, so every column the
+   statement doesn't name — `fii_net_cash`, `dii_net_cash`,
+   `fii_fo_net_long` — was reset to NULL. Force Sync writes FII first and VIX
+   second, so on any evening run the FII flows were wiped seconds after being
+   fetched. Signature in the data: dates carrying a VIX value had no FII value
+   and vice versa. All VIX writes are now `ON CONFLICT(date) DO UPDATE SET
+   india_vix = excluded.india_vix`.
+2. **No gap-fill path.** NSE's `fiidiiTradeReact` serves only the current
+   trading day and ignores the date params it accepts, so a missed run lost
+   that day permanently. A rolling ~30-session mirror feed
+   (`--recent` / the `/api/sync/fii` second step) now backfills any date with
+   no FII value yet. This also matters because NSE intermittently blocks
+   GitHub Actions datacenter IPs — the mirror keeps the cloud cron useful.
+
+Guard: `quant_engine/tests/test_market_regime_upsert.py`.
+
 ## Data Storage
 
 **Table**: `market_regime` in Turso (cloud libSQL). Access via `quant_engine/data/turso_client.connect()` on the Python side or `@libsql/client` on the Node side.
@@ -80,7 +103,8 @@ Foreign Institutional Investor net buying/selling in NSE. Positive FII → bulli
 
 | Gap | Priority |
 |-----|---------|
-| FII flow data not reliably fetched | Medium |
+| FII history limited to the ~30-session mirror window + whatever NSE live captured (no public historical API; longer history needs the manual NSE CSV) | Medium |
+| VIX sync stamps `date.today()`, so it writes rows on non-trading days (e.g. Sat 2026-07-25 carries Friday's value) | Medium |
 | Markov model not retrained on regime data | Medium |
 | No look-ahead validation of regime calls | Low |
 | VIX thresholds hardcoded, not adaptive | Low |
