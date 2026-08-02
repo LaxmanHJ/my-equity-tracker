@@ -90,6 +90,22 @@ logger = logging.getLogger(__name__)
 TRACKS = ("ml", "linear", "ml_regression")
 CPCV_OUTPUT_PATH = PROJECT_ROOT / "data" / "cpcv_diagnostic.json"
 
+
+def _output_path(pit_active: bool, pit_index_name: str) -> Path:
+    """
+    Per-run output path, so a new run can't silently destroy the baseline it is
+    being compared against.
+
+    The 2026-06-04 PIT run was overwritten in place by the legacy run and had to
+    be transcribed from a log into
+    ``data/membership_sources/cpcv_results.md`` — the DSR/PBO numbers that gate
+    live capital survived only as prose. Legacy (non-PIT) runs keep the original
+    filename so existing readers don't break.
+    """
+    if not pit_active:
+        return CPCV_OUTPUT_PATH
+    return CPCV_OUTPUT_PATH.with_name(f"cpcv_diagnostic_{pit_index_name.lower()}_pit.json")
+
 # Trading-days per year for Sharpe annualization.
 TRADING_DAYS = 252
 
@@ -373,10 +389,12 @@ def run_cpcv_diagnostic(
         ),
     }
 
-    CPCV_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CPCV_OUTPUT_PATH, "w") as fh:
+    out_path = _output_path(pit_universe is not None, pit_index_name)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as fh:
         json.dump(result, fh, indent=2, default=str)
-    logger.info("CPCV diagnostic written to %s", CPCV_OUTPUT_PATH)
+    logger.info("CPCV diagnostic written to %s", out_path)
+    result["output_path"] = str(out_path)
     return result
 
 

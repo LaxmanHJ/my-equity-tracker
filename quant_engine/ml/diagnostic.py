@@ -165,7 +165,41 @@ MIN_TEST_OBS = 50               # skip horizon if fewer settled obs in a fold
 MIN_TRAIN_AFTER_PURGE = 200     # skip fold if purged training set too small
 MIN_CROSS_N = 5                 # skip per-date group if cross-section is tiny (ml_regression)
 
+# Cadence mask: a row is usable only where the local bar spacing looks like a
+# continuously traded instrument. Matches research/monthly_momentum.py and
+# short_horizon.py so the ML panel and the research studies agree on what
+# "tradeable history" means.
+CADENCE_WINDOW = 10
+CADENCE_MIN_PERIODS = 5
+CADENCE_MAX_MEDIAN_GAP_DAYS = 1.6
+
 DIAG_OUTPUT_PATH = PROJECT_ROOT / "data" / "ml_diagnostic.json"
+
+
+def cadence_mask(index: pd.DatetimeIndex) -> pd.Series:
+    """
+    True where the rolling median bar gap looks like normal daily trading.
+
+    The ML feature path has no gap handling at all — no reindex to a trading
+    calendar, no forward-fill — so a rolling window simply spans whatever bars
+    exist. On NIFTY200 large caps that is harmless: they trade every session.
+    On a smallcap that was suspended for six months, a "20-day" momentum silently
+    straddles the suspension and reports the gap as a return.
+
+    That asymmetry is exactly why this matters for the NIFTY500 universe
+    expansion (R2): without the mask, the wider universe's apparent signal is
+    partly an artifact of its worse data, and the NIFTY200-vs-NIFTY500
+    comparison would be confounded rather than informative.
+
+    A median (not mean) gap tolerates weekends and holiday clusters — 1.6 days
+    passes normal Mon-Fri trading including long weekends, and fails a symbol
+    that trades a handful of times a month.
+    """
+    gaps = index.to_series().diff().dt.days
+    return (
+        gaps.rolling(CADENCE_WINDOW, min_periods=CADENCE_MIN_PERIODS).median()
+        <= CADENCE_MAX_MEDIAN_GAP_DAYS
+    )
 
 
 def _build_regression_pipeline(params: dict) -> Pipeline:
@@ -265,6 +299,17 @@ def build_dataset_with_horizons(
     benchmark_df = load_benchmark(limit=2000)
     industry_map = load_industry_map()
 
+    # Symbols are dropped whole by two thresholds (MIN_BARS here, <60 valid rows
+    # after masking below). Those drops used to be silent, which matters when
+    # widening the universe: NIFTY500 names have shorter index spells and thinner
+    # history than NIFTY200 names, so if the effective cross-section doesn't
+    # actually grow, that is the finding — not something to tune thresholds
+    # around. Counting them makes it checkable.
+    drop_stats = {
+        "min_bars": 0, "load_error": 0, "too_few_valid_rows": 0,
+        "feature_error": 0, "cadence_rows": 0,
+    }
+
     logger.info("Loading price histories for %d symbols …", len(symbols))
     all_prices: dict[str, pd.DataFrame] = {}
     for sym in symbols:
@@ -272,7 +317,10 @@ def build_dataset_with_horizons(
             df = load_price_history(sym, limit=2000)
             if len(df) >= MIN_BARS:
                 all_prices[sym] = df
+            else:
+                drop_stats["min_bars"] += 1
         except Exception as exc:  # noqa: BLE001
+            drop_stats["load_error"] += 1
             logger.warning("Skipping %s: %s", sym, exc)
 
     # Shared market-wide series — reuse trainer helpers so the dataset is
@@ -331,6 +379,12 @@ def build_dataset_with_horizons(
                 features, symbol, pit_universe, pit_index_name,
             )
 
+            # Cadence mask — drop rows whose surrounding bars are too sparse to
+            # be a real daily series (halts, suspensions, thin smallcaps).
+            n_before_cadence = len(features)
+            features = features[cadence_mask(features.index).reindex(features.index).fillna(False)]
+            drop_stats["cadence_rows"] += n_before_cadence - len(features)
+
             # Multi-horizon forward returns (no look-ahead: we shift backward).
             close = df["close"]
             fwd_rets = pd.DataFrame(
@@ -352,6 +406,7 @@ def build_dataset_with_horizons(
             linear_score = linear_score.reindex(features.index)
 
             if len(features) < 60:
+                drop_stats["too_few_valid_rows"] += 1
                 continue
 
             # 3-class label for the RF (`ml`) track — triple-barrier, identical
@@ -376,10 +431,21 @@ def build_dataset_with_horizons(
             all_meta.append(meta)
 
         except Exception as exc:  # noqa: BLE001
+            drop_stats["feature_error"] += 1
             logger.warning("Skipping %s during feature build: %s", symbol, exc)
 
     if not all_X:
         raise RuntimeError("No data available — is the DB populated?")
+
+    logger.info(
+        "Universe: %d symbols seen → %d with enough bars → %d in panel "
+        "(dropped: min_bars=%d, load_error=%d, too_few_valid_rows=%d, feature_error=%d; "
+        "cadence-masked rows=%d)",
+        len(symbols), len(all_prices), len(all_X),
+        drop_stats["min_bars"], drop_stats["load_error"],
+        drop_stats["too_few_valid_rows"], drop_stats["feature_error"],
+        drop_stats["cadence_rows"],
+    )
 
     X = pd.concat(all_X)
     meta = pd.concat(all_meta)
