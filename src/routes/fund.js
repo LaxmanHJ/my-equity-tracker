@@ -102,12 +102,47 @@ router.get('/config', async (req, res) => {
   }
 });
 
+/**
+ * Validate a tranche_plan payload. setFundConfig is whole-key replacement, so a
+ * malformed PUT silently replaces the entire plan — and a bad day_of_month or
+ * started date corrupts the overdue accounting rather than erroring loudly.
+ * Returns an error string, or null if the shape is fine.
+ */
+function validateTranchePlan(plan) {
+  if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) {
+    return 'tranche_plan must be an object';
+  }
+  if (!Number.isInteger(plan.tranches_total) || plan.tranches_total < 1) {
+    return 'tranche_plan.tranches_total must be a positive integer';
+  }
+  if (!Number.isInteger(plan.day_of_month) || plan.day_of_month < 1 || plan.day_of_month > 28) {
+    // Capped at 28 so every month has the day — no February skew.
+    return 'tranche_plan.day_of_month must be an integer between 1 and 28';
+  }
+  if (typeof plan.instrument !== 'string' || plan.instrument.trim() === '') {
+    return 'tranche_plan.instrument must be a non-empty string';
+  }
+  if (plan.started !== null && plan.started !== undefined) {
+    if (typeof plan.started !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(plan.started)) {
+      return 'tranche_plan.started must be null or a YYYY-MM-DD date';
+    }
+    if (Number.isNaN(new Date(plan.started).getTime())) {
+      return 'tranche_plan.started is not a valid date';
+    }
+  }
+  return null;
+}
+
 /** PUT /api/fund/config — update one key: { key, value } */
 router.put('/config', async (req, res) => {
   try {
     const { key, value } = req.body || {};
     if (!key || value === undefined) {
       return res.status(400).json({ error: 'key and value are required' });
+    }
+    if (key === 'tranche_plan') {
+      const err = validateTranchePlan(value);
+      if (err) return res.status(400).json({ error: err });
     }
     await setFundConfig(key, value);
     res.json({ success: true });

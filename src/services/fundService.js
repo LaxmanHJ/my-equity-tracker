@@ -32,6 +32,11 @@ import { dirname, join } from 'path';
 import { runRiskChecks } from '../risk/riskManager.js';
 import { createEodPriceProvider } from '../risk/priceProvider.js';
 import { fundRiskLimits } from '../config/riskLimits.js';
+import { derivePositions, trancheStatus } from './fundMath.js';
+
+// Re-exported so existing importers keep working; the implementations live in
+// fundMath.js (pure, no Turso) so they can be unit-tested.
+export { derivePositions, trancheStatus };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STUDY_A_PATH = join(__dirname, '../../data/monthly_momentum_study.json');
@@ -55,68 +60,46 @@ export const DEFAULT_CONFIG = {
   },
 };
 
-/** Ensure defaults exist without clobbering user edits. */
+/**
+ * Ensure defaults exist without clobbering user edits.
+ *
+ * Missing subfields are merged in too, not just missing top-level keys. Checking
+ * only the top level meant that once `tranche_plan` was persisted, any subfield
+ * added to DEFAULT_CONFIG afterwards would never reach the stored object — the
+ * key existed, so seeding was skipped and the new field stayed undefined forever.
+ * User-set values always win; only absent subfields are filled.
+ */
 export async function ensureFundConfig() {
   const config = await getFundConfig();
-  let changed = false;
-  for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+  const changedKeys = [];
+
+  for (const [key, defaults] of Object.entries(DEFAULT_CONFIG)) {
     if (!(key in config)) {
-      await setFundConfig(key, value);
-      config[key] = value;
-      changed = true;
+      await setFundConfig(key, defaults);
+      config[key] = defaults;
+      changedKeys.push(key);
+      continue;
     }
+
+    // Key exists — backfill any subfields the stored object is missing.
+    const stored = config[key];
+    if (!isPlainObject(defaults) || !isPlainObject(stored)) continue;
+
+    const missing = Object.entries(defaults).filter(([sub]) => !(sub in stored));
+    if (missing.length === 0) continue;
+
+    const merged = { ...Object.fromEntries(missing), ...stored };
+    await setFundConfig(key, merged);
+    config[key] = merged;
+    changedKeys.push(`${key}.{${missing.map(([sub]) => sub).join(',')}}`);
   }
-  if (changed) console.log('[Fund] Seeded default config');
+
+  if (changedKeys.length > 0) console.log(`[Fund] Seeded default config: ${changedKeys.join(', ')}`);
   return config;
 }
 
-/**
- * Derive open positions per sleeve from the ledger.
- * Returns { positions: [{sleeve, instrument, qty, avgCost, invested}], cash }
- * avgCost is average-cost basis (BUYs only); SELLs reduce qty FIFO-agnostically.
- */
-export function derivePositions(ledgerRows) {
-  const bySleeveInstrument = new Map();
-  let cash = 0;
-
-  for (const row of ledgerRows) {
-    const qty = Number(row.qty);
-    const price = Number(row.price);
-    const fees = Number(row.fees) || 0;
-
-    if (row.side === 'DEPOSIT') { cash += qty * price - fees; continue; }
-    if (row.side === 'WITHDRAW') { cash -= qty * price + fees; continue; }
-
-    const key = `${row.sleeve}|${row.instrument}`;
-    if (!bySleeveInstrument.has(key)) {
-      bySleeveInstrument.set(key, { sleeve: row.sleeve, instrument: row.instrument, qty: 0, costTotal: 0 });
-    }
-    const pos = bySleeveInstrument.get(key);
-
-    if (row.side === 'BUY') {
-      pos.qty += qty;
-      pos.costTotal += qty * price + fees;
-      cash -= qty * price + fees;
-    } else { // SELL
-      // Reduce cost basis proportionally (average-cost method)
-      const avgCost = pos.qty > 0 ? pos.costTotal / pos.qty : 0;
-      pos.qty -= qty;
-      pos.costTotal -= qty * avgCost;
-      cash += qty * price - fees;
-    }
-  }
-
-  const positions = [...bySleeveInstrument.values()]
-    .filter(p => p.qty > 1e-9)
-    .map(p => ({
-      sleeve: p.sleeve,
-      instrument: p.instrument,
-      qty: p.qty,
-      avgCost: p.costTotal / p.qty,
-      invested: p.costTotal,
-    }));
-
-  return { positions, cash };
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
 /** Latest close for an instrument from price_history (null if we don't track it). */
@@ -125,35 +108,6 @@ async function latestClose(instrument) {
   if (!rows?.length) return null;
   const last = rows[rows.length - 1];
   return { price: Number(last.close), date: last.date };
-}
-
-/**
- * Tranche status for the BETA_CORE staged entry.
- */
-export function trancheStatus(tranchePlan, betaCoreLedgerRows) {
-  const buys = betaCoreLedgerRows.filter(r => r.side === 'BUY');
-  const done = buys.length;
-  const total = tranchePlan.tranches_total;
-
-  // Next due date: day_of_month of the current or next month.
-  // Formatted from local parts — toISOString() would shift IST midnight back a day.
-  const now = new Date();
-  let next = new Date(now.getFullYear(), now.getMonth(), tranchePlan.day_of_month);
-  if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, tranchePlan.day_of_month);
-  const nextDueStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
-
-  const totalQty = buys.reduce((s, r) => s + Number(r.qty), 0);
-  const totalCost = buys.reduce((s, r) => s + Number(r.qty) * Number(r.price) + (Number(r.fees) || 0), 0);
-
-  return {
-    instrument: tranchePlan.instrument,
-    tranchesDone: done,
-    tranchesTotal: total,
-    complete: done >= total,
-    nextDue: done >= total ? null : nextDueStr,
-    avgEntry: totalQty > 0 ? totalCost / totalQty : null,
-    totalQty,
-  };
 }
 
 /**
@@ -260,6 +214,17 @@ export async function getFundOverview() {
       });
     }
   }
+  // Tranche status — computed before the risk-flag flush so a slipped tranche
+  // is persisted alongside the other alerts.
+  const tranche = trancheStatus(config.tranche_plan, ledger.filter(r => r.sleeve === 'BETA_CORE'));
+  if (tranche.overdue > 0) {
+    riskFlags.push({
+      type: 'FUND_TRANCHE_OVERDUE', severity: 'warning', symbol: tranche.instrument,
+      message: `${tranche.overdue} BETA_CORE tranche${tranche.overdue > 1 ? 's' : ''} overdue — `
+        + `${tranche.tranchesDone}/${tranche.tranchesTotal} recorded, ${tranche.expected} due by now`,
+    });
+  }
+
   // Stop-loss / circuit-breaker / sector checks on equity positions we have bars for
   let riskCheckResult = null;
   if (marked.length > 0) {
@@ -291,9 +256,6 @@ export async function getFundOverview() {
     studyB: { label: 'Study B — event-driven overlay', status: 'NOT_RUN' },
     studyC: { label: 'Study C — market-neutral LS futures', status: 'NOT_RUN' },
   };
-
-  // Tranche status
-  const tranche = trancheStatus(config.tranche_plan, ledger.filter(r => r.sleeve === 'BETA_CORE'));
 
   // NAV snapshot (idempotent per day)
   const today = new Date().toISOString().slice(0, 10);

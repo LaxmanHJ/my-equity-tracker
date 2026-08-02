@@ -54,6 +54,48 @@ declared rule passes — PEAD and delivery-spike exact rules are dead.
   measured no timing skill, so "should I buy the dip?" is answered by
   schedule, not judgment.
 
+### Tranche schedule semantics (2026-08-03)
+
+The schedule is **anchored on `tranche_plan.started`** — the ISO date of
+tranche 1 — not on the bare calendar.
+
+Until 2026-08-03 `started` was declared in `DEFAULT_CONFIG` but read by nothing,
+and `trancheStatus()` derived `nextDue` purely from the current date. A missed
+month therefore vanished silently: the due date rolled forward to the next
+occurrence of `day_of_month` and the fund reported a healthy schedule while
+capital sat undeployed. That is a direct contradiction of the sleeve's premise —
+level-independent staged entry only means something if slipping is visible.
+
+Now (`src/services/fundMath.js`):
+
+- `expected` = scheduled dates from the anchor that have arrived, capped at
+  `tranches_total`. Tranche *i* falls on `day_of_month` of anchor-month + *i*,
+  with the day clamped to the month's length.
+- `overdue` = `max(0, expected − tranchesDone)`, floored so an early first
+  tranche can't report negative.
+- `nextDue` counts from the anchor, so a late tranche keeps showing the date it
+  was **owed**, not a fresh calendar date.
+- `overdue > 0` raises a `FUND_TRANCHE_OVERDUE` warning into `riskFlags`, so it
+  persists to `risk_alerts` and renders on the page like any other breach.
+- `started: null` → `notStarted: true`, `overdue: 0`. Nothing is late before
+  anything is committed.
+
+`tranchesDone` counts BETA_CORE BUY rows, so **record each tranche as a single
+row** — two partial fills entered separately read as two tranches.
+
+Two supporting fixes landed with it: `ensureFundConfig()` now merges missing
+*subfields* into an already-persisted key (checking only top-level keys meant a
+newly added subfield could never reach stored config), and
+`PUT /api/fund/config` validates `tranche_plan` shape — `setFundConfig` is
+whole-key replacement, so a malformed PUT would otherwise silently replace the
+whole plan.
+
+Pure logic lives in `src/services/fundMath.js` (no Turso import) and is covered
+by `tests/fundMath.test.mjs`; `fundService.js` re-exports it. Note `npm test` is
+now scoped to `tests/` — unscoped `node --test` was also sweeping up the live
+Angel One smoke scripts in `scripts/`, which raced each other into the broker's
+rate limiter and kept the suite permanently red.
+
 ## Discipline
 
 Every sleeve unlock is a pre-registered study run once: declared rule in the
