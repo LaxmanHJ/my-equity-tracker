@@ -9,7 +9,7 @@
     "dev:quant": "python3 -m uvicorn quant_engine.main:app --host 0.0.0.0 --port 5001 --reload",
     "dev:all": "concurrently --kill-others --names \"NODE,QUANT\" --prefix-colors \"cyan,magenta\" \"npm run dev\" \"npm run dev:quant\"",
     "start": "node src/server.js",
-    "test": "node --test",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "fetch": "node src/scripts/fetchData.js",
     "stop": "lsof -ti:3000 -ti:5001 | xargs kill -9 2>/dev/null; echo '✅ Ports 3000 & 5001 cleared'"
   },

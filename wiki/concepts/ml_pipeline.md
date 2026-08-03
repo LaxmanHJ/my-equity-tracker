@@ -73,6 +73,37 @@ Current FEATURE_COLS (20, after P0-c dropped `pcr_score` / `fii_flow_score`):
 - Bar properties: bar range, volume imbalance
 - Entropy features
 
+### Cadence mask (2026-08-03)
+
+`cadence_mask()` in `quant_engine/ml/diagnostic.py` drops rows whose rolling
+10-bar median gap exceeds 1.6 calendar days, applied right after the PIT filter
+in `build_dataset_with_horizons`.
+
+Before this, the ML feature path had **no gap handling at all** — no reindex to a
+trading calendar, no forward-fill — so a rolling window simply spanned whatever
+bars existed. A 20-day momentum on a stock suspended for six months straddled the
+suspension and reported the gap as a return.
+
+On NIFTY200 large caps that is nearly harmless; they trade every session. It
+becomes load-bearing for **R2 (NIFTY500)**: smallcaps halt and get suspended, so
+without the mask the wider universe's apparent signal is partly an artifact of
+its worse data, and the NIFTY200-vs-NIFTY500 comparison measures data quality
+rather than breadth. A median (not mean) gap tolerates weekends and holiday
+clusters. Matches `research/monthly_momentum.py` and `short_horizon.py`, so the
+ML panel and the research studies now agree on what "tradeable history" means.
+
+Landed alongside `drop_stats` instrumentation: `MIN_BARS` (120) and the
+`len(features) < 60` post-mask threshold drop symbols *whole* and used to do so
+silently. They are now counted and logged, because if widening the universe
+doesn't actually grow the effective cross-section, that is the finding — not
+something to tune thresholds around.
+
+**Any comparison across universes must hold this code constant.** The pre-mask
+NIFTY200 PIT reproduction is kept at `data/cpcv_diagnostic_nifty200_pit_premask.json`
+(n=394,705, all DSR≈0, PBO 0.516 — it reproduces the documented 2026-06-04 run,
+confirming the PIT pipeline hasn't drifted) and is **not** comparable to
+post-mask runs.
+
 ## Cross-Validation
 
 **Production trainer**: `TimeSeriesSplit` — **must sort by date before splitting** (see memory: `feedback_ml_cv_split.md`). Sorting by stock before CV split causes data leakage. The production trainer does NOT purge overlapping labels, so its reported CV accuracy is slightly optimistic.

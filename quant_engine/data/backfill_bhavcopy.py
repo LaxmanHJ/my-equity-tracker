@@ -187,6 +187,37 @@ def collect(targets: set[str], d0: date, d1: date, cache: Path, throttle: float)
     return bars
 
 
+def assert_safe_targets(targets: set[str], conn) -> None:
+    """
+    Refuse to run against symbols that already have substantial price history.
+
+    ``write()`` does DELETE-then-insert per symbol, and bhavcopy OHLC is
+    UNADJUSTED. Pointing this at a symbol whose bars came from the Angel feed
+    silently replaces good split/bonus-adjusted history with unadjusted bars —
+    a corruption that surfaces much later as a phantom gap-down in every
+    momentum feature. Bhavcopy is for names Angel can't serve (delisted,
+    suspended), so an existing deep history means the wrong list was passed.
+
+    Override deliberately with --force-overwrite when a re-backfill is intended.
+    """
+    if not targets:
+        return
+    placeholders = ",".join("?" for _ in targets)
+    rows = conn.execute(
+        f"SELECT symbol, COUNT(*) n FROM price_history WHERE symbol IN ({placeholders}) "
+        f"GROUP BY symbol HAVING n >= 100",
+        sorted(targets),
+    ).fetchall()
+    if rows:
+        listed = ", ".join(f"{r[0]}({r[1]})" for r in rows[:15])
+        raise SystemExit(
+            f"Refusing to overwrite {len(rows)} symbol(s) with existing deep history: {listed}"
+            f"{' …' if len(rows) > 15 else ''}\n"
+            "Bhavcopy writes UNADJUSTED bars and DELETEs first. Pass only delisted/"
+            "missing names, or re-run with --force-overwrite if this is intended."
+        )
+
+
 def write(bars: dict[str, list], chunk: int = 500) -> None:
     from quant_engine.data.turso_client import connect
     conn = connect()
@@ -214,6 +245,9 @@ def main(argv=None) -> int:
     p.add_argument("--cache-dir", default=str(DEFAULT_CACHE))
     p.add_argument("--throttle", type=float, default=0.3, help="seconds between requests")
     p.add_argument("--apply", action="store_true", help="write to Turso (else dry-run)")
+    p.add_argument("--force-overwrite", action="store_true",
+                   help="skip the guard that refuses to replace symbols with existing deep "
+                        "history (bhavcopy bars are UNADJUSTED — see assert_safe_targets)")
     a = p.parse_args(argv)
 
     if a.symbols:
@@ -243,6 +277,10 @@ def main(argv=None) -> int:
     if not a.apply:
         print("\n(dry-run — pass --apply to write to Turso)")
         return 0
+    if not a.force_overwrite:
+        from quant_engine.data.turso_client import connect
+        with connect() as _c:
+            assert_safe_targets(targets, _c)
     logger.info("Writing to Turso …")
     write(bars)
     print("Done — written to price_history.")

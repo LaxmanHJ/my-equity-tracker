@@ -57,8 +57,16 @@ async function loadOverview() {
        <div style="margin-top:0.6rem; font-size:0.84rem;">
          ${t.tranchesTotal}/${t.tranchesTotal} tranches in ${t.instrument} ·
          avg entry ${fmtNum(t.avgEntry)}</div>`
-    : `<div style="font-size:0.84rem; line-height:1.7;">
+    : `${t.notStarted
+         ? '<div class="pill pill-muted">Not started</div>'
+         : t.overdue > 0
+           ? `<div class="pill pill-warn">${t.overdue} overdue</div>`
+           : '<div class="pill pill-ok">On schedule</div>'}
+       <div style="font-size:0.84rem; line-height:1.7; margin-top:0.6rem;">
          <strong>${t.tranchesDone}/${t.tranchesTotal}</strong> tranches done in <strong>${t.instrument}</strong><br/>
+         ${t.notStarted
+           ? 'Schedule begins with the first recorded buy.<br/>'
+           : `Due by now: <strong>${t.expected}</strong> · started ${t.started}<br/>`}
          Next due: <strong>${t.nextDue ?? '—'}</strong><br/>
          ${t.avgEntry ? `Avg entry: ${fmtNum(t.avgEntry)} · qty ${fmtNum(t.totalQty, 0)}` : 'No tranches recorded yet.'}
        </div>

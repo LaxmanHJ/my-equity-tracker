@@ -1,6 +1,9 @@
 # Point-in-time universe — survivorship-bias correction (P2-c)
 
-**Status**: infrastructure landed; data ingest pending.
+**Status**: infrastructure landed; NIFTY200 ingested (367 rows, hand-built);
+automated scraper landed 2026-08-03 but its NIFTY200 control run does **not**
+yet reproduce the hand-built data — see § Automated sourcing below. NIFTY500
+(research item R2) is blocked on closing that gap.
 **Branch**: `claude/audit-ml-pipeline-afml-37M7V` commits
 `quant_engine/data/membership.py`, `quant_engine/data/backfill_membership.py`,
 `quant_engine/tests/test_membership.py`.
@@ -31,6 +34,66 @@ A separate `index_membership` table (one row per
   index-name namespacing, CSV format tolerance, end-to-end CSV → PIT query.
 
 The infrastructure works; the **data is what's missing**.
+
+## Automated sourcing (2026-08-03)
+
+`quant_engine/data/scrape_niftyindices.py` reconstructs membership from NSE
+Indices press releases, so the CSV stops being a hand-built artifact with no
+provenance. Written for R2 (NIFTY500), validated against NIFTY200.
+
+**The source is far better than the "~30 PDFs, manual scraping, tedious" note
+below suggested.** `https://www.niftyindices.com/media` returns the **entire**
+press-release archive — 1440 PDFs back to 1998 — in one static HTML response.
+No pagination, no auth, no XHR; the month dropdown filters client-side. PDF URLs
+are `/Press_Release/ind_prs<DDMMYYYY>.pdf`. Current rosters are published exactly
+at `IndexConstituent/ind_nifty{500,200}list.csv`. (`/reports/press-release` is a
+404 — the archive lives under `/media`.)
+
+**Method.** Press releases carry change *events*, not rosters, so the scraper
+anchors on today's published roster and walks **backward**:
+
+    roster_before(review) = roster_after(review) − included + excluded
+
+Inter-event periods then collapse into `(effective_from, effective_to)` spells.
+Walking back from a known endpoint beats walking forward from a guessed base —
+there is no authoritative historical roster to start from.
+
+**Parsing gotcha worth remembering.** Section markers use two conventions:
+`2) Nifty 500` (index numbered directly) and `1) Replacements on account of
+semi-annual review…` → `l) Nifty 200` (index as a lettered child). Matching only
+the numeric form dropped five semi-annual reviews, and since the walk runs
+backward, **each missed event corrupts every earlier period** — the signature is
+disagreement that grows the further back you look.
+
+### Control run — NOT yet clean
+
+NIFTY200 is the control: it was assembled independently, so the scraper must
+reproduce it before NIFTY500 output can be trusted.
+
+| | built | stored |
+|---|---|---|
+| ever-members | 332 | 337 |
+| spells | 363 | 367 |
+
+~224 symbol-date disagreements across 15 probe dates (**≈4.5%**), concentrated
+before 2022 (32 in 2018 → 2 in 2024; 2025 clean). Known causes:
+
+- **Renames are invisible to the method.** GMRINFRA→GMRAIRPORT,
+  MOTHERSUMI→MOTHERSON are symbol changes with no index event, so the walk sees
+  a stock that vanishes and one that appears.
+- **The stored data is not ground truth either** — it contains `DUMMYVEDL1-4`
+  placeholder rows, so a diff is not automatically a scraper bug.
+- Some events remain unparsed; the pre-2022 residual is the evidence.
+
+**Before shipping any NIFTY500 result**: either close the pre-2022 gap or scope
+the study to 2022+, where the reconstruction is near-exact. Re-run
+`--index NIFTY200 --verify` after every parser change.
+
+    python -m quant_engine.data.scrape_niftyindices --index NIFTY200 --verify
+    python -m quant_engine.data.scrape_niftyindices --index NIFTY500
+
+PDFs cache under `data/membership_sources/press_release_cache/`, so re-parses
+cost nothing.
 
 ## What's still needed
 
