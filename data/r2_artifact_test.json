@@ -1,0 +1,28 @@
+{
+  "test": "R2 artifact falsification \u2014 bhavcopy symbols masked",
+  "n_excluded": 296,
+  "n_samples_total": 773966,
+  "tracks": {
+    "ml": {
+      "lo": 0.86,
+      "ls": 0.1726,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0
+    },
+    "linear": {
+      "lo": 0.9307,
+      "ls": -0.1114,
+      "dsr_lo": 0.0041,
+      "dsr_ls": 0.0
+    },
+    "ml_regression": {
+      "lo": 1.0925,
+      "ls": 0.6246,
+      "dsr_lo": 0.86,
+      "dsr_ls": 0.0001
+    }
+  },
+  "pbo_long_short": 0.23317793317793317,
+  "best_dsr": 0.86,
+  "best_dsr_where": "ml_regression.dsr_long_only"
+}
