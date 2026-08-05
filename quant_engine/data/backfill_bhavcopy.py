@@ -143,9 +143,10 @@ def _parse(zbytes: bytes, d: date, targets: set[str]) -> dict[str, dict]:
         if series != "EQ" or sym not in targets:
             continue
         try:
-            # prev_close is what makes split/bonus adjustment possible: the exchange
-            # restates it on the ex-date, so prev_close(t) / close(t-1) IS the
-            # corporate-action ratio. See adjust_for_corporate_actions().
+            # prev_close is captured but does NOT identify corporate actions —
+            # see the warning on adjust_for_corporate_actions(). NSE does not
+            # restate PREVCLOSE on the ex-date (verified: FINPIPE 2021-04-15,
+            # close 698.50 -> 143.65 on a 1:5 split with prev_close still 698.50).
             out[sym] = {"date": d.isoformat(), "open": float(o), "high": float(h),
                         "low": float(l), "close": float(c),
                         "prev_close": float(prev) if prev not in (None, "") else None,
@@ -237,18 +238,27 @@ def adjust_for_corporate_actions(rows: list, tol: float = 0.02) -> tuple[list, i
     PASS) which collapsed to 0.625 (DSR 0.000) once these symbols were masked.
     The entire apparent edge was this.
 
-    The fix needs no external corporate-action feed. NSE restates PREVCLOSE on
-    the ex-date to the adjusted basis, so:
+    *** BROKEN — DO NOT USE. Kept only as a record of a failed approach. ***
 
-        ratio = prev_close(t) / close(t-1)
+    The premise was that NSE restates PREVCLOSE on the ex-date, making
+    ``prev_close(t) / close(t-1)`` the exact adjustment ratio. **It does not.**
+    Verified counter-example: FINPIPE on 2021-04-15 closed 698.50 -> 143.65 on a
+    1:5 split with prev_close still reading the raw 698.50, ratio 1.0 — invisible
+    to this method. ALKYLAMINE 2021-05-11 behaves the same.
 
-    is exactly the adjustment factor (0.1 for a 1:10 split, ~0.98 for a small
-    dividend). Multiply every bar BEFORE t by the cumulative ratio and the
-    series becomes continuous and total-return consistent, matching the
-    convention of the Angel-sourced history it sits alongside.
+    Run against real data on 2026-08-05 it reported "630 corporate actions across
+    240 symbols" while missing every actual split. Those 630 were almost certainly
+    trading gaps where ``rows[i-1]`` was not the previous session, so the function
+    applied 630 spurious adjustments AND left the real splits in place — strictly
+    worse than doing nothing. The abort check in the chain caught it before the
+    corrupted prices reached a gate run.
 
-    `tol` ignores ratios within 2% of 1.0 — those are rounding noise in the
-    published prev_close, not corporate actions.
+    The working fix was different: most "delisted" names are still listed and
+    Angel serves them with proper adjustment. Only 76 of 296 were genuinely
+    unavailable, and those are kept at raw published prices and disclosed. If
+    adjustment is ever needed for that tail, use an authoritative corporate-action
+    feed (NSE CAS archive), not a price-ratio heuristic — on a dying company a
+    real -50% collapse and a 1:2 split are indistinguishable.
     """
     if len(rows) < 2:
         return rows, 0
@@ -284,20 +294,51 @@ def adjust_for_corporate_actions(rows: list, tol: float = 0.02) -> tuple[list, i
     return adjusted, n_actions
 
 
-def _write_one(conn, sym: str, rows: list, chunk: int) -> None:
-    """DELETE-then-insert one symbol. Re-runnable: the DELETE makes a retry idempotent."""
-    conn.execute("DELETE FROM price_history WHERE symbol = ?", [sym])
-    params = [(sym, b["date"], b["open"], b["high"], b["low"], b["close"], b["volume"]) for b in rows]
+def _write_one(conn, sym: str, rows: list, chunk: int, replace: bool = False) -> None:
+    """
+    Insert one symbol's bars, writing ONLY the dates not already stored.
+
+    Was DELETE-then-reinsert. That is correct but ruinously expensive against a
+    metered database: refreshing a symbol with 2,400 bars cost 2,400 deletes plus
+    2,400 inserts, whether or not anything had changed. Rewriting 296 symbols
+    three times during the 2026-08 NIFTY500 migration burned several million row
+    writes and exhausted the Turso free tier's 10M/month allowance.
+
+    Now the existing dates are read first (reads are ~50x cheaper than writes on
+    every metered plan) and only genuinely new rows are sent. A no-op refresh
+    costs zero writes; a daily top-up costs one row.
+
+    `replace=True` restores the old destructive behaviour for the case it was
+    actually meant for: correcting prices already stored, e.g. a split
+    adjustment. Callers that are fixing data must opt in explicitly.
+    """
+    if not rows:
+        return
+
+    if replace:
+        conn.execute("DELETE FROM price_history WHERE symbol = ?", [sym])
+        pending = rows
+    else:
+        cur = conn.execute("SELECT date FROM price_history WHERE symbol = ?", [sym])
+        have = {r[0] for r in cur.fetchall()}
+        pending = [b for b in rows if b["date"] not in have]
+        if not pending:
+            logger.debug("%s: already current, 0 writes", sym)
+            return
+
+    params = [(sym, b["date"], b["open"], b["high"], b["low"], b["close"], b["volume"])
+              for b in pending]
     for i in range(0, len(params), chunk):              # bound request size
         conn.executemany(
-            "INSERT OR REPLACE INTO price_history (symbol, date, open, high, low, close, volume) "
+            "INSERT OR IGNORE INTO price_history (symbol, date, open, high, low, close, volume) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             params[i:i + chunk],
         )
     conn.commit()
 
 
-def write(bars: dict[str, list], chunk: int = 500, attempts: int = 4) -> list[str]:
+def write(bars: dict[str, list], chunk: int = 500, attempts: int = 4,
+          replace: bool = False) -> list[str]:
     """
     Write collected bars to price_history, one symbol at a time.
 
@@ -321,7 +362,7 @@ def write(bars: dict[str, list], chunk: int = 500, attempts: int = 4) -> list[st
     for n, (sym, rows) in enumerate(todo, 1):
         for attempt in range(1, attempts + 1):
             try:
-                _write_one(conn, sym, rows, chunk)
+                _write_one(conn, sym, rows, chunk, replace=replace)
                 logger.info("wrote %s: %d bars  (%d/%d)", sym, len(rows), n, len(todo))
                 break
             except Exception as exc:  # noqa: BLE001 — network/timeout/5xx are all retryable here
@@ -352,6 +393,10 @@ def main(argv=None) -> int:
     p.add_argument("--cache-dir", default=str(DEFAULT_CACHE))
     p.add_argument("--throttle", type=float, default=0.3, help="seconds between requests")
     p.add_argument("--apply", action="store_true", help="write to Turso (else dry-run)")
+    p.add_argument("--replace-existing", dest="replace_existing", action="store_true",
+                   help="DELETE the symbol's stored bars before inserting. Only for CORRECTING "
+                        "prices already in the DB (e.g. a split adjustment). Costs one write per "
+                        "existing row; the default incremental path costs zero for unchanged data.")
     p.add_argument("--raw-prices", action="store_true",
                    help="skip split/bonus back-adjustment (default is to adjust). Raw bhavcopy "
                         "prices contain phantom -90%% split days that contaminate forward returns "
@@ -404,7 +449,7 @@ def main(argv=None) -> int:
         with connect() as _c:
             assert_safe_targets(targets, _c)
     logger.info("Writing to Turso …")
-    failed = write(bars)
+    failed = write(bars, replace=a.replace_existing)
     if failed:
         # Non-zero exit so a scripted/CI caller notices, and the list is printed
         # so it can be fed straight back in via --file.
