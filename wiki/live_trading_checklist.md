@@ -18,7 +18,50 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
 
 ## CRITICAL — Would cause immediate loss or failure
 
-### C0. PIT CPCV/DSR Ship Gate (2026-06-04 — audit terminal finding)
+### C0. PIT CPCV/DSR Ship Gate — R2 passed GROSS, FAILED net of costs (2026-08-05)
+
+- [x] **R2 (NIFTY500 PIT universe) CLEARS the stated gate.** Full universe,
+      849 symbols incl. delisted, n=988,110:
+      `ml_regression` LS Sharpe **1.487**, **DSR(LS) 0.971**, **PBO 0.033**.
+      Sensitivity (76 raw-price delisted names removed): LS 1.345,
+      DSR(LS) 1.000, PBO 0.029 — the result does **not** depend on dirty prices.
+      Pre-registered rule committed before the run
+      (`quant_engine/research/r2_nifty500_gate.py`, commit `95d517c`);
+      artifacts `data/r2_nifty500_gate.json`, `data/r2_sensitivity_delisted.json`.
+- [x] **MEASURED 2026-08-05 — IT IS NET-NEGATIVE. R2 is not shippable.**
+      `quant_engine/research/r2_cost_analysis.py`, real Zerodha charges.
+      **Mean daily turnover 71.6% of the book.** Even the cheapest admissible
+      route — both legs as single-stock futures, ₹20 brokerage cap binding,
+      ZERO spread — flips LS Sharpe **+1.41 → −0.89**, DSR 0.978 → 0.000.
+      Every other scenario is worse (−1.42 at 0.03% brokerage, −3.11 with a
+      10bp spread, −3.52 on CNC delivery). 71.6% × 10.4bp ≈ 7.4 bp/day of cost
+      against ~6-7 bp/day of gross return: the edge is smaller than the toll.
+      Same ending as short-term reversal (real at t=6.3, died on costs) and
+      seven of eight 2026-06 studies.
+- [ ] **Long-short only.** LS 1.487 vs LO 0.946 with DSR(LO) 0.002. Requires
+      shorting → single-stock futures → SSF margins cap the book at 2-3 pairs at
+      ₹5-15L, the same constraint that made Study C capital-blocked.
+- [ ] **One track of three.** `ml` and `linear` show LS ~0.1-0.2, DSR 0.000.
+- [ ] **n_trials=100 may now understate the true trial count**; DSR 0.971 is not
+      far above the 0.95 line and falls as trials rise.
+- [ ] **Close the ~4.5% pre-2022 membership gap and re-run** — declared before
+      the run as a precondition for capital on a PASS.
+
+**Reading this honestly**: the universe expansion was the right hypothesis —
+the comparator NIFTY200 PIT run scored best DSR 0.160 / PBO 0.624 on identical
+code. But a gross-of-cost gate is a necessary condition, not a sufficient one,
+and this project's entire history is edges that were real and still died on
+costs.
+
+> **Prior false positive, for calibration**: the first run of this same gate
+> (2026-08-04) also PASSED — on an artifact. Unadjusted bhavcopy prices made
+> splits read as -90% days; masking those symbols collapsed LS Sharpe
+> 1.382 → 0.625 and DSR 0.974 → 0.000. The sensitivity check above exists
+> because of that.
+
+---
+
+### C0-original. PIT CPCV/DSR Ship Gate (2026-06-04 — audit terminal finding)
 - [ ] **No live capital deploys behind any ML or factor track until
       `python -m quant_engine.ml.cpcv_diagnostic --pit` reports
       `DSR > 0.95` AND `PBO < 0.15` for at least one track (LO or LS).**

@@ -27,9 +27,25 @@
 name: EOD data sync
 
 on:
-  schedule:
-    - cron: '30 9 * * 1-5'  # 15:00 IST — market-hours run (PCR, IV chain)
-    - cron: '0 13 * * 1-5'  # 18:30 IST — post-close run (EOD tables, freshness gate)
+  # ── PAUSED 2026-08-05 — Turso free-tier write quota exhausted ──────────────
+  # The free plan allows 10M row writes/month. A one-off NIFTY500 bulk migration
+  # blew through it (backfill_bhavcopy does DELETE-then-reinsert per symbol, so
+  # rewriting 296 symbols three times cost several million writes). Writes are
+  # now BLOCKED until the monthly quota resets; reads still work, so the
+  # dashboard and fund page are unaffected.
+  #
+  # Left on a schedule this workflow would drain the fresh allowance the moment
+  # it resets — twice a weekday, collecting data nobody is acting on while the
+  # research programme is closed and the fund is parked at zero.
+  #
+  # TO RESUME: uncomment the two crons below. Before doing so, confirm the write
+  # pattern fix is in place (incremental INSERT OR IGNORE, not DELETE+rewrite —
+  # see quant_engine/data/backfill_bhavcopy.py) or the next bulk job will do this
+  # again. workflow_dispatch stays enabled for deliberate catch-up runs.
+  #
+  # schedule:
+  #   - cron: '30 9 * * 1-5'  # 15:00 IST — market-hours run (PCR, IV chain)
+  #   - cron: '0 13 * * 1-5'  # 18:30 IST — post-close run (EOD tables, freshness gate)
   workflow_dispatch: {} # manual trigger for catch-up runs
 
 concurrency:

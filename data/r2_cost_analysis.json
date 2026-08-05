@@ -1,0 +1,80 @@
+{
+  "study": "R2 net-of-cost analysis (Zerodha)",
+  "computed_at": "2026-08-05T17:23:46.803352+00:00",
+  "charges_source": "zerodha.com/charges, read 2026-08-05",
+  "mean_daily_turnover_ls": 0.7160684182360998,
+  "n_samples_total": 986135,
+  "note": "Both legs modelled as equity futures - the cheapest admissible route, since India forbids overnight equity shorts. Spread is charged on top of the brokerage stack and is NOT in the no-spread rows.",
+  "scenarios": [
+    {
+      "scenario": "gross (no costs)",
+      "round_trip_bps": 0.0,
+      "lo_sharpe": 0.9161,
+      "ls_sharpe": 1.4087,
+      "dsr_lo": 0.0005,
+      "dsr_ls": 0.9777,
+      "pbo": 0.056332556332556336,
+      "passes_gate": true
+    },
+    {
+      "scenario": "futures, Rs.20 cap, no spread",
+      "round_trip_bps": 10.38,
+      "lo_sharpe": 0.3699,
+      "ls_sharpe": -0.8933,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.04809634809634809,
+      "passes_gate": false
+    },
+    {
+      "scenario": "futures, 0.03% brk, no spread",
+      "round_trip_bps": 12.74,
+      "lo_sharpe": 0.2457,
+      "ls_sharpe": -1.4165,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.054623154623154625,
+      "passes_gate": false
+    },
+    {
+      "scenario": "futures + 5bp spread",
+      "round_trip_bps": 15.38,
+      "lo_sharpe": 0.1067,
+      "ls_sharpe": -2.0013,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.04094794094794095,
+      "passes_gate": false
+    },
+    {
+      "scenario": "futures + 10bp spread",
+      "round_trip_bps": 20.38,
+      "lo_sharpe": -0.1566,
+      "ls_sharpe": -3.1073,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.002797202797202797,
+      "passes_gate": false
+    },
+    {
+      "scenario": "futures + 20bp spread",
+      "round_trip_bps": 30.38,
+      "lo_sharpe": -0.6831,
+      "ls_sharpe": -5.3097,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.0,
+      "passes_gate": false
+    },
+    {
+      "scenario": "equity delivery (CNC), no spread",
+      "round_trip_bps": 22.25,
+      "lo_sharpe": -0.2552,
+      "ls_sharpe": -3.5208,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0,
+      "pbo": 0.0011655011655011655,
+      "passes_gate": false
+    }
+  ]
+}

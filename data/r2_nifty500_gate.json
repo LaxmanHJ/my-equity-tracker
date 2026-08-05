@@ -1,0 +1,63 @@
+{
+  "study": "R2 \u2014 NIFTY500 PIT universe expansion",
+  "computed_at": "2026-08-04T21:34:18.324524+00:00",
+  "declared_rule": "see module docstring \u2014 fixed before first run",
+  "index_name": "NIFTY500",
+  "n_ever_members": 837,
+  "n_samples_total": 988110,
+  "n_combinations": 15,
+  "n_trials_for_dsr": 100,
+  "pit_universe_active": true,
+  "tracks": {
+    "ml": {
+      "lo": 0.6532,
+      "ls": 0.2124,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0
+    },
+    "linear": {
+      "lo": 0.6607,
+      "ls": 0.172,
+      "dsr_lo": 0.0,
+      "dsr_ls": 0.0
+    },
+    "ml_regression": {
+      "lo": 0.9457,
+      "ls": 1.4872,
+      "dsr_lo": 0.0015,
+      "dsr_ls": 0.9708
+    }
+  },
+  "pbo_long_short": 0.03255633255633256,
+  "best_dsr": 0.9708,
+  "best_dsr_where": "ml_regression.dsr_long_short",
+  "nifty200_baseline": {
+    "n_samples_total": 392822,
+    "pbo_long_short": 0.624009324009324,
+    "tracks": {
+      "ml": {
+        "lo": 0.7052,
+        "ls": 0.3449,
+        "dsr_lo": 0.0,
+        "dsr_ls": 0.0
+      },
+      "linear": {
+        "lo": 0.7852,
+        "ls": 0.4775,
+        "dsr_lo": 0.0046,
+        "dsr_ls": 0.0
+      },
+      "ml_regression": {
+        "lo": 0.8819,
+        "ls": 0.552,
+        "dsr_lo": 0.1598,
+        "dsr_ls": 0.0
+      }
+    }
+  },
+  "gates": {
+    "G1_dsr_gt_0.95": true,
+    "G2_pbo_lt_0.15": true,
+    "verdict": "PASS"
+  }
+}

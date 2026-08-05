@@ -129,8 +129,14 @@ def _daily_portfolio_returns(
     fwd_1d: np.ndarray,
     dates: pd.DatetimeIndex,
     quantile: float = LEG_QUANTILE,
-) -> tuple[pd.Series, pd.Series]:
+    symbols: np.ndarray | None = None,
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     """Build daily long-only and long-short return series from a signed score.
+
+    Also returns per-day one-way TURNOVER for each book when `symbols` is given,
+    which is what makes a net-of-cost Sharpe computable. Returns here are GROSS;
+    the caller applies costs. This series is daily-rebalanced, so turnover is the
+    dominant term in any realistic cost model.
 
     For each date with ≥ MIN_XS_FOR_PORTFOLIO valid names:
       • long_only  = mean fwd_1d of the top-`quantile` by score
@@ -142,21 +148,50 @@ def _daily_portfolio_returns(
     Returns (long_only_series, long_short_series) indexed by date.
     """
     df = pd.DataFrame({"score": score, "fwd": fwd_1d}, index=dates)
+    if symbols is not None:
+        df["symbol"] = symbols
     df = df.dropna(subset=["score", "fwd"])
     lo_rows: dict[pd.Timestamp, float] = {}
     ls_rows: dict[pd.Timestamp, float] = {}
+    lo_turn: dict[pd.Timestamp, float] = {}
+    ls_turn: dict[pd.Timestamp, float] = {}
+    prev_top: set | None = None
+    prev_bot: set | None = None
+
     for d, grp in df.groupby(level=0):
         if len(grp) < MIN_XS_FOR_PORTFOLIO:
             continue
         n_leg = max(1, int(round(len(grp) * quantile)))
         ordered = grp.sort_values("score")
-        bottom = ordered.head(n_leg)["fwd"].mean()
-        top = ordered.tail(n_leg)["fwd"].mean()
+        bottom_rows = ordered.head(n_leg)
+        top_rows = ordered.tail(n_leg)
+        bottom = bottom_rows["fwd"].mean()
+        top = top_rows["fwd"].mean()
         lo_rows[d] = float(top)
         ls_rows[d] = float(top - bottom)
+
+        if symbols is not None:
+            top_set = set(top_rows["symbol"])
+            bot_set = set(bottom_rows["symbol"])
+            # One-way turnover = fraction of each leg replaced since the previous
+            # rebalance. A replacement is an exit plus an entry, i.e. one round
+            # trip's worth of cost on that fraction of the leg's notional.
+            if prev_top is None:
+                lo_turn[d] = 1.0          # initial build of the book
+                ls_turn[d] = 2.0          # both legs
+            else:
+                t_l = len(top_set - prev_top) / max(1, len(top_set))
+                t_s = len(bot_set - prev_bot) / max(1, len(bot_set))
+                lo_turn[d] = float(t_l)
+                # The long-short book pays on BOTH legs' notional.
+                ls_turn[d] = float(t_l + t_s)
+            prev_top, prev_bot = top_set, bot_set
+
     lo = pd.Series(lo_rows).sort_index()
     ls = pd.Series(ls_rows).sort_index()
-    return lo, ls
+    lo_t = pd.Series(lo_turn).sort_index() if lo_turn else pd.Series(dtype=float)
+    ls_t = pd.Series(ls_turn).sort_index() if ls_turn else pd.Series(dtype=float)
+    return lo, ls, lo_t, ls_t
 
 
 def _annualized_sharpe(returns: pd.Series) -> float:
@@ -230,6 +265,8 @@ def run_cpcv_diagnostic(
     n_groups: int = 6,
     n_test_groups: int = 2,
     n_trials: int = DEFAULT_N_TRIALS,
+    cost_round_trip: float = 0.0,
+    cost_sweep: list | None = None,
 ) -> dict:
     """Run CPCV across the three tracks, deflate with DSR, measure PBO.
 
@@ -266,6 +303,10 @@ def run_cpcv_diagnostic(
     # Per-track per-combination Sharpes.
     lo_sharpes: dict[str, list[float]] = {t: [] for t in TRACKS}
     ls_sharpes: dict[str, list[float]] = {t: [] for t in TRACKS}
+    turnover_by_track: dict[str, list[float]] = {t: [] for t in TRACKS}
+    # (combo, track) -> (lo_gross, ls_gross, lo_turnover, ls_turnover);
+    # retained so cost_sweep costs a single CPCV pass, not one per scenario.
+    raw_series: list[dict[str, tuple]] = []
     # For PBO: per-combination long-short daily returns, aligned per track.
     ls_returns_by_combo: list[dict[str, pd.Series]] = []
 
@@ -282,13 +323,28 @@ def run_cpcv_diagnostic(
         )
         test_dates = dates[split.test_idx]
         fwd_1d = meta.iloc[split.test_idx]["fwd_ret_1d"].values
+        syms = meta.iloc[split.test_idx]["symbol"].values
         combo_ls_returns: dict[str, pd.Series] = {}
+        combo_raw: dict[str, tuple] = {}
         for track in TRACKS:
-            lo, ls = _daily_portfolio_returns(scores[track], fwd_1d, test_dates)
+            lo, ls, lo_t, ls_t = _daily_portfolio_returns(
+                scores[track], fwd_1d, test_dates, symbols=syms,
+            )
+            combo_raw[track] = (lo.copy(), ls.copy(), lo_t.copy(), ls_t.copy())
+            # Net of costs. cost_round_trip is a fraction (e.g. 0.00066 = 6.6bp),
+            # charged on the turnover actually incurred. At cost 0 this is
+            # bit-identical to the gross path, so the recorded gate result and
+            # every prior run are unaffected.
+            if cost_round_trip > 0 and not lo_t.empty:
+                lo = lo - lo_t.reindex(lo.index).fillna(0.0) * cost_round_trip
+                ls = ls - ls_t.reindex(ls.index).fillna(0.0) * cost_round_trip
             lo_sharpes[track].append(_annualized_sharpe(lo))
             ls_sharpes[track].append(_annualized_sharpe(ls))
+            if not ls_t.empty:
+                turnover_by_track[track].append(float(ls_t.mean()))
             combo_ls_returns[track] = ls
         ls_returns_by_combo.append(combo_ls_returns)
+        raw_series.append(combo_raw)
 
     # ── Per-track summary + DSR ──────────────────────────────────────────────
     def _summary(vals: list[float]) -> dict:
@@ -375,6 +431,10 @@ def run_cpcv_diagnostic(
         "n_trials_for_dsr": n_trials,
         "rf_params_source": src,
         "leg_quantile": LEG_QUANTILE,
+        "cost_round_trip": cost_round_trip,
+        "mean_daily_turnover_ls": {
+            t: (float(np.mean(v)) if v else None) for t, v in turnover_by_track.items()
+        },
         "tracks": track_results,
         "pbo_long_short": pbo_value,
         "pbo_note": pbo_note,
@@ -388,6 +448,56 @@ def run_cpcv_diagnostic(
             "market-neutral-only (argues for P3-d, not the current long-only path)."
         ),
     }
+
+    # ── Cost sweep ───────────────────────────────────────────────────────────
+    # Net-of-cost Sharpe/DSR/PBO at several round-trip cost levels, computed from
+    # the SAME gross series and measured turnover. One CPCV pass, not one per
+    # scenario. This is what turns a gross gate result into a tradeable claim.
+    if cost_sweep:
+        sweep_out = []
+        for c in cost_sweep:
+            lo_s: dict[str, list[float]] = {t: [] for t in TRACKS}
+            ls_s: dict[str, list[float]] = {t: [] for t in TRACKS}
+            ls_ret: list[dict[str, pd.Series]] = []
+            for combo in raw_series:
+                per_track: dict[str, pd.Series] = {}
+                for track in TRACKS:
+                    lo_g, ls_g, lo_t, ls_t = combo[track]
+                    lo_n = lo_g - lo_t.reindex(lo_g.index).fillna(0.0) * c
+                    ls_n = ls_g - ls_t.reindex(ls_g.index).fillna(0.0) * c
+                    lo_s[track].append(_annualized_sharpe(lo_n))
+                    ls_s[track].append(_annualized_sharpe(ls_n))
+                    per_track[track] = ls_n
+                ls_ret.append(per_track)
+            entry: dict = {"round_trip": c, "round_trip_bps": round(c * 1e4, 2), "tracks": {}}
+            for track in TRACKS:
+                lc = [v for v in ls_s[track] if not np.isnan(v)]
+                oc = [v for v in lo_s[track] if not np.isnan(v)]
+                d_ls = (deflated_sharpe_ratio(observed_sharpe=float(np.mean(lc)),
+                        trial_sharpes=lc, n_samples=n_trials) if len(lc) >= 2 else None)
+                d_lo = (deflated_sharpe_ratio(observed_sharpe=float(np.mean(oc)),
+                        trial_sharpes=oc, n_samples=n_trials) if len(oc) >= 2 else None)
+                entry["tracks"][track] = {
+                    "lo_sharpe": round(float(np.mean(oc)), 4) if oc else None,
+                    "ls_sharpe": round(float(np.mean(lc)), 4) if lc else None,
+                    "dsr_lo": round(d_lo, 4) if d_lo is not None else None,
+                    "dsr_ls": round(d_ls, 4) if d_ls is not None else None,
+                }
+            try:
+                per_series = {}
+                for track in TRACKS:
+                    fr = [x[track] for x in ls_ret if len(x[track]) > 0]
+                    if fr:
+                        per_series[track] = pd.concat(fr).groupby(level=0).mean()
+                m = pd.DataFrame(per_series).dropna()
+                entry["pbo"] = (float(probability_of_backtest_overfitting(
+                    m.values, n_slices=min(16, (len(m) // 2) * 2)))
+                    if len(m) >= 16 and m.shape[1] >= 2 else None)
+            except Exception as exc:  # noqa: BLE001
+                entry["pbo"] = None
+                entry["pbo_note"] = str(exc)
+            sweep_out.append(entry)
+        result["cost_sweep"] = sweep_out
 
     out_path = _output_path(pit_universe is not None, pit_index_name)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,28 @@
+{
+  "test": "R2 sensitivity \u2014 76 raw-price delisted symbols masked",
+  "n_excluded": 76,
+  "n_samples_total": 953308,
+  "tracks": {
+    "ml": {
+      "lo": 0.7052,
+      "ls": 0.1029,
+      "dsr_lo": 0.0003,
+      "dsr_ls": 0.0
+    },
+    "linear": {
+      "lo": 0.8148,
+      "ls": 0.1251,
+      "dsr_lo": 0.0438,
+      "dsr_ls": 0.0
+    },
+    "ml_regression": {
+      "lo": 1.0473,
+      "ls": 1.3445,
+      "dsr_lo": 0.6316,
+      "dsr_ls": 1.0
+    }
+  },
+  "pbo_long_short": 0.02944832944832945,
+  "best_dsr": 1.0,
+  "best_dsr_where": "ml_regression.dsr_long_short"
+}
