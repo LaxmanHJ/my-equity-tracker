@@ -31,3 +31,6 @@ data/angel_fno_universe.json
 
 # Press-release PDF cache — regenerable by scrape_niftyindices.py, ~100MB
 data/membership_sources/press_release_cache/
+
+# NSE bhavcopy zip cache — regenerable by backfill_bhavcopy.py
+data/membership_sources/bhavcopy_cache/

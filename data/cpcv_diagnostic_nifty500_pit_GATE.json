@@ -1,11 +1,11 @@
 {
-  "computed_at": "2026-08-05T16:22:23.708437+00:00",
+  "computed_at": "2026-08-04T21:34:18.249734+00:00",
   "pit_universe_active": true,
   "pit_index_name": "NIFTY500",
   "n_groups": 6,
   "n_test_groups": 2,
   "n_combinations": 15,
-  "n_samples_total": 953308,
+  "n_samples_total": 988110,
   "n_trials_for_dsr": 100,
   "rf_params_source": "metadata.json",
   "leg_quantile": 0.2,
@@ -13,65 +13,65 @@
     "ml": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 0.7052,
-        "std": 0.6184,
-        "median": 0.8346,
-        "q05": -0.2155,
-        "q95": 1.5146
+        "mean": 0.6532,
+        "std": 0.6979,
+        "median": 0.8336,
+        "q05": -0.3654,
+        "q95": 1.3053
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 0.1029,
-        "std": 0.6977,
-        "median": -0.0494,
-        "q05": -0.8862,
-        "q95": 0.9943
+        "mean": 0.2124,
+        "std": 0.6919,
+        "median": 0.3045,
+        "q05": -0.9973,
+        "q95": 1.1546
       },
-      "dsr_long_only": 0.0003,
+      "dsr_long_only": 0.0,
       "dsr_long_short": 0.0
     },
     "linear": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 0.8148,
-        "std": 0.572,
-        "median": 0.9217,
-        "q05": -0.0545,
-        "q95": 1.4967
+        "mean": 0.6607,
+        "std": 0.6932,
+        "median": 0.872,
+        "q05": -0.4497,
+        "q95": 1.3315
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 0.1251,
-        "std": 0.5246,
-        "median": 0.1561,
-        "q05": -0.6573,
-        "q95": 0.7588
+        "mean": 0.172,
+        "std": 0.7449,
+        "median": 0.2539,
+        "q05": -0.816,
+        "q95": 1.2214
       },
-      "dsr_long_only": 0.0438,
+      "dsr_long_only": 0.0,
       "dsr_long_short": 0.0
     },
     "ml_regression": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 1.0473,
-        "std": 0.5677,
-        "median": 1.0375,
-        "q05": 0.3526,
-        "q95": 1.9515
+        "mean": 0.9457,
+        "std": 0.7365,
+        "median": 1.1461,
+        "q05": -0.1433,
+        "q95": 1.9269
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 1.3445,
-        "std": 0.4519,
-        "median": 1.3937,
-        "q05": 0.6674,
-        "q95": 1.9512
+        "mean": 1.4872,
+        "std": 0.684,
+        "median": 1.6418,
+        "q05": 0.3841,
+        "q95": 2.3029
       },
-      "dsr_long_only": 0.6316,
-      "dsr_long_short": 1.0
+      "dsr_long_only": 0.0015,
+      "dsr_long_short": 0.9708
     }
   },
-  "pbo_long_short": 0.02944832944832945,
+  "pbo_long_short": 0.03255633255633256,
   "pbo_note": "",
   "notes": "CPCV (AFML Ch.12) over 3 tracks; per-combination annualized Sharpe for long-only (top-quantile) and long-short (top minus bottom quantile) daily-rebalanced portfolios. DSR (AFML Ch.14) deflates the pooled mean Sharpe by n_trials_for_dsr selection-bias trials. PBO across tracks on long-short returns. DSR > 0.95 AND PBO < 0.15 is the ship gate. long_short >> long_only Sharpe \u21d2 edge is market-neutral-only (argues for P3-d, not the current long-only path)."
 }
