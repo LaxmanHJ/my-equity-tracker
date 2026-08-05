@@ -18,7 +18,7 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
 
 ## CRITICAL — Would cause immediate loss or failure
 
-### C0. PIT CPCV/DSR Ship Gate — FIRST PASS 2026-08-05 (R2), costs still unmodelled
+### C0. PIT CPCV/DSR Ship Gate — R2 passed GROSS, FAILED net of costs (2026-08-05)
 
 - [x] **R2 (NIFTY500 PIT universe) CLEARS the stated gate.** Full universe,
       849 symbols incl. delisted, n=988,110:
@@ -28,13 +28,16 @@ When completing an item, also update the relevant `wiki/concepts/` or `wiki/pape
       Pre-registered rule committed before the run
       (`quant_engine/research/r2_nifty500_gate.py`, commit `95d517c`);
       artifacts `data/r2_nifty500_gate.json`, `data/r2_sensitivity_delisted.json`.
-- [ ] **STILL NOT SHIPPABLE — the gate is GROSS of costs.**
-      `cpcv_diagnostic._daily_portfolio_returns` builds a **daily-rebalanced**
-      long-short book from `fwd_1d` with no cost, spread or turnover term. Seven
-      of eight strategies in the 2026-06 program died on costs; short-term
-      reversal died on costs at t=6.3. A Sharpe-1.487 book earning ~6-7 bp/day
-      gross, rebalanced daily across two ~170-name legs at 30bp one-way, is
-      plausibly **net-negative**. Measure before anything else.
+- [x] **MEASURED 2026-08-05 — IT IS NET-NEGATIVE. R2 is not shippable.**
+      `quant_engine/research/r2_cost_analysis.py`, real Zerodha charges.
+      **Mean daily turnover 71.6% of the book.** Even the cheapest admissible
+      route — both legs as single-stock futures, ₹20 brokerage cap binding,
+      ZERO spread — flips LS Sharpe **+1.41 → −0.89**, DSR 0.978 → 0.000.
+      Every other scenario is worse (−1.42 at 0.03% brokerage, −3.11 with a
+      10bp spread, −3.52 on CNC delivery). 71.6% × 10.4bp ≈ 7.4 bp/day of cost
+      against ~6-7 bp/day of gross return: the edge is smaller than the toll.
+      Same ending as short-term reversal (real at t=6.3, died on costs) and
+      seven of eight 2026-06 studies.
 - [ ] **Long-short only.** LS 1.487 vs LO 0.946 with DSR(LO) 0.002. Requires
       shorting → single-stock futures → SSF margins cap the book at 2-3 pairs at
       ₹5-15L, the same constraint that made Study C capital-blocked.

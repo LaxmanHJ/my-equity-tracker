@@ -1,77 +1,260 @@
 {
-  "computed_at": "2026-08-05T16:22:23.708437+00:00",
+  "computed_at": "2026-08-05T17:23:36.297786+00:00",
   "pit_universe_active": true,
   "pit_index_name": "NIFTY500",
   "n_groups": 6,
   "n_test_groups": 2,
   "n_combinations": 15,
-  "n_samples_total": 953308,
+  "n_samples_total": 986135,
   "n_trials_for_dsr": 100,
   "rf_params_source": "metadata.json",
   "leg_quantile": 0.2,
+  "cost_round_trip": 0.0,
+  "mean_daily_turnover_ls": {
+    "ml": 0.6496754968170885,
+    "linear": 0.36522174042285205,
+    "ml_regression": 0.7160684182360998
+  },
   "tracks": {
     "ml": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 0.7052,
-        "std": 0.6184,
-        "median": 0.8346,
-        "q05": -0.2155,
-        "q95": 1.5146
+        "mean": 0.6429,
+        "std": 0.7256,
+        "median": 0.9044,
+        "q05": -0.4312,
+        "q95": 1.3193
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 0.1029,
-        "std": 0.6977,
-        "median": -0.0494,
-        "q05": -0.8862,
-        "q95": 0.9943
+        "mean": 0.2386,
+        "std": 0.7554,
+        "median": 0.3452,
+        "q05": -1.1215,
+        "q95": 1.16
       },
-      "dsr_long_only": 0.0003,
+      "dsr_long_only": 0.0,
       "dsr_long_short": 0.0
     },
     "linear": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 0.8148,
-        "std": 0.572,
-        "median": 0.9217,
-        "q05": -0.0545,
-        "q95": 1.4967
+        "mean": 0.665,
+        "std": 0.6851,
+        "median": 0.8802,
+        "q05": -0.4298,
+        "q95": 1.3218
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 0.1251,
-        "std": 0.5246,
-        "median": 0.1561,
-        "q05": -0.6573,
-        "q95": 0.7588
+        "mean": 0.1785,
+        "std": 0.754,
+        "median": 0.2614,
+        "q05": -0.8408,
+        "q95": 1.2486
       },
-      "dsr_long_only": 0.0438,
+      "dsr_long_only": 0.0,
       "dsr_long_short": 0.0
     },
     "ml_regression": {
       "long_only_sharpe": {
         "n": 15,
-        "mean": 1.0473,
-        "std": 0.5677,
-        "median": 1.0375,
-        "q05": 0.3526,
-        "q95": 1.9515
+        "mean": 0.9161,
+        "std": 0.7412,
+        "median": 1.0526,
+        "q05": -0.1395,
+        "q95": 1.8966
       },
       "long_short_sharpe": {
         "n": 15,
-        "mean": 1.3445,
-        "std": 0.4519,
-        "median": 1.3937,
-        "q05": 0.6674,
-        "q95": 1.9512
+        "mean": 1.4087,
+        "std": 0.6347,
+        "median": 1.537,
+        "q05": 0.3835,
+        "q95": 2.2572
       },
-      "dsr_long_only": 0.6316,
-      "dsr_long_short": 1.0
+      "dsr_long_only": 0.0005,
+      "dsr_long_short": 0.9777
     }
   },
-  "pbo_long_short": 0.02944832944832945,
+  "pbo_long_short": 0.056332556332556336,
   "pbo_note": "",
-  "notes": "CPCV (AFML Ch.12) over 3 tracks; per-combination annualized Sharpe for long-only (top-quantile) and long-short (top minus bottom quantile) daily-rebalanced portfolios. DSR (AFML Ch.14) deflates the pooled mean Sharpe by n_trials_for_dsr selection-bias trials. PBO across tracks on long-short returns. DSR > 0.95 AND PBO < 0.15 is the ship gate. long_short >> long_only Sharpe \u21d2 edge is market-neutral-only (argues for P3-d, not the current long-only path)."
+  "notes": "CPCV (AFML Ch.12) over 3 tracks; per-combination annualized Sharpe for long-only (top-quantile) and long-short (top minus bottom quantile) daily-rebalanced portfolios. DSR (AFML Ch.14) deflates the pooled mean Sharpe by n_trials_for_dsr selection-bias trials. PBO across tracks on long-short returns. DSR > 0.95 AND PBO < 0.15 is the ship gate. long_short >> long_only Sharpe \u21d2 edge is market-neutral-only (argues for P3-d, not the current long-only path).",
+  "cost_sweep": [
+    {
+      "round_trip": 0.0,
+      "round_trip_bps": 0.0,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": 0.6429,
+          "ls_sharpe": 0.2386,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.665,
+          "ls_sharpe": 0.1785,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": 0.9161,
+          "ls_sharpe": 1.4087,
+          "dsr_lo": 0.0005,
+          "dsr_ls": 0.9777
+        }
+      },
+      "pbo": 0.056332556332556336
+    },
+    {
+      "round_trip": 0.001037548,
+      "round_trip_bps": 10.38,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": 0.1964,
+          "ls_sharpe": -1.7155,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.3956,
+          "ls_sharpe": -0.8011,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": 0.3699,
+          "ls_sharpe": -0.8933,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.04809634809634809
+    },
+    {
+      "round_trip": 0.0012735479999999998,
+      "round_trip_bps": 12.74,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": 0.0948,
+          "ls_sharpe": -2.1596,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.3344,
+          "ls_sharpe": -1.0234,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": 0.2457,
+          "ls_sharpe": -1.4165,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.054623154623154625
+    },
+    {
+      "round_trip": 0.001537548,
+      "round_trip_bps": 15.38,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": -0.0188,
+          "ls_sharpe": -2.6558,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.2658,
+          "ls_sharpe": -1.272,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": 0.1067,
+          "ls_sharpe": -2.0013,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.04094794094794095
+    },
+    {
+      "round_trip": 0.002037548,
+      "round_trip_bps": 20.38,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": -0.2339,
+          "ls_sharpe": -3.5935,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.1361,
+          "ls_sharpe": -1.7419,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": -0.1566,
+          "ls_sharpe": -3.1073,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.002797202797202797
+    },
+    {
+      "round_trip": 0.003037548,
+      "round_trip_bps": 30.38,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": -0.6639,
+          "ls_sharpe": -5.4568,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": -0.1234,
+          "ls_sharpe": -2.6781,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": -0.6831,
+          "ls_sharpe": -5.3097,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.0
+    },
+    {
+      "round_trip": 0.002224812,
+      "round_trip_bps": 22.25,
+      "tracks": {
+        "ml": {
+          "lo_sharpe": -0.3144,
+          "ls_sharpe": -3.9438,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "linear": {
+          "lo_sharpe": 0.0875,
+          "ls_sharpe": -1.9176,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        },
+        "ml_regression": {
+          "lo_sharpe": -0.2552,
+          "ls_sharpe": -3.5208,
+          "dsr_lo": 0.0,
+          "dsr_ls": 0.0
+        }
+      },
+      "pbo": 0.0011655011655011655
+    }
+  ]
 }
