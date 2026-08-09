@@ -152,6 +152,7 @@ invalidates the run.
 | Drift | `open(t) → close(t)` — the tradable leg |
 | Dedup | same symbol, same day, Damerau–Levenshtein similarity > 0.6 → keep earliest |
 | Category exclusions | **NOT YET FROZEN** — must be decided against the full 105–122 value `desc` distribution, not a single month's top-12 |
+| Headline-text exclusions | **NOT YET FROZEN** — `config.HEADLINE_EXCLUSIONS`. Matched on the text, so a row reading "… Copy of Newspaper Publication" is dropped whatever `desc` NSE assigned it. Caught 0 extra rows on 2026-08-07; a guard against vendor-category drift, not a present leak. |
 | Score mapping | YES → +1, UNKNOWN → 0, NO → −1 |
 | Prompt | the paper's, verbatim — **transcribed 2026-08-10** from Section 5, p.5. Hash `1cc1a88738863a44`. |
 

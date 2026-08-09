@@ -55,6 +55,52 @@ with `symbol` and `sm_isin` — no name resolution required. This is the main
 reason NSE announcements anchor the study and Zerodha Pulse does not: Pulse has
 no ticker tag, no company entity, and no archive.
 
+## The NSE text problem — open, and decided by C0
+
+The paper scored **news headlines** that state what happened ("Apple beats
+earnings estimates"). NSE's `attchmntText` is a **filing description**, and the
+substance lives in an attached PDF. Measured on 2026-08-07:
+
+| | |
+|---|---|
+| Announcements with a PDF attached | **1,286 / 1,286 (100%)** |
+| Text beginning "X has informed/submitted the Exchange…" | 92.6% |
+| `attchmntText` length | median 108 chars, max 838 — **not truncated** |
+
+So the instrument is not reading the same object the paper read. The question is
+whether the description carries enough signal anyway.
+
+**First evidence that it carries something.** If the model were merely mapping
+announcement *type* to a prior, scores would be constant within a `desc`
+category. They are not: on n=225, **87% of the total score dispersion survives
+inside a category**, and all 7 categories with n≥5 are genuinely mixed. It is
+reading the text, not the label.
+
+**But that is not proof it is reading the news.** `Outcome of Board Meeting`
+scored 21 NO / 5 YES / 5 UNKNOWN out of 31 — consistent with the model
+defaulting negative on text that says "approved financial results" without
+saying whether they were good.
+
+**This is settled empirically by C0, not by argument.** C0 compares the score
+against the market's own immediate reaction. If text-only scoring cannot beat
+chance there, the description is too thin and the PDFs become necessary.
+
+**Why the PDFs are not read today** — a deliberate scoping decision, not an
+oversight:
+
+- ~1,286 PDFs/day at ~1.3 MB each is ~1.7 GB/day; it cannot be archived the way
+  the text can.
+- A document is thousands of tokens against ~180 for a headline — roughly a 50x
+  cost increase, moving the daily run from cents to tens of dollars.
+- It changes the instrument. The paper's claim is about headlines; scoring full
+  documents is a *different* experiment and would have to be pre-registered and
+  reported as one, not silently swapped in.
+
+**What is done today:** `attachment_url`, `attachment_size`, `has_xbrl` and
+`disseminated_at` are captured on every row and archived. Storing them is free;
+they are unrecoverable if NSE rotates its archive. That keeps the PDF experiment
+available as a declared arm later without committing to it now.
+
 ## India adaptations
 
 The US definitions do not transfer unmodified.

@@ -76,6 +76,42 @@ def test_repeat_export_is_byte_identical(env):
     assert path.read_bytes() == before
 
 
+def test_enrichment_fills_missing_fields_only(env, tmp_path):
+    """A schema addition must be able to backfill rows already archived — but
+    it must never change a value the archive already recorded, or the git
+    timestamps stop being evidence of what was known when."""
+    path = tmp_path / "announcements" / "2026-08-07.ndjson.gz"
+
+    archive._append_ndjson(path, [
+        {"symbol": "RELIANCE", "seq_id": "s1", "headline": "original",
+         "attachment_url": None},
+    ], ("symbol", "seq_id"))
+
+    result = archive._append_ndjson(path, [
+        {"symbol": "RELIANCE", "seq_id": "s1", "headline": "TAMPERED",
+         "attachment_url": "https://nsearchives.nseindia.com/x.pdf"},
+    ], ("symbol", "seq_id"))
+
+    assert result == {"added": 0, "enriched": 1}
+    rows = archive.read_ndjson(path)
+    assert len(rows) == 1
+    assert rows[0]["attachment_url"].endswith("x.pdf")   # missing field filled
+    assert rows[0]["headline"] == "original"             # recorded claim untouched
+
+
+def test_enrichment_preserves_row_order(env, tmp_path):
+    path = tmp_path / "announcements" / "2026-08-07.ndjson.gz"
+    archive._append_ndjson(path, [
+        {"symbol": "AAA", "seq_id": "1", "attachment_url": None},
+        {"symbol": "BBB", "seq_id": "2", "attachment_url": None},
+    ], ("symbol", "seq_id"))
+    archive._append_ndjson(path, [
+        {"symbol": "BBB", "seq_id": "2", "attachment_url": "u2"},
+        {"symbol": "AAA", "seq_id": "1", "attachment_url": "u1"},
+    ], ("symbol", "seq_id"))
+    assert [r["symbol"] for r in archive.read_ndjson(path)] == ["AAA", "BBB"]
+
+
 def test_scores_are_keyed_by_symbol_and_seq_not_row_id(env):
     """Local integer ids are an artefact of one machine's ingest order and
     would not survive a rebuild elsewhere."""

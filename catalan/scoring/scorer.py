@@ -295,9 +295,9 @@ def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
         rows, counts = filters.apply_all(rows)
         logger.info(
             "pending: %d candidates → %d after filters "
-            "(%d excluded category, %d near-duplicate)",
-            counts["input"], counts["kept"],
-            counts["excluded_category"], counts["excluded_duplicate"],
+            "(%d excluded category, %d excluded headline, %d near-duplicate)",
+            counts["input"], counts["kept"], counts["excluded_category"],
+            counts["excluded_headline"], counts["excluded_duplicate"],
         )
 
     return rows[:limit] if limit else rows

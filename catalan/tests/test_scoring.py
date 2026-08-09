@@ -69,6 +69,49 @@ def test_excluded_categories_are_dropped():
     assert [r["symbol"] for r in kept] == ["A"]
 
 
+def test_newspaper_publication_is_dropped_on_headline_text_alone():
+    """The row is the same non-event whatever `desc` NSE filed it under —
+    the category filter must not be the only line of defence."""
+    rows = [_row("A", "Real news"),
+            _row("OLAELEC",
+                 "Ola Electric Mobility Limited has informed the Exchange about "
+                 "Copy of Newspaper Publication",
+                 category="General Updates")]        # miscategorised on purpose
+    kept, counts = filters.apply_all(rows)
+    assert counts["excluded_headline"] == 1
+    assert counts["excluded_category"] == 0
+    assert [r["symbol"] for r in kept] == ["A"]
+
+
+def test_headline_exclusion_is_case_insensitive():
+    rows = [_row("X", "COPY OF NEWSPAPER PUBLICATION submitted", category="Updates")]
+    assert filters.apply_all(rows)[1]["excluded_headline"] == 1
+
+
+def test_the_two_exclusion_rules_are_counted_separately():
+    """If the headline rule ever starts catching a lot, that is NSE's `desc`
+    drifting — it must be visible in the log, not silently absorbed."""
+    rows = [
+        _row("A", "Real news"),
+        _row("B", "Notice", category="Trading Window"),
+        _row("C", "has informed the Exchange about Copy of Newspaper Publication",
+             category="General Updates"),
+    ]
+    kept, counts = filters.apply_all(rows)
+    assert counts["excluded_category"] == 1
+    assert counts["excluded_headline"] == 1
+    assert counts["kept"] == 1
+
+
+def test_a_row_hit_by_both_rules_is_not_double_counted():
+    rows = [_row("D", "has informed the Exchange about Copy of Newspaper Publication",
+                 category="Copy of Newspaper Publication")]
+    counts = filters.apply_all(rows)[1]
+    assert counts["excluded_category"] == 1
+    assert counts["excluded_headline"] == 0     # category already claimed it
+    assert counts["kept"] == 0
+
+
 def test_near_duplicates_keep_the_earliest():
     """The first announcement carried the information; a later restatement
     would attribute the reaction to the wrong timestamp."""
