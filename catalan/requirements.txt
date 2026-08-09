@@ -1,0 +1,18 @@
+# CATALAN — standalone dependency set.
+# Deliberately kept separate from quant_engine/requirements.txt so CATALAN can
+# be lifted out of this repo without untangling the main app's pins.
+
+fastapi==0.109.2
+uvicorn==0.27.1
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+statsmodels>=0.14.0        # firm+date FE regressions, double-clustered SEs
+
+anthropic>=0.40.0          # Message Batches API
+rapidfuzz>=3.6.0           # Damerau-Levenshtein dedup (headline near-duplicates)
+
+pytest>=7.4.0

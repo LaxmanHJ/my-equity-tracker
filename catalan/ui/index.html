@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CATALAN — LLM news-reaction study</title>
+  <link rel="stylesheet" href="/css/catalan.css" />
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <div class="brand">
+        <span class="mark">CAT</span>
+        <div>
+          <h1>CATALAN</h1>
+          <p class="tagline">Does an LLM's reading of NSE announcements predict same-session drift — net of costs?</p>
+        </div>
+      </div>
+      <dl class="meta" id="meta">
+        <div><dt>Study</dt><dd id="meta-study">—</dd></div>
+        <div><dt>Universe</dt><dd id="meta-universe">—</dd></div>
+        <div><dt>Phase</dt><dd id="meta-phase">—</dd></div>
+      </dl>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- Freshness is first because a silently-dead collector is the main
+         failure mode: the forward log accrues one day per calendar day and
+         a missed day is permanently lost. -->
+    <section class="panel" id="freshness-panel">
+      <h2>Forward log</h2>
+      <p class="note">The only evidence that counts for the ship gate. Every day it does not run is an observation nothing recovers.</p>
+      <div class="stat-row">
+        <div class="stat">
+          <span class="stat-value" id="stat-stale">—</span>
+          <span class="stat-label">days since last announcement</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-total">—</span>
+          <span class="stat-label">announcements collected</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-symbols">—</span>
+          <span class="stat-label">distinct symbols</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-unscored">—</span>
+          <span class="stat-label">unscored</span>
+        </div>
+      </div>
+      <p class="range" id="stat-range"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Pre-registered gates</h2>
+      <p class="note">
+        Declared in <code>PREREGISTRATION.md</code> before scoring begins.
+        <strong>C2 is the ship gate</strong> — C1 without C2 is not a result.
+      </p>
+      <div class="gates" id="gates"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Scoring</h2>
+      <p class="note">
+        Automated and cross-sectional: the daily pipeline scores <em>every</em> unscored
+        announcement across the whole universe. No symbol list anywhere in the loop.
+      </p>
+      <div class="stat-row">
+        <div class="stat">
+          <span class="stat-value" id="stat-pending">—</span>
+          <span class="stat-label">pending after filters</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-filtered">—</span>
+          <span class="stat-label">filtered out (excluded / duplicate)</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-arms">—</span>
+          <span class="stat-label">model arms scored</span>
+        </div>
+      </div>
+      <table class="runs" id="arms-table">
+        <thead>
+          <tr><th>Model</th><th>Prompt hash</th><th class="num">Scored</th><th class="num">Runs</th></tr>
+        </thead>
+        <tbody id="arms"><tr><td colspan="4" class="empty">Nothing scored yet.</td></tr></tbody>
+      </table>
+    </section>
+
+    <!-- The escape hatch, not the main path. -->
+    <section class="panel">
+      <h2>Manual entry</h2>
+      <p class="note">
+        For news the NSE announcements feed did not carry. Saved rows are stamped
+        <code>source='manual'</code> — a manual headline has no exchange timestamp
+        guarantee, so it must stay separable from the forward log.
+      </p>
+      <form class="manual" id="manual-form">
+        <div class="field">
+          <label for="m-company">Company</label>
+          <input id="m-company" required placeholder="Reliance Industries Limited" />
+        </div>
+        <div class="field">
+          <label for="m-symbol">NSE symbol <span class="opt">optional — saves if given</span></label>
+          <input id="m-symbol" placeholder="RELIANCE" />
+        </div>
+        <div class="field wide">
+          <label for="m-headline">Headline</label>
+          <input id="m-headline" required placeholder="Board approves demerger of financial services business" />
+        </div>
+        <button type="submit" id="m-submit">Score headline</button>
+      </form>
+      <div id="manual-result" class="manual-result" hidden></div>
+    </section>
+
+    <section class="panel">
+      <h2>Corpus coverage</h2>
+      <p class="note">Raw, unfiltered. Category exclusions and dedup apply at query time so the corpus stays auditable.</p>
+      <div class="coverage" id="coverage"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent ingest runs</h2>
+      <table class="runs">
+        <thead>
+          <tr><th>Source</th><th>Window</th><th class="num">Fetched</th><th class="num">New</th><th>Status</th><th>Finished</th></tr>
+        </thead>
+        <tbody id="runs"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <footer class="wrap">
+    <p>
+      Replicates Lopez-Lira &amp; Tang, <em>Can ChatGPT forecast stock price movements?</em>,
+      JFE 184 (2026) 104335. US result: 34&nbsp;bps/day gross on the drift leg, dies at 20&nbsp;bps round-trip.
+    </p>
+    <p class="muted">Independent of the Sicilian engine, the fund, and R2. Reads their data; borrows none of their conclusions.</p>
+  </footer>
+
+  <script src="/js/catalan.js"></script>
+</body>
+</html>
