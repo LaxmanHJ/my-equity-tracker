@@ -124,6 +124,14 @@ def normalise(row: Dict[str, Any]) -> Optional[Tuple]:
         _seq_id(row, announced_at, headline),
         SOURCE,
         datetime.now().isoformat(timespec="seconds"),
+        # Captured but not read. `headline` (attchmntText) is the filing
+        # description; the substance lives in this PDF. Storing the URL costs
+        # nothing and cannot be recovered if NSE rotates its archive — whether
+        # to actually read the documents is a separate, later decision.
+        (row.get("attchmntFile") or "").strip() or None,
+        (row.get("attFileSize") or row.get("fileSize") or "").strip() or None,
+        1 if row.get("hasXbrl") else 0,
+        parse_ts(row.get("exchdisstime")),
     )
 
 
@@ -166,17 +174,35 @@ def _chunks(frm: date, to: date, days: int) -> Iterable[Tuple[date, date]]:
 INSERT_SQL = """
 INSERT OR IGNORE INTO announcements
     (symbol, isin, company, announced_at, headline, category, industry,
-     seq_id, source, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     seq_id, source, ingested_at,
+     attachment_url, attachment_size, has_xbrl, disseminated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# Rows collected before the attachment columns existed have them NULL, and
+# INSERT OR IGNORE will not update an existing row. Backfill them in place so a
+# re-collect repairs old rows instead of silently leaving them incomplete.
+# Guarded on IS NULL so it can never overwrite a URL already captured.
+BACKFILL_SQL = """
+UPDATE announcements
+   SET attachment_url = ?, attachment_size = ?, has_xbrl = ?, disseminated_at = ?
+ WHERE symbol = ? AND seq_id = ? AND attachment_url IS NULL
 """
 
 
 def persist(conn: sqlite3.Connection, rows: List[Tuple]) -> int:
-    """Insert rows, returning how many were actually new."""
+    """Insert rows, returning how many were actually new.
+
+    Also repairs attachment fields on rows that predate those columns.
+    """
     if not rows:
         return 0
     before = conn.execute("SELECT count(*) FROM announcements").fetchone()[0]
     conn.executemany(INSERT_SQL, rows)
+    conn.executemany(
+        BACKFILL_SQL,
+        [(r[10], r[11], r[12], r[13], r[0], r[7]) for r in rows],
+    )
     conn.commit()
     after = conn.execute("SELECT count(*) FROM announcements").fetchone()[0]
     return after - before

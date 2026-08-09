@@ -56,7 +56,11 @@ ANNOUNCEMENTS_DIR = ARCHIVE_ROOT / "announcements"
 SCORES_DIR = ARCHIVE_ROOT / "scores"
 
 ANNOUNCEMENT_COLS = ("symbol", "isin", "company", "announced_at", "headline",
-                     "category", "industry", "seq_id", "source", "ingested_at")
+                     "category", "industry", "seq_id", "source", "ingested_at",
+                     # Captured, not read — see schema.sql. Rows archived before
+                     # these columns existed simply carry nulls on rebuild.
+                     "attachment_url", "attachment_size", "has_xbrl",
+                     "disseminated_at")
 SCORE_COLS = ("announcement_id", "model_id", "prompt_hash", "effort", "score",
               "rationale", "run_id", "scored_at")
 
@@ -69,27 +73,41 @@ def read_ndjson(path: Path) -> List[Dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def _append_ndjson(path: Path, rows: Iterable[Dict], key_fields: tuple) -> int:
-    """Merge rows into a day's archive file. Idempotent — a re-run adds nothing.
+def _append_ndjson(path: Path, rows: Iterable[Dict], key_fields: tuple) -> Dict[str, int]:
+    """Merge rows into a day's archive file. Idempotent — a re-run changes nothing.
 
-    Dedupe is against the file's own contents, so a repeated collector run on
-    the same day cannot double-write the archive. Existing rows are preserved
-    byte-for-byte in their original order and new rows append after them: the
-    archive is the evidentiary record, so it is never rewritten or reordered.
+    Ordering is preserved: existing rows keep their positions and new rows
+    append after them. The archive is the evidentiary record, so it is never
+    reordered.
+
+    **Enrichment is additive only.** If a row already present acquires a field
+    it did not have before (this happened when `attachment_url` was added to
+    the schema after 2026-08-07 was already archived), the missing field is
+    filled in. A field that already holds a non-null value is NEVER changed —
+    so this can add information to the record but can never alter a claim it
+    already made, which is what keeps the git timestamps meaningful as evidence.
     """
     rows = list(rows)
     existing = read_ndjson(path)
-    seen = {tuple(str(rec.get(k)) for k in key_fields) for rec in existing}
+    index = {tuple(str(rec.get(k)) for k in key_fields): rec for rec in existing}
 
-    fresh = []
+    fresh: List[Dict] = []
+    enriched = 0
     for row in rows:
         key = tuple(str(row.get(k)) for k in key_fields)
-        if key not in seen:
+        prior = index.get(key)
+        if prior is None:
             fresh.append(row)
-            seen.add(key)
+            index[key] = row
+            continue
+        added = {k: v for k, v in row.items()
+                 if v is not None and prior.get(k) is None}
+        if added:
+            prior.update(added)
+            enriched += 1
 
-    if not fresh:
-        return 0
+    if not fresh and not enriched:
+        return {"added": 0, "enriched": 0}
 
     path.parent.mkdir(parents=True, exist_ok=True)
     # mtime=0 keeps the gzip header byte-identical for identical content, so a
@@ -98,7 +116,7 @@ def _append_ndjson(path: Path, rows: Iterable[Dict], key_fields: tuple) -> int:
         for row in existing + fresh:
             line = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
             gz.write(line.encode("utf-8"))
-    return len(fresh)
+    return {"added": len(fresh), "enriched": enriched}
 
 
 def export_announcements(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
@@ -118,9 +136,10 @@ def export_announcements(day: str, conn: Optional[sqlite3.Connection] = None) ->
         if own:
             conn.close()
 
-    n = _append_ndjson(ANNOUNCEMENTS_DIR / f"{day}.ndjson.gz", rows, ("symbol", "seq_id"))
-    logger.info("archive: %s announcements +%d (%d in store)", day, n, len(rows))
-    return n
+    r = _append_ndjson(ANNOUNCEMENTS_DIR / f"{day}.ndjson.gz", rows, ("symbol", "seq_id"))
+    logger.info("archive: %s announcements +%d added, %d enriched (%d in store)",
+                day, r["added"], r["enriched"], len(rows))
+    return r["added"]
 
 
 def export_scores(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
@@ -151,10 +170,11 @@ def export_scores(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
         if own:
             conn.close()
 
-    n = _append_ndjson(SCORES_DIR / f"{day}.ndjson.gz", rows,
+    r = _append_ndjson(SCORES_DIR / f"{day}.ndjson.gz", rows,
                        ("symbol", "seq_id", "model_id", "prompt_hash"))
-    logger.info("archive: %s scores +%d (%d in store)", day, n, len(rows))
-    return n
+    logger.info("archive: %s scores +%d added, %d enriched (%d in store)",
+                day, r["added"], r["enriched"], len(rows))
+    return r["added"]
 
 
 def rebuild(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:

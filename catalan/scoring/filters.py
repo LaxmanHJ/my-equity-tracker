@@ -19,7 +19,11 @@ from __future__ import annotations
 import re
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from catalan.config import CATEGORY_EXCLUSIONS, DEDUP_SIMILARITY
+from catalan.config import (
+    CATEGORY_EXCLUSIONS,
+    DEDUP_SIMILARITY,
+    HEADLINE_EXCLUSIONS,
+)
 
 try:                                   # optional; stdlib fallback below
     from rapidfuzz.distance import DamerauLevenshtein
@@ -55,6 +59,24 @@ def normalise_headline(text: str) -> str:
 def is_excluded_category(category) -> bool:
     """True if this `desc` is on the declared exclusion list."""
     return (category or "") in CATEGORY_EXCLUSIONS
+
+
+def is_excluded_headline(headline) -> bool:
+    """True if the headline TEXT marks this as a declared non-event.
+
+    Complements the `desc` filter rather than replacing it. `desc` is
+    vendor-assigned; a row reading "... has informed the Exchange about Copy of
+    Newspaper Publication" is the same non-event whatever category it was filed
+    under.
+    """
+    text = (headline or "").lower()
+    return any(pattern in text for pattern in HEADLINE_EXCLUSIONS)
+
+
+def is_excluded(row: Dict) -> bool:
+    """Either exclusion rule fires."""
+    return (is_excluded_category(row.get("category"))
+            or is_excluded_headline(row.get("headline")))
 
 
 def dedup_key(symbol: str, announced_at: str) -> Tuple[str, str]:
@@ -106,16 +128,25 @@ def apply_all(rows: Iterable[Dict], dedup: bool = True) -> Tuple[List[Dict], Dic
     be visible in the run log, not discovered later in a coverage plot.
     """
     rows = list(rows)
-    after_category = [r for r in rows if not is_excluded_category(r.get("category"))]
+
+    # Counted separately so the run log shows which rule is doing the work.
+    # If the headline rule ever starts catching a lot, that is NSE's `desc`
+    # drifting and worth knowing about rather than silently absorbing.
+    by_category = [r for r in rows if is_excluded_category(r.get("category"))]
+    by_headline = [r for r in rows
+                   if not is_excluded_category(r.get("category"))
+                   and is_excluded_headline(r.get("headline"))]
+    kept_rows = [r for r in rows if not is_excluded(r)]
 
     if dedup:
-        kept, dupes = drop_near_duplicates(after_category)
+        kept, dupes = drop_near_duplicates(kept_rows)
     else:
-        kept, dupes = after_category, []
+        kept, dupes = kept_rows, []
 
     return kept, {
         "input": len(rows),
-        "excluded_category": len(rows) - len(after_category),
+        "excluded_category": len(by_category),
+        "excluded_headline": len(by_headline),
         "excluded_duplicate": len(dupes),
         "kept": len(kept),
     }

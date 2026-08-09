@@ -25,6 +25,21 @@ CREATE TABLE IF NOT EXISTS announcements (
     seq_id        TEXT NOT NULL,     -- NSE row identity, for idempotent re-runs
     source        TEXT NOT NULL,     -- 'nse_announcements' | 'pulse'
     ingested_at   TEXT NOT NULL,
+
+    -- Every NSE announcement carries a PDF, and `headline` is only the filing
+    -- *description* — the substance (actual numbers, actual outcome) is in the
+    -- attachment. We do not read the PDFs today; see catalan/wiki/concepts/
+    -- llm_news_scoring.md for why that is a deliberate, separately-scoped
+    -- decision rather than an oversight.
+    --
+    -- The URL is captured anyway because it costs nothing to store and cannot
+    -- be recovered later if NSE rotates its archive. Unused data is free;
+    -- missing data is permanent.
+    attachment_url  TEXT,
+    attachment_size TEXT,
+    has_xbrl        INTEGER,         -- structured filing data also available
+    disseminated_at TEXT,            -- NSE `exchdisstime`; cross-check on an_dt
+
     UNIQUE(symbol, seq_id)
 );
 

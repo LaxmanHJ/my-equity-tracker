@@ -24,6 +24,25 @@ from catalan.config import DB_PATH
 
 _SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
+# Columns added after the first stores were created. `CREATE TABLE IF NOT
+# EXISTS` in schema.sql cannot retrofit these, so they are ALTERed in
+# idempotently on every open. Additive only — never drop or rename here, or a
+# rebuild from the archive would lose data.
+_MIGRATIONS = (
+    ("announcements", "attachment_url", "TEXT"),
+    ("announcements", "attachment_size", "TEXT"),
+    ("announcements", "has_xbrl", "INTEGER"),
+    ("announcements", "disseminated_at", "TEXT"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, coltype in _MIGRATIONS:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    conn.commit()
+
 # A statement is allowed if its first keyword is one of these. Comments and
 # leading whitespace are stripped first so `-- oops\nDELETE ...` cannot sneak by.
 _READ_ONLY_VERBS = frozenset({"select", "pragma", "with", "explain"})
@@ -66,6 +85,7 @@ def store(db_path: Optional[Union[str, Path]] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA_PATH.read_text())
     conn.commit()
+    _migrate(conn)
     return conn
 
 

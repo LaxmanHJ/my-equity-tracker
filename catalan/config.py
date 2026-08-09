@@ -86,6 +86,22 @@ CATEGORY_EXCLUSIONS = (
     "Disclosure under SEBI Takeover Regulations",
 )
 
+# Second line of defence, matched against the headline TEXT rather than `desc`.
+#
+# `desc` is vendor-assigned and there is no guarantee it stays consistent: a row
+# whose text reads "... has informed the Exchange about Copy of Newspaper
+# Publication" is the same non-event regardless of what category NSE filed it
+# under. Measured on 2026-08-07 this catches zero rows the category filter
+# misses (all 138 text mentions already carried the matching `desc`), so it is
+# a guard against future drift, not a fix for a present leak — the kind of
+# inconsistency that surfaces at row 50,000, not row 1,300.
+#
+# Case-insensitive substring patterns. Same status as CATEGORY_EXCLUSIONS:
+# a declared study parameter, frozen before scoring.
+HEADLINE_EXCLUSIONS = (
+    "copy of newspaper publication",
+)
+
 # ── Model arms ────────────────────────────────────────────────────────────────
 # Replicates the paper's §7 "financial reasoning is an emergent capacity" claim
 # and doubles as the contamination control: a smaller model has a different

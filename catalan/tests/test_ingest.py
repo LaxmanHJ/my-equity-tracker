@@ -31,6 +31,10 @@ def nse_row(**over):
         "desc": "Board Meeting Outcome",
         "smIndustry": "Refineries",
         "seqId": "998877",
+        "attchmntFile": "https://nsearchives.nseindia.com/corporate/REL_070826_Outcome.pdf",
+        "attFileSize": "1.34 MB",
+        "hasXbrl": True,
+        "exchdisstime": "06-Aug-2026 18:24:10",
     }
     row.update(over)
     return row
@@ -113,3 +117,52 @@ def test_same_seq_id_different_symbol_is_a_distinct_row(db):
 
 def test_persist_handles_an_empty_batch(db):
     assert persist(db, []) == 0
+
+
+# ── Attachment capture ────────────────────────────────────────────────────────
+# Every NSE announcement carries a PDF and `headline` is only the filing
+# description, so the URL is captured against a possible later decision to read
+# the documents. It cannot be recovered if NSE rotates its archive.
+
+def test_attachment_fields_are_captured():
+    out = normalise(nse_row())
+    assert out[10].endswith("REL_070826_Outcome.pdf")
+    assert out[11] == "1.34 MB"
+    assert out[12] == 1
+    assert out[13] == "2026-08-06T18:24:10"
+
+
+def test_missing_attachment_does_not_drop_the_row():
+    """A row without a PDF is still a real announcement — the URL is a bonus,
+    not a requirement."""
+    out = normalise(nse_row(attchmntFile="", hasXbrl=False))
+    assert out is not None
+    assert out[10] is None
+    assert out[12] == 0
+
+
+def test_attachment_url_is_persisted(db):
+    persist(db, [normalise(nse_row())])
+    url = db.execute("SELECT attachment_url FROM announcements").fetchone()[0]
+    assert url.endswith("REL_070826_Outcome.pdf")
+
+
+def test_rows_predating_the_columns_are_backfilled(db):
+    """INSERT OR IGNORE will not update an existing row, so a re-collect has to
+    repair rows captured before the attachment columns existed."""
+    row = list(normalise(nse_row()))
+    row[10] = row[11] = row[12] = row[13] = None      # simulate an old row
+    persist(db, [tuple(row)])
+    assert db.execute("SELECT attachment_url FROM announcements").fetchone()[0] is None
+
+    persist(db, [normalise(nse_row())])               # re-collect
+    url = db.execute("SELECT attachment_url FROM announcements").fetchone()[0]
+    assert url.endswith("REL_070826_Outcome.pdf")
+    assert db.execute("SELECT count(*) FROM announcements").fetchone()[0] == 1
+
+
+def test_backfill_never_overwrites_a_captured_url(db):
+    persist(db, [normalise(nse_row())])
+    persist(db, [normalise(nse_row(attchmntFile="https://example.com/DIFFERENT.pdf"))])
+    url = db.execute("SELECT attachment_url FROM announcements").fetchone()[0]
+    assert url.endswith("REL_070826_Outcome.pdf")
