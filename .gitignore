@@ -35,3 +35,8 @@ data/membership_sources/press_release_cache/
 data/membership_sources/bhavcopy_cache/
 
 data/archive/
+
+# CATALAN local store (standalone study)
+catalan/data/*.db
+catalan/data/*.db-*
+catalan/**/__pycache__/

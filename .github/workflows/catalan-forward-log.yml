@@ -1,0 +1,134 @@
+# CATALAN forward log — the scheduled collector + scorer.
+#
+# WHY THIS RUNS IN THE CLOUD: the forward log accrues exactly one day per
+# calendar day and it is the only evidence that clears CATALAN's C2 ship gate
+# (Claude's training cutoffs fall inside the historical corpus, so backfilled
+# scores measure recall, not prediction). A day this does not run is a
+# permanently lost observation. It cannot depend on a laptop being awake.
+#
+# WHY IT COMMITS DATA BACK: Actions runners are ephemeral and Turso writes are
+# blocked repo-wide (free-tier quota exhausted 2026-08-05), so there is nowhere
+# else to put the corpus. The committed NDJSON under catalan/data/forward_log/
+# is the system of record; catalan.db is a rebuildable local cache.
+#
+# The commit timestamps are the point, not a side effect: they are independent,
+# tamper-evident proof that each headline was recorded BEFORE the return it
+# predicts was known. The pre-registration's contamination argument rests on it.
+#
+# Required repository secret:
+#   ANTHROPIC_API_KEY   — scoring. Without it, set SKIP_SCORE=true and the run
+#                         still collects (headlines are the irreplaceable part;
+#                         scoring can always be backfilled from them later).
+# Optional:
+#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN — only needed once the returns panel
+#                         lands (Phase 2). Collection does not read Turso.
+
+name: CATALAN forward log
+
+on:
+  schedule:
+    # 03:45 UTC = 09:15 IST, Tue-Sat. Collects the PREVIOUS calendar day, so a
+    # Tuesday run captures Monday's post-close filings and a Saturday run
+    # captures Friday's. NSE announcements keep landing until ~23:59 IST
+    # (observed: the latest row on 2026-08-07 was 23:57), so anything earlier
+    # than midnight IST would truncate the day.
+    - cron: "45 3 * * 2-6"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Day to collect (YYYY-MM-DD). Blank = yesterday."
+        required: false
+      skip_score:
+        description: "Collect only, no Anthropic calls"
+        type: boolean
+        default: false
+
+concurrency:
+  # Never let a manual catch-up race the nightly run — both commit to the
+  # same branch and a mid-run push would conflict.
+  group: catalan-forward-log
+  cancel-in-progress: false
+
+# Required for the archive commit. Without this the default GITHUB_TOKEN is
+# read-only on many repos and the push step fails.
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    # Pinned to the branch CATALAN lives on. Update both of these together if
+    # the project is ever merged to main.
+    env:
+      CATALAN_BRANCH: r2-nifty500-gate
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r2-nifty500-gate
+          # A token with write access is what lets the commit step push back.
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CATALAN dependencies
+        run: python -m pip install -r catalan/requirements.txt
+
+      - name: Run pipeline (rebuild → collect → score → archive)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            ARGS="--date ${{ github.event.inputs.date }}"
+          fi
+          if [ "${{ github.event.inputs.skip_score }}" = "true" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::scoring skipped — headlines still collected"
+            ARGS="$ARGS --skip-score"
+          fi
+          python -m catalan.pipeline $ARGS | tee pipeline_result.json
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### CATALAN forward log"
+            echo '```json'
+            cat pipeline_result.json 2>/dev/null || echo "pipeline produced no output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit the archive
+        run: |
+          git config user.name  "catalan-bot"
+          git config user.email "catalan-bot@users.noreply.github.com"
+          git add catalan/data/forward_log/
+          if git diff --staged --quiet; then
+            echo "no new rows — nothing to commit"
+            exit 0
+          fi
+          # Rebase onto any commit pushed while this job ran; the archive is
+          # append-only NDJSON so a rebase cannot lose rows.
+          git pull --rebase origin "$CATALAN_BRANCH"
+          git commit -m "data(catalan): forward log $(date -u +%Y-%m-%d)"
+          git push origin HEAD:"$CATALAN_BRANCH"
+
+      - name: Fail loudly if nothing was collected
+        run: |
+          # A silently-dead collector is this study's main failure mode, so a
+          # zero-row day must be a red run rather than a green no-op. NSE
+          # publishes announcements on non-trading days too (they are just
+          # sparse), so zero really does mean something broke.
+          python - <<'PY'
+          import json, sys
+          r = json.load(open("pipeline_result.json"))
+          fetched = r.get("collect", {}).get("fetched", 0)
+          print(json.dumps(r, indent=2))
+          if fetched == 0:
+              sys.exit("collector fetched 0 rows for %s — investigate" % r.get("date"))
+          PY

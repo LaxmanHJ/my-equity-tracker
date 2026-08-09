@@ -1,0 +1,193 @@
+/* CATALAN — its own visual identity.
+   Deliberately not the main dashboard's dark trading-desk look: this is a
+   research log, so it reads like a working paper. Serif headings, generous
+   measure, tabular figures, one accent colour used sparingly. */
+
+:root {
+  --paper:      #f7f5f0;
+  --paper-2:    #fffefb;
+  --ink:        #1c1a17;
+  --ink-2:      #55504a;
+  --ink-3:      #8b847b;
+  --rule:       #ddd7cc;
+  --accent:     #8a3324;   /* oxide red — used for the ship gate and nothing else */
+  --ok:         #2f6b4f;
+  --warn:       #9a6b18;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper:   #16150f;
+    --paper-2: #1e1c16;
+    --ink:     #ece7dc;
+    --ink-2:   #b3ac9f;
+    --ink-3:   #7d766a;
+    --rule:    #34302a;
+    --accent:  #d4674f;
+    --ok:      #6cbf95;
+    --warn:    #d6a83f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* ── Masthead ─────────────────────────────────────────────────────────── */
+
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding: 2.25rem 0 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.brand { display: flex; gap: 1rem; align-items: flex-start; }
+
+.mark {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  padding: 0.3rem 0.5rem;
+  margin-top: 0.5rem;
+  flex-shrink: 0;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-size: 2.4rem;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+
+.tagline { color: var(--ink-2); margin: 0.15rem 0 0; max-width: 58ch; }
+
+.meta { display: flex; gap: 2.5rem; margin: 1.5rem 0 0; }
+.meta div { margin: 0; }
+.meta dt {
+  font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.meta dd { margin: 0.15rem 0 0; font-family: var(--mono); font-size: 0.85rem; }
+
+/* ── Panels ───────────────────────────────────────────────────────────── */
+
+.panel { margin-bottom: 2.75rem; }
+
+h2 {
+  font-family: var(--serif); font-size: 1.35rem; font-weight: 400;
+  margin: 0 0 0.3rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule);
+}
+
+.note { color: var(--ink-2); font-size: 0.87rem; margin: 0.6rem 0 1.2rem; max-width: 72ch; }
+.note code { font-family: var(--mono); font-size: 0.82em; background: var(--paper-2); padding: 0.1em 0.35em; border: 1px solid var(--rule); }
+
+/* ── Stats ────────────────────────────────────────────────────────────── */
+
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+.stat { background: var(--paper-2); padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.stat-value { font-family: var(--mono); font-size: 1.75rem; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat-value.is-stale { color: var(--accent); }
+.stat-value.is-fresh { color: var(--ok); }
+.stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.range { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-3); margin: 0.7rem 0 0; }
+
+/* ── Gates ────────────────────────────────────────────────────────────── */
+
+.gates { display: grid; gap: 0.9rem; }
+
+.gate {
+  background: var(--paper-2); border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule);
+  padding: 1rem 1.25rem;
+  display: grid; grid-template-columns: 3.5rem 1fr auto; gap: 1rem; align-items: baseline;
+}
+.gate.is-ship { border-left-color: var(--accent); }
+
+.gate-id { font-family: var(--mono); font-size: 1.1rem; color: var(--ink-2); }
+.gate.is-ship .gate-id { color: var(--accent); font-weight: 700; }
+.gate-name { font-size: 0.95rem; }
+.gate-ref { display: block; font-size: 0.78rem; color: var(--ink-3); margin-top: 0.2rem; }
+.gate-ref .untradable { color: var(--warn); }
+.gate-status { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-3); white-space: nowrap; }
+
+/* ── Coverage bars ────────────────────────────────────────────────────── */
+
+.coverage { display: flex; align-items: flex-end; gap: 2px; min-height: 90px; border-bottom: 1px solid var(--rule); padding-bottom: 0.4rem; overflow-x: auto; }
+.cov-bar { flex: 1 0 8px; background: var(--ink-2); min-height: 2px; position: relative; }
+.cov-bar:hover { background: var(--accent); }
+.cov-empty { color: var(--ink-3); font-size: 0.85rem; font-style: italic; }
+
+/* ── Runs table ───────────────────────────────────────────────────────── */
+
+.runs { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.runs th {
+  text-align: left; padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3); font-weight: 400;
+}
+.runs td { padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 0.8rem; }
+.runs .num { text-align: right; font-variant-numeric: tabular-nums; }
+.runs .empty { text-align: center; color: var(--ink-3); font-style: italic; padding: 1.5rem; }
+.s-ok { color: var(--ok); }
+.s-error { color: var(--accent); }
+.s-running { color: var(--warn); }
+
+/* ── Manual entry ─────────────────────────────────────────────────────── */
+
+.manual { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem 1rem; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 0.3rem; }
+.field.wide { grid-column: 1 / -1; }
+.field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.field .opt { text-transform: none; letter-spacing: 0; font-style: italic; }
+.field input {
+  font-family: var(--sans); font-size: 0.9rem; padding: 0.55rem 0.7rem;
+  background: var(--paper-2); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 2px;
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+
+.manual button {
+  grid-column: 1 / -1; justify-self: start;
+  font-family: var(--sans); font-size: 0.85rem; font-weight: 600;
+  padding: 0.55rem 1.4rem; cursor: pointer;
+  background: var(--ink); color: var(--paper);
+  border: none; border-radius: 2px;
+}
+.manual button:hover:not(:disabled) { background: var(--accent); }
+.manual button:disabled { opacity: 0.5; cursor: progress; }
+
+.manual-result {
+  margin-top: 1.2rem; padding: 1rem 1.25rem;
+  background: var(--paper-2); border: 1px solid var(--rule); border-left: 3px solid var(--rule);
+}
+.manual-result.v-yes { border-left-color: var(--ok); }
+.manual-result.v-no { border-left-color: var(--accent); }
+.manual-result.v-unknown { border-left-color: var(--ink-3); }
+.manual-result.v-error { border-left-color: var(--warn); }
+.verdict { font-family: var(--mono); font-size: 1.3rem; font-weight: 700; }
+.manual-result.v-yes .verdict { color: var(--ok); }
+.manual-result.v-no .verdict { color: var(--accent); }
+.manual-result p { margin: 0.4rem 0 0; font-size: 0.88rem; }
+.manual-result .prov { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); margin-top: 0.6rem; }
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+
+footer { border-top: 1px solid var(--rule); padding: 1.5rem 1.5rem 3rem; margin-top: 1rem; }
+footer p { font-size: 0.82rem; color: var(--ink-2); margin: 0 0 0.4rem; max-width: 72ch; }
+footer .muted { color: var(--ink-3); font-size: 0.78rem; }
