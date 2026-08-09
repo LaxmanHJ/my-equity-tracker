@@ -68,6 +68,9 @@ jobs:
           ref: r2-nifty500-gate
           # A token with write access is what lets the commit step push back.
           persist-credentials: true
+          # Full history: the retry path rebases, and rebase on the default
+          # shallow (depth 1) clone fails.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -91,7 +94,7 @@ jobs:
             echo "::notice::scoring skipped — headlines still collected"
             ARGS="$ARGS --skip-score"
           fi
-          python -m catalan.pipeline $ARGS | tee pipeline_result.json
+          python -m catalan.pipeline $ARGS | tee "$RUNNER_TEMP/pipeline_result.json"
 
       - name: Summarise
         if: always()
@@ -99,7 +102,7 @@ jobs:
           {
             echo "### CATALAN forward log"
             echo '```json'
-            cat pipeline_result.json 2>/dev/null || echo "pipeline produced no output"
+            cat "$RUNNER_TEMP/pipeline_result.json" 2>/dev/null || echo "pipeline produced no output"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -112,11 +115,24 @@ jobs:
             echo "no new rows — nothing to commit"
             exit 0
           fi
-          # Rebase onto any commit pushed while this job ran; the archive is
-          # append-only NDJSON so a rebase cannot lose rows.
-          git pull --rebase origin "$CATALAN_BRANCH"
+
+          # COMMIT FIRST, THEN REBASE. `git rebase` refuses to run against a
+          # dirty index, so staging the archive and *then* pulling fails with
+          # "cannot pull with rebase: Your index contains uncommitted changes"
+          # (this is what broke the 2026-08-11 run). Stashing instead of
+          # committing would be worse than the bug: the stash is never popped,
+          # so the run goes green having committed nothing and the day's rows
+          # are gone with the runner.
           git commit -m "data(catalan): forward log $(date -u +%Y-%m-%d)"
-          git push origin HEAD:"$CATALAN_BRANCH"
+
+          # Fast path: nobody else pushed, so no rebase is needed at all. Only
+          # if the push is rejected do we rebase our commit onto theirs and
+          # retry — the archive is append-only, so a rebase cannot lose rows.
+          if ! git push origin HEAD:"$CATALAN_BRANCH"; then
+            echo "push rejected — rebasing onto the newer tip and retrying"
+            git pull --rebase origin "$CATALAN_BRANCH"
+            git push origin HEAD:"$CATALAN_BRANCH"
+          fi
 
       - name: Fail loudly if nothing was collected
         run: |
@@ -125,8 +141,8 @@ jobs:
           # publishes announcements on non-trading days too (they are just
           # sparse), so zero really does mean something broke.
           python - <<'PY'
-          import json, sys
-          r = json.load(open("pipeline_result.json"))
+          import json, os, sys
+          r = json.load(open(os.environ["RUNNER_TEMP"] + "/pipeline_result.json"))
           fetched = r.get("collect", {}).get("fetched", 0)
           print(json.dumps(r, indent=2))
           if fetched == 0:
