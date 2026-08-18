@@ -120,6 +120,25 @@ jobs:
           git config user.name  "catalan-bot"
           git config user.email "catalan-bot@users.noreply.github.com"
           git add catalan/data/forward_log/
+
+          # GUARD: "git staged nothing" has two causes and only one is benign.
+          #
+          # Benign — the day was already collected and committed, so a re-run
+          # is idempotent and there is genuinely nothing new.
+          #
+          # CATASTROPHIC — the archive is invisible to git (a .gitignore rule,
+          # a bad path) so `git add` silently staged nothing. This runner is
+          # ephemeral and Turso writes are quota-blocked, so git is the only
+          # durable destination: exiting 0 here destroys the day's collection
+          # and reports success. That happened on 2026-08-19, when
+          # catalan/data/forward_log/ was added to .gitignore.
+          #
+          # Distinguish them by asking whether git tracks the archive at all.
+          if [ -z "$(git ls-files catalan/data/forward_log/)" ]; then
+            echo "::error::catalan/data/forward_log/ is NOT TRACKED by git. The archive is the system of record and this runner is about to be destroyed with the day's collection on it. Check .gitignore — the directory must stay tracked."
+            exit 1
+          fi
+
           if git diff --staged --quiet; then
             echo "no new rows — nothing to commit"
             exit 0
