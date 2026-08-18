@@ -39,4 +39,5 @@ data/archive/
 # CATALAN local store (standalone study)
 catalan/data/*.db
 catalan/data/*.db-*
+catalan/data/forward_log/
 catalan/**/__pycache__/
