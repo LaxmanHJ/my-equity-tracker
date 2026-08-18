@@ -27,12 +27,21 @@ name: CATALAN forward log
 
 on:
   schedule:
-    # 03:45 UTC = 09:15 IST, Tue-Sat. Collects the PREVIOUS calendar day, so a
+    # 03:45 UTC = 09:15 IST, EVERY day. Collects the PREVIOUS calendar day, so a
     # Tuesday run captures Monday's post-close filings and a Saturday run
     # captures Friday's. NSE announcements keep landing until ~23:59 IST
     # (observed: the latest row on 2026-08-07 was 23:57), so anything earlier
     # than midnight IST would truncate the day.
-    - cron: "45 3 * * 2-6"
+    #
+    # WHY ALL SEVEN DAYS and not Tue-Sat: a Tue-Sat schedule collects Mon-Fri
+    # filings only, so Saturday and Sunday filings were never collected at all.
+    # They are not sparse — Saturday 2026-08-08 carried 480 announcements, 37%
+    # of the preceding Friday's 1,286, and survived only because that day was
+    # dispatched by hand. Weekend filings are also the ones most likely to be a
+    # biased subset (news released when the market cannot react), which is
+    # exactly the population a news-reaction study must not silently drop.
+    # `attribution_date()` already maps them onto the next trading day's open.
+    - cron: "45 3 * * *"
   workflow_dispatch:
     inputs:
       date:
