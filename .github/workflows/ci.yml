@@ -1,0 +1,93 @@
+# The test gate.
+#
+# Until this file existed there was NO test CI in this repository — only the two
+# data jobs (catalan-forward-log.yml, eod-sync.yml). 135 catalan tests, 225
+# quant_engine tests and 42 node tests existed and nothing ran them on a change.
+# "Only gate-passing changes are retained" needs a mechanism, not just tests.
+#
+# ── CRITICAL SEPARATION: GATES BLOCK CODE, NEVER DATA ────────────────────────
+# Nothing here may ever become a dependency of catalan-forward-log.yml. That job
+# collects exactly one day per calendar day and a missed day is a PERMANENTLY
+# lost observation — the one failure this study cannot absorb. An unrelated red
+# test must never stop the collector. They are separate workflows on purpose;
+# keep it that way.
+#
+# ── RETENTION REQUIRES A REPO SETTING THIS FILE CANNOT APPLY ─────────────────
+# This workflow REPORTS; it does not BLOCK. To actually stop non-passing code
+# from landing, enable branch protection on `main` and `r2-nifty500-gate` with
+# `catalan`, `quant_engine` and `node` as required status checks:
+#   GitHub → Settings → Branches → Add rule → Require status checks to pass.
+# That is a manual step and there is no way to do it from a committed file.
+#
+# Three independent jobs rather than one, so a red suite localises immediately
+# instead of hiding behind whichever suite happens to fail first.
+#
+# Every job runs OFFLINE — no Turso, no NSE, no Anthropic credentials. That
+# matches catalan/tests/conftest.py's stated contract, and it means a test that
+# starts needing the network fails here rather than quietly costing money.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # One run per ref. A force-push mid-run just supersedes the old one.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  catalan:
+    name: catalan (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r catalan/requirements.txt
+      - name: Run tests
+        # Includes the study gates: G1 dependency arrow (test_boundaries.py),
+        # G2/G3 frozen parameters + prompt hash (test_frozen_params.py),
+        # G4 panel invariants (test_panel.py), G5 no-Turso-writes and the
+        # byte-identical archive re-export.
+        run: python -m pytest catalan/tests/ -q
+
+  quant_engine:
+    name: quant_engine (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        # pytest is not in quant_engine/requirements.txt — that file is the
+        # runtime set for the deployed engine, and a test runner does not belong
+        # in it. Installed here instead.
+        run: |
+          python -m pip install -r quant_engine/requirements.txt
+          python -m pip install pytest
+      - name: Run tests
+        run: python -m pytest quant_engine/tests/ -q
+
+  node:
+    name: node (npm test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test

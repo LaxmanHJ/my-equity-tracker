@@ -155,6 +155,50 @@ invalidates the run.
 | Headline-text exclusions | **NOT YET FROZEN** — `config.HEADLINE_EXCLUSIONS`. Matched on the text, so a row reading "… Copy of Newspaper Publication" is dropped whatever `desc` NSE assigned it. Caught 0 extra rows on 2026-08-07; a guard against vendor-category drift, not a present leak. |
 | Score mapping | YES → +1, UNKNOWN → 0, NO → −1 |
 | Prompt | the paper's, verbatim — **transcribed 2026-08-10** from Section 5, p.5. Hash `1cc1a88738863a44`. |
+| Liquidity buckets | 5, within-date quintiles by 20-day ADV. **Orientation: 1 = LEAST liquid … 5 = MOST liquid.** |
+| ADV measure | **rupee turnover** (`close × volume`), 20 sessions, `min_periods` = the full window |
+| Corporate-action guard | `abs(init_ret) > 0.20` → null `init_ret` **and** `prev_close`; retain `open`, `close`, `drift_ret` |
+| `prev_close` | the immediately preceding **global trading session's** close, or NULL. **No forward-fill.** |
+| Phantom-session floor | a date is a session only if its breadth ≥ `max(20, 0.25 × median breadth)` over the window |
+| Weekly-cadence guard | per symbol, rolling-10 median bar gap > 1.6 sessions → row dropped entirely |
+| Flat-bar guard | `open == high == low == close` → row dropped entirely |
+
+### Panel construction — declared consequences
+
+These are stated here because each one decides which rows enter C0/C1/C2, and
+because two of them are known, uncorrected biases.
+
+**The corporate-action guard costs the ship gate nothing.** On an ex-date all
+four of a session's prices are already quoted in the post-action basis, so only
+the comparison to the *previous* close crosses the basis change. `drift_ret =
+close(t)/open(t) − 1` is unaffected. The guard therefore protects only the
+untradable C0 leg. It must never be "simplified" into dropping the row: that
+would delete drift observations on exactly the highest-news-intensity days.
+
+**Declared residual — ex-dividends and rights issues are not caught.** A 1–2%
+dividend yield sits far inside the 20% band, so `init_ret` carries a small
+negative bias on ex-dates. This is stated rather than silently corrected,
+because correcting it would require a corporate-actions table this project does
+not have.
+
+**Declared consequence — `prev_close` is not forward-filled.** If a stock was
+halted on t−1, `open(t)/close(t−2) − 1` is a two-day return wearing an
+overnight label. Those rows get a NULL `init_ret` instead. Losing an
+observation is cheap; a mislabelled horizon in the C0 leg is not.
+
+**Declared consequence — the pre-2025-03-17 contamination is dropped, not
+adjusted.** `price_history` rows from before that cutover were weekly
+aggregated OHLC, and earlier RapidAPI-era rows copied one price into all four
+OHLC fields (giving `drift_ret` an *exact* 0.0 — a fake zero in the tradable
+leg, worse than noise because it shrinks the mean toward zero). Both are
+dropped. This means the historical arm's row count is materially reduced in a
+way that is **not random across time**, which is one more reason the forward
+log, not the backtest, is the ship gate.
+
+**Fewer than 5 eligible symbols on a date → that date gets NULL buckets**,
+never 1..k for k < 5. Assigning 1..4 would file a mid-cap under "bucket 1 =
+most illiquid", and bucket 1 is the cell this document reads its negative
+verdict off.
 
 ## Observed corpus behaviour (2026-08-10, n=225, Haiku 4.5)
 
