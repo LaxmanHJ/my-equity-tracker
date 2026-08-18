@@ -195,6 +195,36 @@ dropped. This means the historical arm's row count is materially reduced in a
 way that is **not random across time**, which is one more reason the forward
 log, not the backtest, is the ship gate.
 
+### Observed panel behaviour (2026-08-19, dry run over 2019-01-01 → 2026-08-04)
+
+Recorded because it was measured before any gate was evaluated, and because it
+revises an assumption this document was drafted under.
+
+| Statistic | Value |
+|---|---|
+| Sessions / symbols / rows fetched | 1,880 / 840 / 1,283,881 |
+| Rows written | 1,279,354 (99.6%) |
+| Rows in PIT NIFTY500 | 921,518 (71.8% of written) |
+| Dropped — flat bar | 4,227 (0.33%) |
+| Dropped — phantom session | 161 (0.01%) |
+| Dropped — weekly cadence | 139 (0.01%) |
+| Corporate-action suppressions | 25 in 7.6 years |
+
+**The weekly-aggregate contamination this document anticipated is essentially
+absent.** 139 rows, not a large non-random fraction. The guard stays — it costs
+nothing and a future re-backfill could reintroduce the problem — but the
+historical arm is not disqualified on data quality. It remains **exploratory
+only**, for the separate and unchanged reason that model training cutoffs fall
+inside the window.
+
+**`price_history` appears to be split-adjusted**, contrary to
+`backfill_bhavcopy.py:33`. Verified against TATASTEEL 1:10 (ex 2022-07-29),
+WIPRO 1:3 bonus (2019-03) and IRCTC 1:5 (ex 2021-10-29): none shows a basis
+jump. This makes `init_ret` more trustworthy than assumed, and makes the
+corporate-action guard near-vacuous rather than load-bearing. **The declared
+ex-dividend residual above is unaffected** — dividend adjustments are a separate
+question from split adjustment and remain uncorrected.
+
 **Fewer than 5 eligible symbols on a date → that date gets NULL buckets**,
 never 1..k for k < 5. Assigning 1..4 would file a mid-cap under "bucket 1 =
 most illiquid", and bucket 1 is the cell this document reads its negative
