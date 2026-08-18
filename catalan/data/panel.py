@@ -591,20 +591,36 @@ def build_panel(start: Union[str, date], end: Union[str, date], *,
             )
 
             # ── prev_close on the GLOBAL grid ─────────────────────────────────
-            # A per-symbol positional lag is wrong. Pivot onto the session grid,
-            # reindex (introducing NaN wherever a symbol had no bar), then one
-            # single shift, which propagates that NaN.
+            # A per-symbol positional lag is WRONG — it would silently reach
+            # across a halt. prev_close is defined against the session grid:
+            # look up the same symbol's close on the immediately preceding
+            # GRID session, whatever that symbol did in between.
             #
-            # DECLARED RULE: prev_close is the immediately preceding session's
-            # close, or NULL. NO FORWARD-FILL. If a stock was halted on t-1,
+            # DECLARED RULE: the immediately preceding session's close, or NULL.
+            # NO FORWARD-FILL. If a stock was halted on t-1 then
             # open(t)/close(t-2)-1 is a two-day return wearing an overnight
-            # label. Losing a row is cheap; a mislabelled horizon is not.
-            close_w = kept.pivot(index="date", columns="symbol", values="close")
-            close_w = close_w.reindex(grid)
-            prev_w = close_w.shift(1)
-            prev_long = prev_w.stack(dropna=True).rename("prev_close").reset_index()
-            prev_long.columns = ["date", "symbol", "prev_close"]
-            kept = kept.merge(prev_long, on=["date", "symbol"], how="left")
+            # label. Losing an observation is cheap; a mislabelled horizon in
+            # the C0 leg is not. The left-merge below yields NaN exactly when
+            # the symbol had no bar on the previous grid session, which is the
+            # rule stated directly rather than emerging from NaN propagation.
+            #
+            # Implemented as a self-merge rather than pivot -> shift -> stack.
+            # That round-trip materialised a full sessions x symbols matrix
+            # (1,880 x 840 on the historical build) to read back the ~0.1% of
+            # cells that exist, and it depended on `stack(dropna=True)` — an
+            # argument pandas 3 rejects outright. Simply DELETING that
+            # argument would not have been a drop-in fix either: the newer
+            # stack implementation keeps pre-existing NaN, so the stacked frame
+            # would have grown from "cells that exist" to the entire matrix.
+            # Both problems disappear when there is no pivot at all.
+            prev_session = {d: grid[i - 1] for i, d in enumerate(grid) if i > 0}
+            prev_src = kept[["date", "symbol", "close"]].rename(
+                columns={"date": "_prev_date", "close": "prev_close"})
+            kept["_prev_date"] = kept["date"].map(prev_session)
+            # (symbol, date) is already unique — duplicate_bar rows were dropped
+            # above — so this merge cannot multiply rows.
+            kept = kept.merge(prev_src, on=["_prev_date", "symbol"], how="left")
+            kept = kept.drop(columns=["_prev_date"])
 
             # ── 8. Return legs. Gate BEFORE dividing ──────────────────────────
             # open missing or zero → BOTH legs NULL, never 0.0 and never inf.
