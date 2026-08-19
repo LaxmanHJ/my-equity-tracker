@@ -335,6 +335,17 @@ WHERE NOT EXISTS (
 ORDER BY a.announced_at DESC
 """
 
+# The rest of the corpus for the days `pending` is selecting from. These rows
+# are NOT candidates for scoring — they are the cluster context that makes
+# near-duplicate dedup corpus-level instead of batch-level. Without them a
+# duplicate is suppressed on one run and admitted on the next, once the
+# cluster's keeper has been scored and left the pending set.
+COHORT_SQL = """
+SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at
+FROM announcements a
+WHERE substr(a.announced_at, 1, 10) IN ({days})
+"""
+
 
 def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
             limit: Optional[int] = None, apply_filters: bool = True) -> List[Dict]:
@@ -358,12 +369,30 @@ def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
             conn.close()
 
     if apply_filters:
-        rows, counts = filters.apply_all(rows)
+        # Dedup must see the whole symbol-day, not just what is unscored, or
+        # duplicates leak back in one run at a time. Scoped to the days present
+        # in the pending set — typically one day, and never the whole corpus.
+        days = sorted({(r["announced_at"] or "")[:10] for r in rows if r["announced_at"]})
+        context: List[Dict] = []
+        if days:
+            own_ctx = conn is None
+            ctx_conn = conn or store()
+            try:
+                sql = COHORT_SQL.format(days=",".join("?" * len(days)))
+                pending_ids = {r["id"] for r in rows}
+                context = [dict(r) for r in ctx_conn.execute(sql, days)
+                           if r["id"] not in pending_ids]
+            finally:
+                if own_ctx:
+                    ctx_conn.close()
+
+        rows, counts = filters.apply_all(rows, context=context)
         logger.info(
             "pending: %d candidates → %d after filters "
-            "(%d excluded category, %d excluded headline, %d near-duplicate)",
+            "(%d excluded category, %d excluded headline, %d near-duplicate; "
+            "%d cohort rows as dedup context)",
             counts["input"], counts["kept"], counts["excluded_category"],
-            counts["excluded_headline"], counts["excluded_duplicate"],
+            counts["excluded_headline"], counts["excluded_duplicate"], len(context),
         )
 
     return rows[:limit] if limit else rows

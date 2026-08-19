@@ -376,3 +376,89 @@ def test_reparse_dry_run_writes_nothing(sdb):
     out = scorer.reparse_stored("m", conn=sdb, dry_run=True)
     assert out["recovered"] == 1 and out["dry_run"] is True
     assert sdb.execute("SELECT score FROM scores").fetchone()[0] is None
+
+
+# ── Dedup is corpus-level, not batch-level (2026-08-20) ───────────────────────
+#
+# `pending()` used to hand the dedup filter only its unscored rows. A duplicate
+# was therefore suppressed on one run and admitted on the next — once the
+# cluster's keeper had been scored and left the pending set. Corpus size became
+# a function of how many times scoring ran, which a pre-registered study cannot
+# defend. One real run readmitted 151 rows this way.
+
+def _ann(conn, ann_id, symbol, headline, at, category="Board Meeting Outcome"):
+    conn.execute(
+        "INSERT INTO announcements (id, symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES (?,?,?,?,?,?,?, 'nse', 'x')",
+        (ann_id, symbol, symbol, at, headline, category, f"seq{ann_id}"))
+    conn.commit()
+
+
+def test_a_duplicate_stays_suppressed_after_its_keeper_is_scored(sdb):
+    """THE REGRESSION. Scoring the keeper must not readmit its duplicate."""
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
+         "2026-08-07T18:05:00")
+    sdb.commit()
+
+    first = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in first] == [1], "the earliest of the cluster is the keeper"
+
+    # Score the keeper — exactly what the daily run does.
+    scorer._write_scores(sdb, [_score_row(1, 1, "good news")])
+
+    second = scorer.pending("m", conn=sdb)
+    assert second == [], (
+        "the duplicate was readmitted once its keeper left the pending set — "
+        "dedup is being applied to the pending subset instead of the corpus")
+
+
+def test_dedup_context_never_leaks_into_the_returned_rows(sdb):
+    """Context rows shape clusters but are not candidates for scoring."""
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited announces a rights issue of equity shares",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange about a board meeting",
+         "2026-08-07T18:05:00")
+    sdb.commit()
+    scorer._write_scores(sdb, [_score_row(1, 1, "scored")])
+
+    todo = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in todo] == [2], "only the unscored, non-duplicate row is returned"
+
+
+def test_an_excluded_row_cannot_become_the_cluster_keeper(sdb):
+    """Exclusions run before dedup, and that order is load-bearing.
+
+    An excluded-category filing is not part of the corpus, so it must not
+    suppress a filing that is — otherwise the exclusion list would silently
+    delete real observations as collateral.
+    """
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00", category="Trading Window")          # excluded
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
+         "2026-08-07T18:05:00")                                      # not excluded
+    sdb.commit()
+
+    todo = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in todo] == [2], \
+        "the excluded row suppressed a real one — exclusions must precede dedup"
+
+
+def test_same_timestamp_ties_break_deterministically_on_ingest_id(sdb):
+    """NSE stamps several filings from one company to the same second.
+
+    Without an explicit tie-break, which one wins the cluster depends on the
+    order the database returned rows in — so the corpus would differ run to run.
+    """
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 7, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
+         "2026-08-07T18:00:00")
+    sdb.commit()
+    assert [r["id"] for r in scorer.pending("m", conn=sdb)] == [3], \
+        "the lower ingest id must win an exact timestamp tie"
