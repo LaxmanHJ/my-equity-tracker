@@ -115,6 +115,41 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Surface a scoring outage as a red annotation WITHOUT failing the job.
+      #
+      # Collection is the irreplaceable half — a lost day is permanent, whereas
+      # scoring can always be redone from the stored headlines. So this must
+      # never exit non-zero, or a billing problem would start costing us
+      # corpus. It only has to be impossible to miss.
+      #
+      # Why it exists: between 2026-08-11 and 08-17 the Anthropic credit
+      # balance ran out, API failures were silently recorded as completed
+      # scores, and the job reported success every day at up to 100% failure.
+      - name: Flag scoring failures
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pipeline_result.json"
+          try:
+              score = json.loads(p.read_text()).get("score") or {}
+          except Exception:
+              print("::warning::could not read pipeline result to check scoring health")
+              raise SystemExit(0)
+          if score.get("skipped"):
+              raise SystemExit(0)
+          failed, attempted = score.get("api_failed", 0), score.get("pending", 0)
+          if failed:
+              pct = 100.0 * failed / attempted if attempted else 100.0
+              print(f"::error::{failed}/{attempted} ({pct:.1f}%) scoring API calls FAILED. "
+                    "Headlines were still collected and are safe; these announcements "
+                    "remain pending and will be retried. Check the Anthropic credit "
+                    "balance first — that was the cause on 2026-08-14/17.")
+          if score.get("parse_missed"):
+              print(f"::warning::{score['parse_missed']} responses carried no readable "
+                    "verdict. Try `--reparse` before re-scoring; it costs nothing.")
+          PY
+
       - name: Commit the archive
         run: |
           git config user.name  "catalan-bot"

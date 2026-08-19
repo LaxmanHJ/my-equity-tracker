@@ -207,3 +207,172 @@ def test_scores_are_append_only(db):
                                       "run-2", "2026-08-10T10:00:00")]) == 0
     stored = db.execute("SELECT score, rationale FROM scores").fetchone()
     assert (stored[0], stored[1]) == (1, "first")
+
+
+# ── The silent-failure fix (2026-08-19) ───────────────────────────────────────
+#
+# Between 08-11 and 08-17 the NULL-verdict rate went 0.6% → 100% and the daily
+# job stayed green. Three defects compounded: an API failure was returned as a
+# bare None, that None was persisted as a completed score, and the pending
+# query tested only for a row's existence — so 1,077 announcements were marked
+# permanently done with no verdict. These tests pin each half of the repair.
+
+import sqlite3
+
+from catalan.data.store import store as _store
+from catalan.scoring.scorer import prompt_hash as _phash
+
+
+@pytest.fixture
+def sdb(tmp_path):
+    conn = _store(tmp_path / "scoring.db")
+    conn.execute(
+        "INSERT INTO announcements (id, symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES "
+        "(1,'RELIANCE','Reliance','2026-08-07T18:00:00','Board approves demerger',"
+        "'Board Meeting Outcome','s1','nse_announcements','2026-08-07T19:00:00')")
+    conn.commit()
+    yield conn
+    conn.close()
+
+
+def _score_row(ann_id, score, rationale, model="m", run="r"):
+    return (ann_id, model, _phash(), None, score, rationale, run, "2026-08-07T20:00:00")
+
+
+# ── Parser: verdicts behind a preamble ────────────────────────────────────────
+
+def test_verdict_on_its_own_line_is_recovered_from_behind_a_preamble():
+    """Haiku often answers "I can help you analyze this..." then "**UNKNOWN**".
+
+    Anchoring to line 1 alone discarded those as parse misses, which is how a
+    perfectly readable verdict became a NULL score.
+    """
+    raw = ("I can help you analyze this headline for Laxmi Dental Limited.\n\n"
+           "**UNKNOWN**\n\n"
+           "The headline merely announces a scheduled meeting notification.")
+    score, rationale = scorer.parse_response(raw)
+    assert score == 0
+    assert "I can help you analyze" in rationale, \
+        "the preamble is evidence about the instrument and must be retained"
+
+
+@pytest.mark.parametrize("line", ["**NO**", "# YES", "`UNKNOWN`", "UNKNOWN.", "__NO__"])
+def test_markdown_wrapped_verdicts_are_recovered(line):
+    score, _ = scorer.parse_response(f"Some preamble sentence.\n{line}\nReasoning.")
+    assert score is not None
+
+
+def test_the_second_pass_matches_only_a_BARE_verdict_never_prose():
+    """The widening must not reintroduce the bug it is guarded against.
+
+    A whole-response search would read the "NO" out of this rationale and
+    invert the row. Only a line that is nothing but a verdict counts.
+    """
+    raw = ("I am unable to give a view on this one.\n"
+           "This is not a NO for the stock price, but I cannot say more.\n"
+           "There is no clear read here.")
+    assert scorer.parse_response(raw)[0] is None
+
+
+def test_a_numbered_list_item_is_not_a_verdict():
+    assert scorer.parse_response("Preamble.\n1. NO\nMore text.")[0] is None
+
+
+# ── An API failure is not an observation ──────────────────────────────────────
+
+def test_api_failure_is_not_persisted_and_stays_pending(sdb, monkeypatch):
+    """THE CORE BUG. A call that never succeeded must not consume the
+    announcement's provenance slot."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, None, True)])
+
+    result = scorer.score_pending(model_id="m", conn=sdb)
+
+    assert result["api_failed"] == 1
+    assert result["scored"] == 0
+    assert sdb.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 0, \
+        "a failed call must write no row at all"
+    assert len(scorer.pending("m", conn=sdb, apply_filters=False)) == 1, \
+        "the announcement must still be pending for the next run"
+
+
+def test_parse_miss_IS_persisted_and_is_not_retried(sdb, monkeypatch):
+    """The opposite case: the model answered, so the response is evidence and
+    is kept — and re-calling the API would burn money for the same text."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, "the raw reply", False)])
+
+    result = scorer.score_pending(model_id="m", conn=sdb)
+
+    assert result["parse_missed"] == 1 and result["api_failed"] == 0
+    assert sdb.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 1
+    assert scorer.pending("m", conn=sdb, apply_filters=False) == []
+
+
+def test_the_two_failure_modes_are_reported_apart(sdb, monkeypatch):
+    """Collapsing them is what hid a four-day outage behind a 'parse miss' label."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, None, True)])
+    r = scorer.score_pending(model_id="m", conn=sdb)
+    assert r["parse_missed"] == 0
+    assert r["abstained"] == 1, "legacy key stays the sum of both"
+
+
+# ── Write path: append-only, enforced in SQL ──────────────────────────────────
+
+def test_a_verdict_is_never_overwritten(sdb):
+    scorer._write_scores(sdb, [_score_row(1, 1, "good news")])
+    scorer._write_scores(sdb, [_score_row(1, -1, "CONTRADICTORY", run="r2")])
+    got = sdb.execute("SELECT score, rationale, run_id FROM scores").fetchone()
+    assert (got[0], got[1], got[2]) == (1, "good news", "r"), \
+        "scores are append-only — an existing verdict is immutable"
+
+
+def test_a_parse_miss_is_also_protected(sdb):
+    """It holds the model's response text, which is a real observation."""
+    scorer._write_scores(sdb, [_score_row(1, None, "the model's reply")])
+    scorer._write_scores(sdb, [_score_row(1, 1, "overwrite attempt", run="r2")])
+    assert sdb.execute("SELECT rationale FROM scores").fetchone()[0] == "the model's reply"
+
+
+def test_a_row_recording_no_observation_CAN_be_filled(sdb):
+    """The narrow repair path for the 1,077 rows the outage left behind.
+
+    Nothing is protected here, because nothing was ever observed.
+    """
+    scorer._write_scores(sdb, [_score_row(1, None, None)])
+    scorer._write_scores(sdb, [_score_row(1, -1, "now scored", run="r2")])
+    got = sdb.execute("SELECT score, rationale FROM scores").fetchone()
+    assert (got[0], got[1]) == (-1, "now scored")
+
+
+def test_rows_recording_no_observation_are_pending_again(sdb):
+    scorer._write_scores(sdb, [_score_row(1, None, None)])
+    assert len(scorer.pending("m", conn=sdb, apply_filters=False)) == 1
+    assert scorer.unobserved("m", conn=sdb) == 1
+
+
+# ── Free repair ───────────────────────────────────────────────────────────────
+
+def test_reparse_recovers_verdicts_without_calling_the_api(sdb):
+    sdb.execute("INSERT INTO announcements (id, symbol, company, announced_at, "
+                "headline, category, seq_id, source, ingested_at) VALUES "
+                "(2,'TCS','TCS','2026-08-07T18:00:00','h','c','s2','nse','x')")
+    scorer._write_scores(sdb, [
+        _score_row(1, None, "Preamble sentence.\n**NO**\nBecause of the fine."),
+        _score_row(2, 1, "already scored"),
+    ])
+    out = scorer.reparse_stored("m", conn=sdb)
+
+    assert out["recovered"] == 1 and out["by_verdict"] == {"NO": 1}
+    assert sdb.execute("SELECT score FROM scores WHERE announcement_id=1").fetchone()[0] == -1
+    assert sdb.execute("SELECT score FROM scores WHERE announcement_id=2").fetchone()[0] == 1, \
+        "a row that already had a verdict is never revisited"
+
+
+def test_reparse_dry_run_writes_nothing(sdb):
+    scorer._write_scores(sdb, [_score_row(1, None, "Preamble.\n**YES**\nReason.")])
+    out = scorer.reparse_stored("m", conn=sdb, dry_run=True)
+    assert out["recovered"] == 1 and out["dry_run"] is True
+    assert sdb.execute("SELECT score FROM scores").fetchone()[0] is None
