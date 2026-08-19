@@ -220,3 +220,67 @@ def test_preregistration_documents_the_panel_rules_it_claims_to_freeze():
             f"PREREGISTRATION.md does not mention {needle!r}; the panel rule it "
             "corresponds to is frozen in config.py but undeclared to the reader."
         )
+
+
+# ── G2b: the gate thresholds are frozen too (set 2026-08-20) ──────────────────
+#
+# The thresholds live in PREREGISTRATION.md rather than config.py, because that
+# document is their authority. That means the hash gate above does not cover
+# them — so they get their own pin. A threshold that can be edited after a
+# result is seen is not a pre-registered threshold.
+
+GATE_THRESHOLDS = [
+    # C0 — comprehension smoke test
+    "daily long-short hit rate ≥ 70%",
+    "Minimum observations: 40 trading days",
+    # C1 — gross drift
+    "mean daily long-short drift > 0 with t ≥ 2.0",
+    # C2 — the ship gate, all four conditions
+    "mean daily net LS drift **> 0 with t ≥ 2.0**",
+    "mean daily net LS drift **≥ 5 bps**",
+    "net annualized Sharpe ≥ 0.5",
+    "Deflated Sharpe > 0.95",
+    # Multiple testing + horizon
+    "**Declared cell count for the deflation: K = 5.**",
+    "evaluated exactly once, at 120 trading days",
+]
+
+
+@pytest.mark.parametrize("clause", GATE_THRESHOLDS)
+def test_gate_threshold_is_still_declared(clause):
+    from catalan.config import CATALAN_ROOT
+
+    text = (CATALAN_ROOT / "PREREGISTRATION.md").read_text()
+    assert clause in text, (
+        f"PREREGISTRATION.md no longer declares {clause!r}. Gate thresholds were "
+        "fixed on 2026-08-20, blind to every quantity they judge (no scored "
+        "headline had a return joined to it — price_history ended before the "
+        "forward log began). Editing one after a gate statistic becomes "
+        "computable voids the pre-registration. If a threshold genuinely must "
+        "change, bump STUDY_VERSION and start a separate study."
+    )
+
+
+def test_no_TBD_thresholds_remain():
+    """A `TBD` in the gates section means the study cannot legitimately report."""
+    from catalan.config import CATALAN_ROOT
+
+    text = (CATALAN_ROOT / "PREREGISTRATION.md").read_text()
+    gates = text.split("## Gates", 1)[1].split("## Cost model", 1)[0]
+    assert "TBD" not in gates, "an unset threshold is still marked TBD in the gates section"
+
+
+def test_the_stopping_rule_is_declared():
+    """Optional stopping is the failure a pre-registration exists to prevent.
+
+    Without a fixed horizon and a declared 'inconclusive' outcome, the natural
+    behaviour — collect, re-check, stop when t crosses 2 — inflates the
+    false-positive rate and leaves no trace in the reported numbers.
+    """
+    from catalan.config import CATALAN_ROOT
+
+    text = (CATALAN_ROOT / "PREREGISTRATION.md").read_text()
+    for needle in ("There is no second look and no extension",
+                   "underpowered — no result",
+                   "A near-miss is a miss"):
+        assert needle in text, f"the stopping rule no longer states: {needle!r}"

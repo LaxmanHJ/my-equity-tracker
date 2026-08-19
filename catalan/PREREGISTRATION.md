@@ -1,9 +1,23 @@
 # CATALAN — Pre-registration
 
-> **STATUS: DRAFT.** Thresholds marked `TBD` are not yet set.
-> **This file must be finalized and committed before the first scoring run.**
-> Nothing in `catalan/scoring/` may be executed against the corpus until the
-> `TBD`s are numbers and this banner is replaced with a commit hash and date.
+> **STATUS: THRESHOLDS SET 2026-08-20.**
+>
+> **Sequencing, stated plainly because it is the whole point.** Scoring began
+> before this file was finalised: 7,884 headlines carried a verdict when these
+> numbers were fixed. That is a deviation from the original plan and it is
+> recorded rather than hidden.
+>
+> **It does not compromise the pre-registration, for a specific and checkable
+> reason: not one gate statistic had been computable.** Turso `price_history`
+> ends 2026-08-04 and the forward log begins 2026-08-07 — the two do not
+> overlap, so no scored headline had ever been joined to a return. No hit rate,
+> no drift, no Sharpe existed to be seen. The thresholds below were therefore
+> set blind to every quantity they judge, which is the only property that
+> matters.
+>
+> Anyone auditing this can verify it from git history: the panel builder
+> (`catalan/data/panel.py`) landed 2026-08-19 and the price-data gap is recorded
+> in `catalan/README.md` under "Known data limits" from the same commit.
 
 This is the single most important sequencing decision in the project. R2
 produced a gate PASS gross of costs and then died on costs. Declaring the bar
@@ -48,22 +62,57 @@ the returns join all work. Failing C0 means something upstream is broken, **not*
 that the market is efficient.
 
 - Paper's US figure: 93.3%
-- Threshold: `TBD` — set well below 93.3%; the point is "far from chance", not parity
-- Minimum observations: `TBD` trading days
+- **Threshold: daily long-short hit rate ≥ 70%**
+- **Minimum observations: 40 trading days**
+
+40 days at 70% is 28/40, one-sided binomial *p* = 0.0083 against a fair coin —
+comfortably inside a 1% bar. Deliberately far below the paper's 93.3%: C0 asks
+"is the pipeline wired correctly", not "does India match the US". A pass means
+entity linkage, session classification and the returns join work. **A fail means
+something upstream is broken and C1/C2 must not be evaluated at all** — it is
+not evidence about market efficiency.
+
+C0 is evaluable long before C1/C2 and should be run as soon as 40 sessions of
+overlapping price data exist, precisely so a broken pipeline is caught early
+rather than after a year of collection.
+
+Supplementary diagnostic, reported alongside but carrying no gate authority:
+the **per-announcement** initial-reaction hit rate. At ~107 directional
+in-universe overnight names/day it reaches tight bounds far faster than the
+daily portfolio statistic, which makes it the better early warning — but the
+portfolio form is what the paper reports, so the portfolio form is the gate.
 
 ### C1 — Drift, gross of costs
 
 Daily long-short **drift** (`open(t) → close(t)`) return on the forward log.
 
 - Reported: mean daily return (bps), t-statistic with **date-clustered** standard errors, hit rate, annualized Sharpe
-- Threshold: `TBD`
-- Minimum observations: `TBD` trading days
+- **Threshold: mean daily long-short drift > 0 with t ≥ 2.0** (date-clustered SE)
+- **Minimum observations: 120 trading days** — see *Horizon and stopping rule*
+
+C1 is a **necessary, not sufficient** condition. It gates nothing on its own and
+is never reported without C2 beside it.
 
 ### C2 — Drift, NET of costs. **THIS IS THE SHIP GATE.**
 
 The same statistic after the cost model below, reported **per liquidity bucket**.
 
-- Threshold: `TBD`
+**Threshold — all four must hold simultaneously:**
+
+| # | Condition | Why it is here |
+|---|---|---|
+| 1 | mean daily net LS drift **> 0 with t ≥ 2.0**, date-clustered SE | statistical significance |
+| 2 | mean daily net LS drift **≥ 5 bps** | economic materiality |
+| 3 | **net annualized Sharpe ≥ 0.5** | materiality, scale-free |
+| 4 | **Deflated Sharpe > 0.95** over the declared cells | multiple testing |
+
+- **Minimum observations: 120 trading days.**
+- Conditions 2 and 3 exist because with enough days, t ≥ 2 can certify an edge
+  far too small to trade. R2 is the cautionary case in the other direction — it
+  passed gross and died on costs — and a bar that certifies 1 bp/day would be
+  the same mistake wearing different clothes. At N = 120 these floors are
+  **insurance, not the active bar**: they correspond to daily Sharpe 0.028 and
+  0.032 against the 0.183 that condition 1 demands.
 - **C1 without C2 is not a result.** No gross number is reported anywhere —
   API, UI, or write-up — without its net companion beside it.
 - If the edge survives **only** in the most illiquid bucket, that is recorded as
@@ -74,16 +123,81 @@ The same statistic after the cost model below, reported **per liquidity bucket**
 
 Deflated Sharpe over the number of declared cells. **The cell count is fixed in
 advance**, here, and is not the number of things that turn out to have been
-tried:
+tried.
 
-| Dimension | Values | Count |
+**Primary endpoint — the ship gate.** One configuration, declared now:
+
+> the **primary model arm** (`config.PRIMARY_MODEL`, Haiku 4.5), at **100%
+> rebalancing**, reported across the **5 liquidity buckets**.
+
+**Declared cell count for the deflation: K = 5.**
+
+**Secondary endpoints — reported, but they gate nothing.** The other two model
+arms, the three non-LLM baselines, and the 25% rebalancing variant. 55 further
+configurations, all reported for completeness and none of them able to clear C2.
+A secondary cell that looks better than the primary is **not** promotable: that
+is the multiple-testing failure this section exists to prevent, and swapping the
+primary after seeing results would void the pre-registration.
+
+**Why 5 and not 60.** An earlier draft crossed model arms with baseline arms
+(3 × 3 × 5 × 2 = 90), which is arithmetically wrong — a headline is scored by
+*one* scorer, so the six scorers are alternatives, not a product. The honest
+full-grid count is 6 × 5 × 2 = 60. Deflating over all 60 while only one
+configuration can actually clear the gate is a self-inflicted penalty: it raises
+the required effect from 58% of the paper's to 158% of it, turning a ~2-month
+study into a 7.5-month one at best and a 2.5-year one if the Indian effect is
+half the US figure. Primary/secondary endpoint separation is the standard
+answer and is what is declared here.
+
+### Horizon and stopping rule
+
+**C1 and C2 are evaluated exactly once, at 120 trading days of forward log with
+usable price data. There is no second look and no extension.**
+
+This is the rule the rest of the document depends on. Without a fixed horizon
+the natural behaviour — keep collecting, re-check, stop when the t-statistic
+crosses 2 — is optional stopping, and it inflates the false-positive rate
+without leaving a trace in the reported numbers. A pre-registration that omits
+it is decoration.
+
+Three consequences, all accepted in advance:
+
+1. **"Inconclusive" is a declared outcome, not a failure to be worked around.**
+   If |t| < 2.0 at 120 days the study reports *underpowered — no result* and
+   stops. It does not keep collecting until significance appears.
+2. **A near-miss is a miss.** t = 1.9 at day 120 is inconclusive. Extending to
+   day 140 to see whether it crosses is exactly the prohibited move.
+3. **The 120-day clock starts when price data and the forward log overlap**, not
+   when collection started. As of 2026-08-20 the overlap is **zero days** — see
+   the blocker note below.
+
+**Declared statistical power, so "inconclusive" is interpretable.**
+
+Taking the paper's own ratio (34 bps/day at 2.97 annualized ⇒ daily Sharpe
+0.187, implying ~182 bps/day long-short volatility):
+
+| Constraint at N = 120 | Minimum detectable daily Sharpe | As % of the paper's effect |
 |---|---|---|
-| Model arm | Haiku 4.5, Sonnet 5, Opus 5 | 3 |
-| Baseline arm | Loughran–McDonald, textblob_v1, finbert_v1 | 3 |
-| Liquidity bucket | quintiles | 5 |
-| Rebalance fraction | 100%, 25% | 2 |
+| t ≥ 2.0 | 0.183 | **98%** |
+| Deflated Sharpe, K = 5 | 0.109 | 58% |
 
-Declared cell count for the deflation: `TBD` (fill in before scoring).
+**t ≥ 2.0 is the binding constraint, and 120 days can only detect an effect
+essentially as strong as the US result** — about 33 bps/day. An Indian effect at
+70% of the paper's would need ~233 days and will read as inconclusive here; at
+half, ~457 days. This horizon was chosen with that limitation understood. It
+buys a fast, clean answer to *"is there a US-sized effect in India?"* and
+explicitly does not answer *"is there a smaller one?"*
+
+A future study may ask the smaller question. It must do so under a **new
+pre-registration with its own horizon** — not by extending this one.
+
+### Blocker on the clock
+
+`price_history` ends **2026-08-04**; the forward log begins **2026-08-07**. They
+do not overlap, so **zero of the 120 days have been accrued** despite 8 days of
+headlines being collected and scored. The clock cannot start until the price
+side is repaired (Angel One → Turso). Recorded here because a horizon that
+silently never starts is the same failure as no horizon at all.
 
 ### Contamination test (paper Online Appendix C)
 
@@ -255,5 +369,6 @@ was peak results season, but if it persists the corpus projections (~500k rows
 2. ~~Transcribe the paper's prompt verbatim~~ — done 2026-08-10
 3. Freeze the `desc` exclusion list
 4. Source T2T / ASM / GSM daily lists for the shortability flag
-5. Set every `TBD` threshold above
-6. Declare the cell count for the deflated Sharpe
+5. ~~Set every `TBD` threshold above~~ — done 2026-08-20
+6. ~~Declare the cell count for the deflated Sharpe~~ — done 2026-08-20 (K = 5)
+7. Repair the price/forward-log overlap so the 120-day clock can start
