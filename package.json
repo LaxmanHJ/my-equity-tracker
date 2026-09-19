@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Personal stock portfolio analyzer for Indian NSE/BSE stocks",
   "type": "module",
+  "engines": {
+    "//": "node --test only expands glob patterns from 22 onward; the test script relies on it",
+    "node": ">=22"
+  },
   "main": "src/server.js",
   "scripts": {
     "dev": "node --watch src/server.js",
