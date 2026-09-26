@@ -25,3 +25,4 @@ Raw PDFs: `~/Desktop/Proyectos/Scilian-Books/Catalan/`
 | Page | Covers |
 |---|---|
 | [llm_news_scoring](concepts/llm_news_scoring.md) | The technique and its India adaptations — session clock, cost model, contamination. |
+| [returns_panel_construction](concepts/returns_panel_construction.md) | How `price_history` becomes `init_ret`/`drift_ret` — every guard, and which rows the study refuses to measure. |
