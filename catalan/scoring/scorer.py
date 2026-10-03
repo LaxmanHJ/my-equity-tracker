@@ -70,13 +70,40 @@ TRANSPORT_BATCH = "batch"
 # a rationale reading "...this is not a NO for the stock" must not flip the score.
 _ANSWER_RE = re.compile(r"\b(YES|NO|UNKNOWN)\b", re.IGNORECASE)
 
+# A line that is ONLY a verdict, once markdown emphasis and trailing
+# punctuation are stripped: "**UNKNOWN**", "# NO", "`YES`", "UNKNOWN." all
+# qualify. Prose does not — "this is not a NO for the stock" is not a bare
+# token, and neither is "1. NO" (a digit cannot start the match). That is what
+# makes scanning past line 0 safe.
+_VERDICT_ONLY_RE = re.compile(r"^[\s*#>`_~\-]*(YES|NO|UNKNOWN)[\s*`_~.:!,]*$",
+                              re.IGNORECASE)
+
+# How far past the first line to look. The observed preambles are one or two
+# sentences ("I can help you analyze this headline for X."), so a handful of
+# lines is enough; scanning the whole response would start reading rationale.
+_VERDICT_SCAN_LINES = 6
+
 
 def parse_response(raw: str) -> Tuple[Optional[int], Optional[str]]:
     """Free-text response → (score, rationale), per the paper's format.
 
-    Returns (None, raw) when the first line carries no recognisable answer —
-    an abstention is recorded as such rather than silently coerced to 0, since
-    0 is a real UNKNOWN verdict and must stay distinguishable from a parse miss.
+    Returns (None, raw) when no recognisable answer is found — an abstention is
+    recorded as such rather than silently coerced to 0, since 0 is a real
+    UNKNOWN verdict and must stay distinguishable from a parse miss.
+
+    Two passes, and the order matters:
+
+    1. The paper's format puts the verdict on the first line, so that line is
+       searched first and loosely. Anchoring here is deliberate: a rationale
+       reading "...this is not a NO for the stock" must never flip the score.
+    2. If line 1 carries no verdict, look for a line that is *nothing but* a
+       verdict within the first few lines. Haiku frequently answers with a
+       preamble — "I can help you analyze this headline for X." — and then
+       "**UNKNOWN**" on its own line. Pass 1 alone discarded those as parse
+       misses, which is how a readable verdict became a NULL score.
+
+    The second pass is narrow on purpose. It matches only a bare token, so it
+    cannot pick a verdict out of prose the way a whole-response search would.
     """
     if not raw:
         return None, None
@@ -86,12 +113,21 @@ def parse_response(raw: str) -> Tuple[Optional[int], Optional[str]]:
         return None, None
 
     match = _ANSWER_RE.search(lines[0])
-    if not match:
-        return None, raw.strip()[:500]
+    if match:
+        score = SCORE_VALUES[match.group(1).upper()]
+        rationale = " ".join(lines[1:]).strip() or None
+        return score, (rationale[:500] if rationale else None)
 
-    score = SCORE_VALUES[match.group(1).upper()]
-    rationale = " ".join(lines[1:]).strip() or None
-    return score, (rationale[:500] if rationale else None)
+    for i, line in enumerate(lines[:_VERDICT_SCAN_LINES]):
+        verdict = _VERDICT_ONLY_RE.match(line)
+        if verdict:
+            score = SCORE_VALUES[verdict.group(1).upper()]
+            # Keep the preamble in the rationale — it is evidence about how the
+            # instrument behaved, and discarding it would hide the drift.
+            rest = " ".join(lines[:i] + lines[i + 1:]).strip() or None
+            return score, (rest[:500] if rest else None)
+
+    return None, raw.strip()[:500]
 
 
 # ── Anthropic client ──────────────────────────────────────────────────────────
@@ -136,13 +172,25 @@ def _message_params(company: str, headline: str, model_id: str) -> Dict:
 
 # ── Sync transport ────────────────────────────────────────────────────────────
 
-def _score_one_sync(company: str, headline: str, model_id: str) -> Tuple[Optional[int], Optional[str]]:
+def _score_one_sync(company: str, headline: str,
+                    model_id: str) -> Tuple[Optional[int], Optional[str], bool]:
+    """Score one headline. Returns (score, rationale, api_failed).
+
+    THE THIRD ELEMENT IS THE WHOLE POINT. "The model answered and I could not
+    read a verdict" and "the call never succeeded" are completely different
+    events, and collapsing them into a bare None is what let a total API
+    outage be recorded as 1,077 completed scores on 2026-08-14/17 while the
+    job stayed green.
+
+    An observation that was never made must not be stored as an observation.
+    """
     client = _anthropic()
     for attempt in range(MAX_RETRIES):
         try:
             resp = client.messages.create(**_message_params(company, headline, model_id))
             text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-            return parse_response(text)
+            score, rationale = parse_response(text)
+            return score, rationale, False
         except Exception as exc:                          # noqa: BLE001
             transient = type(exc).__name__ in (
                 "RateLimitError", "APIStatusError", "APIConnectionError",
@@ -150,17 +198,21 @@ def _score_one_sync(company: str, headline: str, model_id: str) -> Tuple[Optiona
             )
             if not transient or attempt == MAX_RETRIES - 1:
                 _log_api_error(f"scoring {company!r}", exc)
-                return None, None
+                return None, None, True
             time.sleep(2 ** attempt)
-    return None, None
+    return None, None, True
 
 
 def score_texts(items: Sequence[Tuple[str, str]],
-                model_id: str = None) -> List[Tuple[Optional[int], Optional[str]]]:
+                model_id: str = None) -> List[Tuple[Optional[int], Optional[str], bool]]:
     """Score (company, headline) pairs concurrently. Order preserved.
 
     The public entry point for anything that is not a stored announcement —
     manual entry, the A/B harness, ad-hoc checks.
+
+    Each element is ``(score, rationale, api_failed)``. Callers MUST check
+    ``api_failed`` before persisting: a failed call is not a verdict and must
+    leave the announcement pending rather than consuming its provenance slot.
     """
     model_id = model_id or PRIMARY_MODEL
     if not items:
@@ -257,6 +309,19 @@ def collect_batches(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]
 
 # ── Selection and persistence ─────────────────────────────────────────────────
 
+# An announcement is pending unless a real OBSERVATION exists for it under this
+# provenance. The distinction is load-bearing:
+#
+#   score IS NOT NULL                     → a verdict. Never re-score.
+#   score IS NULL, rationale IS NOT NULL  → the model answered, the parser could
+#                                           not read it. Deterministic, so
+#                                           re-calling the API would just burn
+#                                           money for the same text. Not pending.
+#   score IS NULL, rationale IS NULL      → NOTHING WAS EVER OBSERVED. The call
+#                                           failed. Still pending.
+#
+# The old version tested only for the row's existence, so an API outage that
+# wrote 1,077 empty rows marked those announcements permanently done.
 PENDING_SQL = """
 SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at
 FROM announcements a
@@ -265,8 +330,20 @@ WHERE NOT EXISTS (
     WHERE s.announcement_id = a.id
       AND s.model_id = ?
       AND s.prompt_hash = ?
+      AND (s.score IS NOT NULL OR s.rationale IS NOT NULL)
 )
 ORDER BY a.announced_at DESC
+"""
+
+# The rest of the corpus for the days `pending` is selecting from. These rows
+# are NOT candidates for scoring — they are the cluster context that makes
+# near-duplicate dedup corpus-level instead of batch-level. Without them a
+# duplicate is suppressed on one run and admitted on the next, once the
+# cluster's keeper has been scored and left the pending set.
+COHORT_SQL = """
+SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at
+FROM announcements a
+WHERE substr(a.announced_at, 1, 10) IN ({days})
 """
 
 
@@ -292,29 +369,65 @@ def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
             conn.close()
 
     if apply_filters:
-        rows, counts = filters.apply_all(rows)
+        # Dedup must see the whole symbol-day, not just what is unscored, or
+        # duplicates leak back in one run at a time. Scoped to the days present
+        # in the pending set — typically one day, and never the whole corpus.
+        days = sorted({(r["announced_at"] or "")[:10] for r in rows if r["announced_at"]})
+        context: List[Dict] = []
+        if days:
+            own_ctx = conn is None
+            ctx_conn = conn or store()
+            try:
+                sql = COHORT_SQL.format(days=",".join("?" * len(days)))
+                pending_ids = {r["id"] for r in rows}
+                context = [dict(r) for r in ctx_conn.execute(sql, days)
+                           if r["id"] not in pending_ids]
+            finally:
+                if own_ctx:
+                    ctx_conn.close()
+
+        rows, counts = filters.apply_all(rows, context=context)
         logger.info(
             "pending: %d candidates → %d after filters "
-            "(%d excluded category, %d excluded headline, %d near-duplicate)",
+            "(%d excluded category, %d excluded headline, %d near-duplicate; "
+            "%d cohort rows as dedup context)",
             counts["input"], counts["kept"], counts["excluded_category"],
-            counts["excluded_headline"], counts["excluded_duplicate"],
+            counts["excluded_headline"], counts["excluded_duplicate"], len(context),
         )
 
     return rows[:limit] if limit else rows
 
 
 def _write_scores(conn: sqlite3.Connection, rows: Sequence[Tuple]) -> int:
-    """Append score rows. INSERT OR IGNORE — never overwrite an existing verdict."""
+    """Append score rows, and repair rows that record no observation.
+
+    Append-only is preserved, and now enforced in SQL rather than by
+    convention. The DO UPDATE fires only where the stored row has BOTH a NULL
+    score and a NULL rationale — i.e. a row left behind by a failed API call,
+    which contains no observation to protect. A real verdict, and even a parse
+    miss with its response text, are untouchable.
+
+    That repair path exists for the 1,077 empty rows the pre-2026-08-19 code
+    wrote during the API outage. New failures are never persisted at all, so
+    going forward this behaves exactly like the INSERT OR IGNORE it replaces.
+    """
     if not rows:
         return 0
-    before = conn.execute("SELECT count(*) FROM scores").fetchone()[0]
-    conn.executemany(
-        "INSERT OR IGNORE INTO scores (announcement_id, model_id, prompt_hash, "
-        "effort, score, rationale, run_id, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    cur = conn.executemany(
+        "INSERT INTO scores (announcement_id, model_id, prompt_hash, "
+        "effort, score, rationale, run_id, scored_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(announcement_id, model_id, prompt_hash) DO UPDATE SET "
+        "  effort    = excluded.effort, "
+        "  score     = excluded.score, "
+        "  rationale = excluded.rationale, "
+        "  run_id    = excluded.run_id, "
+        "  scored_at = excluded.scored_at "
+        "WHERE scores.score IS NULL AND scores.rationale IS NULL",
         rows,
     )
     conn.commit()
-    return conn.execute("SELECT count(*) FROM scores").fetchone()[0] - before
+    return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(rows)
 
 
 def score_pending(model_id: str = None, transport: str = TRANSPORT_SYNC,
@@ -350,19 +463,127 @@ def score_pending(model_id: str = None, transport: str = TRANSPORT_SYNC,
             [(r["company"] or r["symbol"], r["headline"]) for r in todo], model_id
         )
         now = datetime.now().isoformat(timespec="seconds")
+
+        # ONLY rows whose call actually completed are persisted. A failed call
+        # produced no observation, so writing it would consume the
+        # announcement's provenance slot and mark it permanently done — which
+        # is exactly what happened on 2026-08-14/17. Unwritten rows stay
+        # pending and are retried on the next run, which is what the old log
+        # line claimed but the old code did not do.
         rows = [
             (r["id"], model_id, prompt_hash(), None, score, rationale, run_id, now)
-            for r, (score, rationale) in zip(todo, results)
+            for r, (score, rationale, failed) in zip(todo, results)
+            if not failed
         ]
         written = _write_scores(conn, rows)
-        abstained = sum(1 for s, _ in results if s is None)
-        if abstained:
-            logger.warning("%d/%d abstained (parse miss or API failure) — these "
-                           "stay pending and will be retried next run",
-                           abstained, len(results))
+
+        api_failed = sum(1 for _, _, failed in results if failed)
+        parse_missed = sum(1 for score, _, failed in results
+                           if score is None and not failed)
+
+        if parse_missed:
+            logger.warning(
+                "%d/%d parse misses — the model answered but no verdict could "
+                "be read. Stored with their response text for audit; they are "
+                "NOT retried, because the same text would parse the same way.",
+                parse_missed, len(results))
+
+        if api_failed:
+            # ERROR, not warning: this is an instrument outage, and the last
+            # one ran for four days at up to 100%/day without anyone noticing.
+            # It is surfaced in the returned dict too, so the Action's step
+            # summary carries it.
+            share = 100.0 * api_failed / len(results)
+            logger.error(
+                "%d/%d (%.1f%%) API CALLS FAILED — these were NOT written and "
+                "remain pending. Check the error lines above for the cause "
+                "(credits, rate limit, key). If this share is large the day's "
+                "scoring is effectively missing, even though collection "
+                "succeeded.", api_failed, len(results), share)
 
         return {"run_id": run_id, "pending": len(todo), "scored": written,
-                "abstained": abstained}
+                "parse_missed": parse_missed, "api_failed": api_failed,
+                # Kept for backwards compatibility with anything reading the
+                # old key; it is the sum of the two distinct failure modes.
+                "abstained": parse_missed + api_failed}
+    finally:
+        if own:
+            conn.close()
+
+
+def reparse_stored(model_id: str = None,
+                   conn: Optional[sqlite3.Connection] = None,
+                   dry_run: bool = False) -> Dict:
+    """Re-read verdicts out of response text already stored. No API calls.
+
+    A parse miss stores the model's full response in ``rationale`` and leaves
+    ``score`` NULL. When the parser improves, those rows can be re-read for
+    free — the text is already on disk and the model is deterministic with
+    respect to it. This is strictly better than re-scoring: it costs nothing
+    and, more importantly, it does not change the instrument. Re-calling the
+    API would produce a *new* response, which is a different observation.
+
+    Only rows that record no verdict are touched, and only ever to fill one in.
+    A row with a score is never revisited.
+    """
+    model_id = model_id or PRIMARY_MODEL
+    own = conn is None
+    conn = conn or store()
+    try:
+        rows = conn.execute(
+            "SELECT announcement_id, rationale FROM scores "
+            "WHERE model_id = ? AND prompt_hash = ? "
+            "  AND score IS NULL AND rationale IS NOT NULL",
+            (model_id, prompt_hash()),
+        ).fetchall()
+
+        recovered = []
+        for ann_id, raw in rows:
+            score, rationale = parse_response(raw)
+            if score is not None:
+                recovered.append((score, rationale, ann_id))
+
+        if recovered and not dry_run:
+            conn.executemany(
+                "UPDATE scores SET score = ?, rationale = ? "
+                "WHERE announcement_id = ? AND model_id = ? AND prompt_hash = ? "
+                "  AND score IS NULL",
+                [(sc, rt, aid, model_id, prompt_hash()) for sc, rt, aid in recovered],
+            )
+            conn.commit()
+
+        by_verdict: Dict[str, int] = {}
+        for sc, _, _ in recovered:
+            name = {1: "YES", 0: "UNKNOWN", -1: "NO"}[sc]
+            by_verdict[name] = by_verdict.get(name, 0) + 1
+
+        logger.info("reparse: %d candidates, %d verdicts recovered %s%s",
+                    len(rows), len(recovered), by_verdict,
+                    " (dry run — nothing written)" if dry_run else "")
+        return {"candidates": len(rows), "recovered": len(recovered),
+                "by_verdict": by_verdict, "dry_run": dry_run}
+    finally:
+        if own:
+            conn.close()
+
+
+def unobserved(model_id: str = None,
+               conn: Optional[sqlite3.Connection] = None) -> int:
+    """Count score rows that record NO observation — a failed call's leftovers.
+
+    Health metric. Under the current code this should stay at 0: failures are
+    no longer persisted. A non-zero value means either legacy rows from before
+    2026-08-19 or a regression in the write path.
+    """
+    model_id = model_id or PRIMARY_MODEL
+    own = conn is None
+    conn = conn or store()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM scores WHERE model_id = ? AND prompt_hash = ? "
+            "  AND score IS NULL AND rationale IS NULL",
+            (model_id, prompt_hash()),
+        ).fetchone()[0]
     finally:
         if own:
             conn.close()
@@ -380,16 +601,21 @@ def score_manual(company: str, headline: str, symbol: Optional[str] = None,
     point-in-time claim the forward log exists to make.
     """
     model_id = model_id or PRIMARY_MODEL
-    score, rationale = score_texts([(company, headline)], model_id)[0]
+    score, rationale, api_failed = score_texts([(company, headline)], model_id)[0]
 
     out = {
         "company": company, "symbol": symbol, "headline": headline,
         "model_id": model_id, "prompt_hash": prompt_hash(),
         "score": score, "rationale": rationale,
-        "verdict": {1: "YES", 0: "UNKNOWN", -1: "NO"}.get(score, "PARSE_FAILED"),
+        "verdict": {1: "YES", 0: "UNKNOWN", -1: "NO"}.get(
+            score, "API_FAILED" if api_failed else "PARSE_FAILED"),
+        "api_failed": api_failed,
         "persisted": False,
     }
-    if not persist or not symbol:
+    # Never persist a call that did not complete — the same rule as the bulk
+    # path. A manual entry that failed should be re-run, not recorded as a
+    # scored headline with no verdict.
+    if api_failed or not persist or not symbol:
         return out
 
     own = conn is None
@@ -431,6 +657,8 @@ def main() -> None:
     ap.add_argument("--transport", choices=[TRANSPORT_SYNC, TRANSPORT_BATCH],
                     default=TRANSPORT_SYNC)
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--reparse", action="store_true",
+                    help="re-read verdicts from stored response text; no API calls")
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would be scored, call nothing")
     args = ap.parse_args()
@@ -439,6 +667,9 @@ def main() -> None:
         result = score_manual(args.company or args.symbol or "the company",
                               args.headline, symbol=args.symbol, model_id=args.model)
         print(json.dumps(result, indent=2))
+    elif args.reparse:
+        print(json.dumps(reparse_stored(args.model, dry_run=args.dry_run), indent=2))
+
     elif args.collect:
         print(json.dumps(collect_batches(), indent=2))
     elif args.pending:

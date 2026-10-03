@@ -143,6 +143,68 @@ GST_RATE = 0.18                     # on (brokerage + exchange txn)
 LIQUIDITY_BUCKETS = 5               # by 20-day ADV, within-date quintiles
 ADV_WINDOW_DAYS = 20
 
+# ADV is measured as RUPEE TURNOVER (close x volume), not share count.
+# spread_impact_bps(bucket, participation) needs participation = order notional
+# / ADV, and a share-count ADV cannot answer that: 10,000 shares of a Rs.50
+# stock and 10,000 shares of a Rs.5,000 stock are not comparable liquidity.
+ADV_MEASURE = "turnover_inr"
+
+# Bucket ORIENTATION, declared. 1 = LEAST liquid ... 5 = MOST liquid.
+# PREREGISTRATION reads its negative-result verdict off "the most illiquid
+# bucket", so which integer that is has to be a study parameter rather than an
+# implementation detail someone can flip while refactoring.
+LIQUIDITY_BUCKET_1_IS_LEAST_LIQUID = True
+
+# ── Returns panel construction ────────────────────────────────────────────────
+# These are measurement rules, so they are frozen like every other parameter
+# here: each one decides which rows enter C0/C1/C2, and changing one after
+# scoring begins changes the sample the pre-registered thresholds were set for.
+
+# Corporate-action guard. There is NO corporate-actions table anywhere in the
+# repo and price_history OHLC is unadjusted (backfill_bhavcopy.py:33), so a
+# split shows up as a fake overnight return. |init_ret| above this nulls
+# init_ret AND prev_close, and retains open/close/drift_ret unchanged: on an
+# ex-date all four prices are already quoted in the post-action basis, so only
+# the comparison to the PREVIOUS close crosses the basis change. The tradable
+# leg is untouched, which is why this guard costs the C2 ship gate nothing.
+#
+# 0.20 is defensible against NSE price bands (5/10/20%, 10% dynamic for F&O):
+# a >20% overnight move that is not a corporate action is near-unobtainable,
+# while a 1:2 split is -50% and a 1:10 split is -90%.
+#
+# DECLARED RESIDUAL: ex-dividends and rights issues are NOT caught — a 1-2%
+# yield sits well inside the band — which imparts a small negative bias to
+# init_ret on ex-dates. Stated, not silently corrected.
+PANEL_CA_GAP_LIMIT = 0.20
+
+# Phantom-session floor. A date in price_history carrying a handful of bars is
+# a partial write, not a trading day, and admitting one shifts every symbol's
+# prev_close by a session and becomes a date attribution_date() can return.
+# Relative floor with an absolute backstop: a fixed constant right for 2026
+# coverage would be wrong for 2019.
+PANEL_MIN_SESSION_BREADTH_ABS = 20
+PANEL_MIN_SESSION_BREADTH_REL = 0.25    # x median breadth over the window
+
+# Weekly-cadence guard. Before the 2025-03-17 cutover, price_history held
+# weekly AGGREGATED OHLC (av_weekly_backfill.py:20-22): `open` is the week's
+# open and `close` the week's close, so BOTH legs are weekly returns wearing a
+# session label. Detected per symbol on its own bars as a rolling median gap.
+# 1.6 sessions follows the precedent at quant_engine short_horizon.py:78-80.
+PANEL_CADENCE_WINDOW = 10
+PANEL_CADENCE_MIN_PERIODS = 5
+PANEL_CADENCE_MAX_MEDIAN_GAP = 1.6
+
+# Warm-up, counted in SESSIONS and never calendar days — a calendar-day guess
+# under-fetches across holiday clusters and ADV then silently returns NULL for
+# the first week of every build. ADV needs 20 bars; the cadence median needs
+# another CADENCE_WINDOW behind it.
+PANEL_WARMUP_SESSIONS = ADV_WINDOW_DAYS + PANEL_CADENCE_WINDOW
+
+# Turso has no server-side cursor and a fixed 30s HTTP timeout
+# (turso_client.py:126-131). A quarter of price_history (~52k rows) times out;
+# a month (~17k) does not.
+PANEL_FETCH_CHUNK = "month"
+
 # Paper §6.2: 25% partial rebalancing cut turnover 190%→46%/day and *improved*
 # net Sharpe at 10 bps. Reported as a declared variant, not a rescue attempt.
 REBALANCE_FRACTIONS = (1.0, 0.25)

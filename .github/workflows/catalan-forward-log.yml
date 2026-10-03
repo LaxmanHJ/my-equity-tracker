@@ -27,12 +27,21 @@ name: CATALAN forward log
 
 on:
   schedule:
-    # 03:45 UTC = 09:15 IST, Tue-Sat. Collects the PREVIOUS calendar day, so a
+    # 03:45 UTC = 09:15 IST, EVERY day. Collects the PREVIOUS calendar day, so a
     # Tuesday run captures Monday's post-close filings and a Saturday run
     # captures Friday's. NSE announcements keep landing until ~23:59 IST
     # (observed: the latest row on 2026-08-07 was 23:57), so anything earlier
     # than midnight IST would truncate the day.
-    - cron: "45 3 * * 2-6"
+    #
+    # WHY ALL SEVEN DAYS and not Tue-Sat: a Tue-Sat schedule collects Mon-Fri
+    # filings only, so Saturday and Sunday filings were never collected at all.
+    # They are not sparse — Saturday 2026-08-08 carried 480 announcements, 37%
+    # of the preceding Friday's 1,286, and survived only because that day was
+    # dispatched by hand. Weekend filings are also the ones most likely to be a
+    # biased subset (news released when the market cannot react), which is
+    # exactly the population a news-reaction study must not silently drop.
+    # `attribution_date()` already maps them onto the next trading day's open.
+    - cron: "45 3 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -106,11 +115,65 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Surface a scoring outage as a red annotation WITHOUT failing the job.
+      #
+      # Collection is the irreplaceable half — a lost day is permanent, whereas
+      # scoring can always be redone from the stored headlines. So this must
+      # never exit non-zero, or a billing problem would start costing us
+      # corpus. It only has to be impossible to miss.
+      #
+      # Why it exists: between 2026-08-11 and 08-17 the Anthropic credit
+      # balance ran out, API failures were silently recorded as completed
+      # scores, and the job reported success every day at up to 100% failure.
+      - name: Flag scoring failures
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pipeline_result.json"
+          try:
+              score = json.loads(p.read_text()).get("score") or {}
+          except Exception:
+              print("::warning::could not read pipeline result to check scoring health")
+              raise SystemExit(0)
+          if score.get("skipped"):
+              raise SystemExit(0)
+          failed, attempted = score.get("api_failed", 0), score.get("pending", 0)
+          if failed:
+              pct = 100.0 * failed / attempted if attempted else 100.0
+              print(f"::error::{failed}/{attempted} ({pct:.1f}%) scoring API calls FAILED. "
+                    "Headlines were still collected and are safe; these announcements "
+                    "remain pending and will be retried. Check the Anthropic credit "
+                    "balance first — that was the cause on 2026-08-14/17.")
+          if score.get("parse_missed"):
+              print(f"::warning::{score['parse_missed']} responses carried no readable "
+                    "verdict. Try `--reparse` before re-scoring; it costs nothing.")
+          PY
+
       - name: Commit the archive
         run: |
           git config user.name  "catalan-bot"
           git config user.email "catalan-bot@users.noreply.github.com"
           git add catalan/data/forward_log/
+
+          # GUARD: "git staged nothing" has two causes and only one is benign.
+          #
+          # Benign — the day was already collected and committed, so a re-run
+          # is idempotent and there is genuinely nothing new.
+          #
+          # CATASTROPHIC — the archive is invisible to git (a .gitignore rule,
+          # a bad path) so `git add` silently staged nothing. This runner is
+          # ephemeral and Turso writes are quota-blocked, so git is the only
+          # durable destination: exiting 0 here destroys the day's collection
+          # and reports success. That happened on 2026-08-19, when
+          # catalan/data/forward_log/ was added to .gitignore.
+          #
+          # Distinguish them by asking whether git tracks the archive at all.
+          if [ -z "$(git ls-files catalan/data/forward_log/)" ]; then
+            echo "::error::catalan/data/forward_log/ is NOT TRACKED by git. The archive is the system of record and this runner is about to be destroyed with the day's collection on it. Check .gitignore — the directory must stay tracked."
+            exit 1
+          fi
+
           if git diff --staged --quiet; then
             echo "no new rows — nothing to commit"
             exit 0

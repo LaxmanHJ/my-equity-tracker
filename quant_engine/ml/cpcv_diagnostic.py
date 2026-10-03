@@ -145,7 +145,9 @@ def _daily_portfolio_returns(
     Using fwd_1d (next-day return) gives a daily-rebalanced series whose Sharpe
     is annualizable. NaN scores / returns are dropped per date.
 
-    Returns (long_only_series, long_short_series) indexed by date.
+    Returns (long_only, long_short, long_only_turnover, long_short_turnover),
+    all indexed by date. The two turnover series are empty when `symbols` is
+    None — turnover is undefined without holdings identity.
     """
     df = pd.DataFrame({"score": score, "fwd": fwd_1d}, index=dates)
     if symbols is not None:
