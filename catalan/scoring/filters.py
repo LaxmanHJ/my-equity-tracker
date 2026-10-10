@@ -84,50 +84,92 @@ def dedup_key(symbol: str, announced_at: str) -> Tuple[str, str]:
     return (symbol, (announced_at or "")[:10])
 
 
+def _order_key(row: Dict):
+    """Deterministic ordering within a dedup bucket.
+
+    `announced_at` alone is not enough: NSE routinely stamps several filings
+    from one company to the same second, and which of them wins the cluster
+    would otherwise depend on the order the database happened to return rows
+    in. `id` is the ingest sequence and breaks the tie stably.
+    """
+    return (row.get("announced_at") or "", row.get("id") or 0)
+
+
 def drop_near_duplicates(
     rows: Sequence[Dict],
     threshold: float = None,
+    context: Sequence[Dict] = (),
 ) -> Tuple[List[Dict], List[Dict]]:
-    """Split rows into (kept, dropped) on same-symbol same-day similarity.
+    """Split ``rows`` into (kept, dropped) on same-symbol same-day similarity.
 
     The earliest announcement in a near-duplicate cluster is kept — it is the
     one that carried the information first, and keeping a later restatement
     instead would attribute the reaction to the wrong timestamp.
 
-    ``rows`` need ``symbol``, ``announced_at`` and ``headline``. Returns dicts
-    from the input untouched.
+    ``context`` rows take part in forming clusters but are never returned in
+    either list. **This is what makes the rule corpus-level rather than
+    batch-level**, and it is not an optimisation — it is the declared rule.
+
+    Without it, dedup only sees whichever rows the caller happened to be
+    holding. A caller that passes just its unscored rows suppresses a duplicate
+    on the first pass, then — once the cluster's keeper has been scored and
+    left that set — stops suppressing it on the next, and the duplicate enters
+    the corpus after all. Corpus size then depends on how many times the caller
+    ran, which a pre-registered study cannot defend. Observed 2026-08-20: one
+    scoring run readmitted 151 rows this way.
+
+    ``rows`` and ``context`` need ``symbol``, ``announced_at`` and ``headline``;
+    ``id`` is used to break timestamp ties. Returns dicts from the input
+    untouched.
     """
     thresh = DEDUP_SIMILARITY if threshold is None else threshold
 
-    buckets: Dict[Tuple[str, str], List[Dict]] = {}
+    # False = context (participates, never returned), True = candidate.
+    tagged: Dict[Tuple[str, str], List[Tuple[Dict, bool]]] = {}
+    for row in context:
+        tagged.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append((row, False))
     for row in rows:
-        buckets.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append(row)
+        tagged.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append((row, True))
 
     kept: List[Dict] = []
     dropped: List[Dict] = []
 
-    for bucket in buckets.values():
-        bucket.sort(key=lambda r: r["announced_at"])
-        survivors: List[Tuple[str, Dict]] = []
-        for row in bucket:
+    for bucket in tagged.values():
+        bucket.sort(key=lambda pair: _order_key(pair[0]))
+        survivors: List[str] = []
+        for row, is_candidate in bucket:
             norm = normalise_headline(row["headline"])
-            if any(_similarity(norm, seen) > thresh for seen, _ in survivors):
-                dropped.append(row)
+            if any(_similarity(norm, seen) > thresh for seen in survivors):
+                if is_candidate:
+                    dropped.append(row)
             else:
-                survivors.append((norm, row))
-                kept.append(row)
+                survivors.append(norm)
+                if is_candidate:
+                    kept.append(row)
 
-    kept.sort(key=lambda r: (r["announced_at"], r["symbol"]))
+    kept.sort(key=_order_key)
     return kept, dropped
 
 
-def apply_all(rows: Iterable[Dict], dedup: bool = True) -> Tuple[List[Dict], Dict[str, int]]:
+def apply_all(rows: Iterable[Dict], dedup: bool = True,
+              context: Iterable[Dict] = ()) -> Tuple[List[Dict], Dict[str, int]]:
     """Category exclusions then dedup. Returns (kept, counts) for reporting.
 
     The counts matter: a filter that silently removes most of the corpus should
     be visible in the run log, not discovered later in a coverage plot.
+
+    ``context`` is the rest of the corpus for the same symbol-days — rows the
+    caller is not selecting from, but which must still take part in forming
+    near-duplicate clusters. Pass it whenever ``rows`` is a *subset* of a day's
+    announcements (e.g. only the unscored ones); omit it when ``rows`` already
+    is the whole corpus under consideration. See ``drop_near_duplicates``.
+
+    Exclusions are applied to ``context`` too, and for the same reason they are
+    applied to ``rows``: an excluded-category filing is not part of the corpus,
+    so it must not become the keeper that suppresses a filing that is.
     """
     rows = list(rows)
+    context = [r for r in context if not is_excluded(r)]
 
     # Counted separately so the run log shows which rule is doing the work.
     # If the headline rule ever starts catching a lot, that is NSE's `desc`
@@ -139,7 +181,7 @@ def apply_all(rows: Iterable[Dict], dedup: bool = True) -> Tuple[List[Dict], Dic
     kept_rows = [r for r in rows if not is_excluded(r)]
 
     if dedup:
-        kept, dupes = drop_near_duplicates(kept_rows)
+        kept, dupes = drop_near_duplicates(kept_rows, context=context)
     else:
         kept, dupes = kept_rows, []
 

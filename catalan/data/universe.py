@@ -79,3 +79,21 @@ def reset_cache() -> None:
     """Drop cached registry + per-date memo. For tests, and after a roster refresh."""
     members_on.cache_clear()
     _registry.cache_clear()
+
+
+def roster_last_effective_from() -> Optional[date]:
+    """Newest ``effective_from`` in the roster — i.e. how fresh the PIT membership is.
+
+    The panel needs this to warn when it is asked to build sessions that run
+    past the roster's last known reconstitution. Past that point ``members_on``
+    keeps returning the last known roster rather than failing, so a stale
+    registry produces a silently wrong ``in_universe`` column instead of an
+    error. A warning is the right severity: the roster being a few weeks behind
+    the price data is the normal steady state, not a bug.
+    """
+    intervals = getattr(_registry(), "_all_intervals", None)
+    if not intervals:
+        return None
+    stamps = [iv.effective_from for iv in intervals
+              if iv.index_name == UNIVERSE_INDEX]
+    return max(stamps) if stamps else None

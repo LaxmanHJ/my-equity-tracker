@@ -7,10 +7,19 @@ uvicorn==0.27.1
 python-dotenv>=1.0.0
 requests>=2.31.0
 
-pandas>=2.0.0
-numpy>=1.24.0
-scipy>=1.10.0
-statsmodels>=0.14.0        # firm+date FE regressions, double-clustered SEs
+# MAJOR-VERSION CEILINGS ARE DELIBERATE. This is a pre-registered study whose
+# integrity argument is that results are reconstructible; a floating numerical
+# stack means the panel's numbers can change between runs with no code change
+# and nothing to notice it. quant_engine/requirements.txt pins exactly for the
+# same reason — catalan was the outlier.
+#
+# Not hypothetical: an unbounded `pandas>=2.0.0` pulled pandas 3 into CI on
+# 2026-08-19, where `DataFrame.stack(dropna=...)` is rejected outright, and
+# 26 panel tests failed against a local env that was green on 2.1.4.
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<3.0.0
+scipy>=1.10.0,<2.0.0
+statsmodels>=0.14.0,<1.0.0  # firm+date FE regressions, double-clustered SEs
 
 anthropic>=0.40.0          # Message Batches API
 rapidfuzz>=3.6.0           # Damerau-Levenshtein dedup (headline near-duplicates)
