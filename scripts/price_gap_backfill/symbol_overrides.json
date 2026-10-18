@@ -1,0 +1,55 @@
+{
+  "_doc": [
+    "Explicit symbol -> Angel instrument mapping for names that no longer resolve as '<SYMBOL>-EQ' in Angel's scrip master.",
+    "Key = the symbol as STORED in price_history (never renamed here; rows keep the stored name so the series continues).",
+    "angel_symbol = Angel trading symbol to fetch; its token is looked up in the live scrip master on every run.",
+    "nse_symbol = ticker in NSE's bhavcopy, used only for the official-price spot check.",
+    "token_seen = token observed when the entry was added. The fetcher warns if the live token differs.",
+    "Add an entry only after checking the new instrument's bars equal the stored bars on the overlap days (the tool does this for you on the next --dry-run).",
+    "Unresolved symbols are listed in every report together with candidate instruments of the same name."
+  ],
+  "overrides": {
+    "HFCL": {
+      "angel_symbol": "HFCL-BE",
+      "exchange": "NSE",
+      "nse_symbol": "HFCL",
+      "token_seen": "21954",
+      "added": "2026-09-27",
+      "reason": "Moved from EQ to the BE (trade-for-trade) series between 2026-08-07 and 2026-09-25. HFCL-EQ is gone from the scrip master. The BE token serves the continuous history, including the EQ period; checked against the bhavcopy on 5 dates. Remove this entry if HFCL returns to EQ."
+    },
+    "HEG": {
+      "angel_symbol": "HEGAM-EQ",
+      "exchange": "NSE",
+      "nse_symbol": "HEGAM",
+      "token_seen": "1336",
+      "added": "2026-09-27",
+      "reason": "Ticker renamed HEG -> HEGAM. Stored under HEG. HEGAM then had a demerger (ex 2026-09-07) that Angel back-adjusted, so HEG is currently held back by the corporate-action check (ratio 0.357). See README 'Known quirks'."
+    }
+  },
+  "_doc_hold_back": [
+    "hold_back: stored symbols this tool must NEVER extend, whatever the overlap check says.",
+    "Each is a known corporate-action seam: its stored history is on the pre-action basis while Angel now serves the adjusted basis, so appending Angel bars would create a fake return at the join.",
+    "The CATALAN pre-registration excludes these three from its study universe unless their history is rewritten on a consistent basis.",
+    "Remove an entry ONLY after its full history has been deliberately rewritten on one basis (a DELETE+reinsert, outside this tool). The next --dry-run must then show 'overlap exact' for it."
+  ],
+  "hold_back": {
+    "TRENT": {
+      "since": "2026-09-27",
+      "action": "Bonus 1:2, ex 2026-06-04",
+      "ratio": 0.66667,
+      "stored_through": "2026-05-08"
+    },
+    "CUB": {
+      "since": "2026-09-27",
+      "action": "Bonus 1:3, ex 2026-06-12",
+      "ratio": 0.75002,
+      "stored_through": "2026-06-02"
+    },
+    "HEG": {
+      "since": "2026-09-27",
+      "action": "Demerger (as HEGAM), ex 2026-09-07",
+      "ratio": 0.35702,
+      "stored_through": "2026-06-02"
+    }
+  }
+}
