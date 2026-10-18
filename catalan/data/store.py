@@ -33,6 +33,9 @@ _MIGRATIONS = (
     ("announcements", "attachment_size", "TEXT"),
     ("announcements", "has_xbrl", "INTEGER"),
     ("announcements", "disseminated_at", "TEXT"),
+    # NULL on every row scored before catalan-v2 (2026-10-18): those ran at the model
+    # default (1.0 for Haiku), because no temperature was sent.
+    ("scores", "temperature", "REAL"),
 )
 
 

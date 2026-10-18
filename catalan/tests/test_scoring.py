@@ -112,18 +112,30 @@ def test_a_row_hit_by_both_rules_is_not_double_counted():
     assert counts["kept"] == 0
 
 
-def test_near_duplicates_keep_the_earliest():
+def test_duplicates_keep_the_earliest():
     """The first announcement carried the information; a later restatement
     would attribute the reaction to the wrong timestamp."""
     rows = [
         _row("REL", "Board approves demerger of financial services business",
              at="2026-08-07T18:00:00"),
-        _row("REL", "Board approves demerger of financial services businesses",
+        _row("REL", "Board approves demerger of financial services business",
              at="2026-08-07T19:30:00"),
     ]
     kept, counts = filters.apply_all(rows)
     assert counts["excluded_duplicate"] == 1
     assert kept[0]["announced_at"] == "2026-08-07T18:00:00"
+
+
+def test_a_one_character_difference_is_a_different_filing():
+    """v2 (2026-10-18): only identical filing text is a duplicate. Near-matches
+    differed by exactly the detail that made them separate events."""
+    rows = [
+        _row("KIRLOSKAR", "Kirloskar has informed the Exchange about meet at 10.30 AM",
+             at="2026-08-07T18:00:00"),
+        _row("KIRLOSKAR", "Kirloskar has informed the Exchange about meet at 3.30 PM",
+             at="2026-08-07T18:05:00"),
+    ]
+    assert filters.apply_all(rows)[1]["excluded_duplicate"] == 0
 
 
 def test_dedup_is_scoped_to_same_symbol_same_day():
@@ -183,6 +195,23 @@ def test_pending_applies_filters_by_default(db):
     newspaper copy."""
     rows = scorer.pending("test-model", conn=db)
     assert {r["symbol"] for r in rows} == {"RELIANCE", "TCS"}
+
+
+def test_pending_opens_its_own_connection_when_none_is_given(tmp_path, monkeypatch):
+    """The CLI --dry-run and the UI status endpoint call pending() with no
+    connection. It used to close the one it opened and then reuse that closed
+    handle for the dedup-context query."""
+    path = tmp_path / "own.db"
+    seed = store(path)
+    seed.execute(
+        "INSERT INTO announcements (symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES "
+        "('TCS', 'TCS', '2026-08-07T18:00:00', 'Q1 revenue up', "
+        "'Board Meeting Outcome', 's1', 'test', '2026-08-07T18:00:00')")
+    seed.commit()
+    seed.close()
+    monkeypatch.setattr(scorer, "store", lambda: store(path))
+    assert {r["symbol"] for r in scorer.pending("test-model")} == {"TCS"}
 
 
 def test_scored_rows_stop_being_pending(db):
@@ -399,7 +428,7 @@ def test_a_duplicate_stays_suppressed_after_its_keeper_is_scored(sdb):
     sdb.execute("DELETE FROM announcements")
     _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
          "2026-08-07T18:00:00")
-    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
+    _ann(sdb, 2, "ACME", "ACME LTD has informed the Exchange regarding Appointment of Mr X",
          "2026-08-07T18:05:00")
     sdb.commit()
 
@@ -439,13 +468,15 @@ def test_an_excluded_row_cannot_become_the_cluster_keeper(sdb):
     sdb.execute("DELETE FROM announcements")
     _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
          "2026-08-07T18:00:00", category="Trading Window")          # excluded
-    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
-         "2026-08-07T18:05:00")                                      # not excluded
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:05:00", category="Trading Window")          # also excluded...
+    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:10:00")                                      # ...this one is not
     sdb.commit()
 
     todo = scorer.pending("m", conn=sdb)
-    assert [r["id"] for r in todo] == [2], \
-        "the excluded row suppressed a real one — exclusions must precede dedup"
+    assert [r["id"] for r in todo] == [3], \
+        "an excluded row suppressed a real one — exclusions must precede dedup"
 
 
 def test_same_timestamp_ties_break_deterministically_on_ingest_id(sdb):
@@ -457,8 +488,145 @@ def test_same_timestamp_ties_break_deterministically_on_ingest_id(sdb):
     sdb.execute("DELETE FROM announcements")
     _ann(sdb, 7, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
          "2026-08-07T18:00:00")
-    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr Y",
+    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
          "2026-08-07T18:00:00")
     sdb.commit()
     assert [r["id"] for r in scorer.pending("m", conn=sdb)] == [3], \
         "the lower ingest id must win an exact timestamp tie"
+
+
+# ── catalan-v2 amendment (2026-09-29): temperature, the PDF arm, the dedup rule ─
+
+def test_temperature_zero_is_sent_to_haiku():
+    params = scorer._message_params("Acme", "Board approves demerger", "claude-haiku-4-5-20251001")
+    assert params["temperature"] == 0.0
+
+
+def test_no_temperature_is_sent_to_models_that_reject_it():
+    """Opus 5 and later return a 400 on `temperature`."""
+    assert "temperature" not in scorer._message_params("Acme", "x", "claude-opus-5")
+
+
+def test_a_document_selects_the_pdf_prompt():
+    head = scorer._message_params("Acme", "Results", "claude-haiku-4-5")["messages"][0]["content"]
+    pdf = scorer._message_params("Acme", "Results", "claude-haiku-4-5",
+                                 document="Revenue grew 23%")["messages"][0]["content"]
+    assert "Announcement text" not in head and "Is this headline good or bad" in head
+    assert "Revenue grew 23%" in pdf and "Is this announcement good or bad" in pdf
+
+
+def test_the_arms_have_distinct_pinned_hashes():
+    assert scorer.arm_hash(scorer.ARM_HEADLINE) == _phash()
+    assert scorer.arm_hash(scorer.ARM_PDF) != scorer.arm_hash(scorer.ARM_HEADLINE)
+    with pytest.raises(ValueError):
+        scorer.arm_hash("other")
+
+
+def test_every_score_row_records_its_temperature(sdb):
+    scorer._write_scores(sdb, [_score_row(1, 1, "yes")], temperature=0.0)
+    assert sdb.execute("SELECT temperature FROM scores").fetchone()[0] == 0.0
+
+
+def test_a_ninth_element_carries_a_rows_own_temperature(sdb):
+    """How archive.rebuild replays history: old rows keep NULL (none was sent)."""
+    scorer._write_scores(sdb, [_score_row(1, 1, "yes") + (None,)], temperature=0.0)
+    assert sdb.execute("SELECT temperature FROM scores").fetchone()[0] is None
+
+
+def _pdf_text(conn, ann_id, status="ok", text="[page 1]\nRevenue grew 23%"):
+    conn.execute(
+        "INSERT INTO pdf_texts (announcement_id, status, text, extractor, extracted_at) "
+        "VALUES (?, ?, ?, 'test', '2026-10-02T09:00:00')",
+        (ann_id, status, text if status == "ok" else None))
+    conn.commit()
+
+
+def test_the_pdf_arm_only_sees_cleanly_extracted_filings(sdb):
+    _ann(sdb, 2, "TCS", "Tata Consultancy Services has submitted results", "2026-08-07T19:00:00")
+    _pdf_text(sdb, 1)
+    _pdf_text(sdb, 2, status="unreadable")
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, arm=scorer.ARM_PDF)] == [1]
+    assert {r["id"] for r in scorer.pending("m", conn=sdb)} == {1, 2}   # headline arm: all
+
+
+def test_the_arms_do_not_satisfy_each_other(sdb):
+    """A headline verdict must not stop the PDF arm scoring the same filing."""
+    _pdf_text(sdb, 1)
+    scorer._write_scores(sdb, [_score_row(1, 1, "headline verdict")])
+    assert scorer.pending("m", conn=sdb) == []
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, arm=scorer.ARM_PDF)] == [1]
+
+
+def test_score_pending_on_the_pdf_arm_writes_its_own_rows(sdb, monkeypatch):
+    _pdf_text(sdb, 1)
+    seen = []
+
+    def fake(items, model_id=None):
+        seen.extend(items)
+        return [(1, "strong quarter", False) for _ in items]
+
+    monkeypatch.setattr(scorer, "score_texts", fake)
+    out = scorer.score_pending("claude-haiku-4-5-20251001", conn=sdb, arm=scorer.ARM_PDF)
+    assert out["scored"] == 1 and out["arm"] == "pdf"
+    assert seen[0][2] == "[page 1]\nRevenue grew 23%", "the document must reach the prompt"
+    row = sdb.execute("SELECT prompt_hash, temperature FROM scores").fetchone()
+    assert (row[0], row[1]) == (scorer.arm_hash(scorer.ARM_PDF), 0.0)
+
+
+def test_the_pdf_arm_refuses_the_batch_transport(sdb):
+    with pytest.raises(ValueError):
+        scorer.score_pending("m", transport=scorer.TRANSPORT_BATCH, conn=sdb, arm=scorer.ARM_PDF)
+
+
+def _drow(symbol, headline, category="Appointment", size=None, at="2026-10-01T18:00:00", i=0):
+    return {"id": i, "symbol": symbol, "headline": headline, "category": category,
+            "attachment_size": size, "announced_at": at}
+
+
+def test_filing_text_strips_the_filer_and_the_stem():
+    assert filters.filing_text(
+        "PNB GILTS LTD. has informed the Exchange regarding Appointment of Mr X") == "appointment of mr x"
+    assert filters.filing_text("Board approves demerger") == "board approves demerger"
+
+
+def test_different_categories_are_never_the_same_filing():
+    """The audit's main false positive: an ESOP allotment 'duplicating' a meet schedule."""
+    rows = [_drow("A", "Acme has informed the Exchange about Schedule of meet", "Analysts meet", i=1),
+            _drow("A", "Acme has informed the Exchange about Schedule of meet", "Updates", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 0
+
+
+def test_different_document_sizes_mean_different_filings():
+    """Two genuine 'Schedule of meet' filings on one day are two meetings."""
+    rows = [_drow("A", "Acme has informed the Exchange about Schedule of meet", size="410.2 KB", i=1),
+            _drow("A", "Acme has informed the Exchange about Schedule of meet", size="388.9 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 0
+
+
+def test_the_same_document_posted_twice_is_a_duplicate():
+    rows = [_drow("A", "Acme Ltd has informed the Exchange about Schedule of meet", size="410.2 KB", i=1),
+            _drow("A", "ACME LIMITED has informed the Exchange regarding Schedule of meet",
+                  size="410.2 KB", i=2)]
+    kept, dropped = filters.drop_near_duplicates(rows)
+    assert [r["id"] for r in kept] == [1] and [r["id"] for r in dropped] == [2]
+
+
+def test_a_zero_byte_size_is_unknown_not_different():
+    rows = [_drow("A", "Acme has informed the Exchange about Price movement", "Price movement", "0 Bytes", i=1),
+            _drow("A", "Acme has informed the Exchange about Price movement", "Price movement", "12.1 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 1
+
+
+def test_two_different_appointments_survive_when_sizes_differ():
+    rows = [_drow("A", "Acme has informed the Exchange regarding Appointment of Ms. Neha Rajvanshi as CFO",
+                  size="220.1 KB", i=1),
+            _drow("A", "Acme has informed the Exchange regarding Appointment of Shri Ravi Gupta as CS",
+                  size="231.7 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[0]) == 2
+
+
+def test_since_is_a_date_floor_never_a_symbol_filter(sdb):
+    """The daily run passes STUDY_CLOCK_START so it cannot bulk-score the pilot."""
+    _ann(sdb, 2, "TCS", "Tata Consultancy Services has submitted results", "2026-10-19T18:00:00")
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, since="2026-10-19")] == [2]
+    assert {r["id"] for r in scorer.pending("m", conn=sdb)} == {1, 2}

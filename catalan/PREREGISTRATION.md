@@ -1,6 +1,8 @@
 # CATALAN — Pre-registration
 
-> **STATUS: THRESHOLDS SET 2026-08-20.**
+> **STATUS: AMENDED 2026-10-18 — study version catalan-v2. Amendment 1
+> (directly below) supersedes the v1 text wherever they conflict.**
+> v1 status: thresholds set 2026-08-20.
 >
 > **Sequencing, stated plainly because it is the whole point.** Scoring began
 > before this file was finalised: 7,884 headlines carried a verdict when these
@@ -23,6 +25,313 @@ This is the single most important sequencing decision in the project. R2
 produced a gate PASS gross of costs and then died on costs. Declaring the bar
 before seeing the number is what prevents that repeating — and the only way
 that works is if the declaration is dated earlier than the result.
+
+---
+
+## AMENDMENT 1 — catalan-v2 (drafted 2026-09-29, final text 2026-10-18)
+
+**This amendment supersedes the v1 text below wherever they conflict.** The v1
+text is kept unchanged, as the record of what was declared first.
+
+### Why amend, and why it is legitimate now
+
+- **Nothing has been peeked at.**
+  - v1 scored the forward log from 2026-08-07, but price data first overlapped
+    it on 2026-09-27, when the Turso backfill landed.
+  - From that day the NO-PEEK rule has been in force: no verdict has been
+    joined to any return, in any form.
+  - The data audit (`catalan/audit/`) read no prices.
+  - When this text was committed, `price_history` ended on 2026-09-25, so no
+    counted-period return was even in the database.
+  - This amendment is therefore set blind to every gate statistic, as v1's
+    thresholds were.
+- **The data audit found the v1 instrument unfit to count**
+  (`catalan/audit/output/data_audit_report.md`, 26,585 records):
+  1. The v1 dedup rule (0.6 similarity on the whole headline) dropped 13.3% of
+     the corpus. 63% of the drops differed in category from their keeper, and
+     18 of 22 hand-read drops were distinct events.
+  2. No temperature was sent, so verdicts were sampled at 1.0. Of 1,334
+     headlines re-scored about 15 times, 42% changed verdict.
+  3. 52% of headlines are label-only: the text, minus the company name, is
+     shared by ≥ 5 companies. The substance of results and ratings is in the
+     PDF.
+- **Owner decisions:**
+  - Long-only (2026-09-27): the model surfaces buy candidates; the owner
+    decides what to buy.
+  - The model `gemini-3.5-flash-lite` (2026-10-18), chosen over Claude Haiku
+    4.5 to score at no cost.
+- **Timeline.**
+  - Drafted 2026-09-29 for a 2026-10-01 start.
+  - The work was interrupted until 2026-10-18. Independent verification then
+    changed the design, including the model and the universe.
+  - The clock start was moved to **2026-10-26**, so this text precedes every
+    counted announcement. Announcements dated 2026-08-07 → 2026-10-25 are the
+    **pilot**.
+- **This is a new study version.** Per this project's own rule (gate G2: a
+  change to a frozen parameter after scoring has begun is a new study version),
+  this is **catalan-v2**.
+
+### What changes
+
+| | v1 | **v2** |
+|---|---|---|
+| Primary portfolio | long-short, YES vs NO | **long-only**: YES-basket drift in excess of the universe |
+| Model / sampling | Claude Haiku 4.5, no temperature sent (1.0) | **`gemini-3.5-flash-lite`, temperature 0**. Every response must report `modelVersion` equal to the requested model, or scoring halts. |
+| Instrument | paper prompt over the headline | **PDF arm**: paper prompt over headline + first 3 PDF pages (hash `55503e79581ae655`). Falls back to the headline arm (hash `1cc1a88738863a44`) when there is no clean text. |
+| Universe | point-in-time NIFTY500 roster (Turso) | **NSE's NIFTY500 list as published 2026-10-18**, frozen (`data/universe/nifty500_2026-10-18.csv`, sha256 pinned): EQ series only, minus TRENT, CUB, HEGAM and DUMMYHEG. **491 symbols.** The Turso roster could not be used: it lacks the September 2026 reconstitution. |
+| Scoring scope | every announcement | **study-universe announcements only** |
+| Overnight | by clock time only | by clock time on a session date; **a filing on any non-session date is overnight** |
+| Sessions | weekday or weekend dates passing the breadth floor | **weekday** dates passing the breadth floor. Weekend-dated bars (Muhurat, budget Saturday) are never sessions. |
+| Dedup | whole headline, DL similarity > 0.6 | same symbol, IST day and category; **identical** filing text (no filer name, no template stem; `DEDUP_SIMILARITY` = 1.0); different NSE attachment sizes are never the same filing |
+| Category / headline exclusions | not frozen | **frozen**: Trading Window, Copy of Newspaper Publication, Disclosure under SEBI Takeover Regulations; headline text "copy of newspaper publication" |
+| Counted data | forward log from 2026-08-07 | announcements dated **≥ 2026-10-26** (`STUDY_CLOCK_START`), attributed to a session **≥ 2026-10-27** |
+
+### Definitions
+
+- **Session.** A weekday date that is present in `price_history` and passes the
+  panel's session rules (breadth floor). Weekend-dated bars are not sessions.
+- **Overnight announcement.** One published after 15:30 IST, or before 09:00
+  IST, on a session date, **or at any time on a non-session date** (weekend or
+  exchange holiday). Its session is the next session (`panel.attribution_date`).
+- **Usable counted session.** A session t ≥ 2026-10-27 on which at least 80%
+  (`USABLE_SESSION_MIN_COVERAGE`) of the study universe has a valid panel row
+  (`drift_ret`). Prices count whenever they are loaded; the panel is rebuilt
+  from `price_history` at evaluation.
+- **Valid stock-session.** A study-universe stock on session t that has a
+  valid panel row and at least 20 prior sessions of `price_history`, so that
+  its ADV and spread are defined. The spread additionally needs at least 15
+  usable pairs (see the cost definition). A stock-session that is not valid is left out
+  of the basket, the universe return and the buckets that day.
+- **Eligible announcement.** All of the following hold:
+  - dated ≥ 2026-10-26;
+  - the symbol is in the study universe;
+  - it is overnight, and attributed to a usable counted session;
+  - it is not excluded by the frozen exclusions;
+  - it survives the v2 dedup rule.
+
+  Announcements attributed to a session before 2026-10-27 are dropped. For
+  example, a filing before 09:00 on 2026-10-26 belongs to session 2026-10-26,
+  which is not counted.
+- **Verdict.** Only score rows with `model_id` = `gemini-3.5-flash-lite`,
+  temperature 0.0, and the arm's own prompt hash count.
+  - The PDF arm's *parsed* verdict, when one exists.
+  - Otherwise the headline arm's parsed verdict, flagged as a fallback.
+  - A response with no readable verdict (an abstention) counts as no verdict
+    from that arm.
+  - An announcement with no parsed verdict from either arm is **dropped**, not
+    scored 0.
+  - The fallback share and the dropped share are both reported.
+- **Stock-session score.** The mean verdict (+1 / 0 / −1) of the stock's
+  eligible announcements attributed to session t.
+  - **YES basket:** score > 0.
+  - **NO basket:** score < 0 (used by C0 only).
+  - Equal weights.
+- **Universe return on t.** The equal-weighted `drift_ret` of every valid
+  stock-session on t.
+- **Excess series.** e_t = mean `drift_ret`(YES basket) − universe return, at
+  100% daily rebalancing.
+  - A basket stock whose stock-session is not valid is dropped for that day.
+  - **An empty YES basket gives e_t = 0 and c_t = 0** (no position, so no cost
+    and no hedge). The session still counts toward the 120.
+- **Liquidity bucket.** The within-date quintile of 20-session rupee ADV
+  (`adv_20d`) across that day's valid study-universe stock-sessions (1 = least
+  liquid). It is **recomputed at evaluation over `study_universe()`**. The
+  panel's stored `in_universe` and `liquidity_bucket` columns come from the
+  stale Turso roster and are **not** used. For bucket-level series, the
+  benchmark is the bucket's own equal-weighted universe.
+- **Cost c_t** (C2). The mean, over YES-basket stocks, of a round-trip cost on a
+  position of **₹1,00,000** (`POSITION_NOTIONAL_INR`):
+  - **Explicit costs:** the cost table below, at that notional.
+  - **Spread:** the stock's **Abdi–Ranaldo (2017)** window estimator over the
+    previous 20 sessions (`SPREAD_ESTIMATOR`, `SPREAD_WINDOW_SESSIONS`), on log
+    prices:
+    - s = √max(0, 4 · mean[(c_τ − η_τ)(c_τ − η_{τ+1})]);
+    - c is the log close, and η the mean of the log high and log low;
+    - the mean is taken over the pairs (τ, τ+1) of consecutive grid sessions in
+      the window where the stock has a bar on both;
+    - with fewer than 15 such pairs (halts, gaps), the stock-session is not
+      valid that day.
+
+    It is charged in full per round trip.
+  - **Hedge:** plus **1 bp** (`HEDGE_COST_BPS`) for neutralising market drift
+    with index futures.
+
+  No other impact term is charged; at ₹1,00,000 per position, participation in
+  any study-universe stock is negligible.
+
+### Gates
+
+**C0: pipeline check.**
+- h_t = 1[mean `init_ret`(YES basket) − mean `init_ret`(NO basket) > 0], with
+  `init_ret` = close(t−1) → open(t).
+- A tie is a miss.
+- Stocks whose `init_ret` is NULL (the panel's corporate-action guard) are left
+  out of both C0 baskets that day.
+- Sessions where either basket is empty are not C0 observations.
+- **Threshold: h_t = 1 on ≥ 70% of the first 40 usable counted sessions that
+  have both baskets non-empty.** Evaluated once.
+- No short trade is involved, because the initial reaction is not tradable.
+- **A fail stops the study:** C1 and C2 are not evaluated.
+
+**C1: long-only excess drift, gross.** Mean e_t > 0 with t = mean/(sd/√N) ≥
+2.0 (sample sd, ddof = 1), over the first 120 usable counted sessions. Necessary, never sufficient;
+never reported without C2 beside it.
+
+**C2: long-only excess drift, NET of costs. THE SHIP GATE.**
+- n_t = e_t − c_t, the **pooled** daily series. All four conditions must hold
+  on it:
+  1. t ≥ 2.0
+  2. mean ≥ 5 bps/day
+  3. annualized Sharpe (daily Sharpe × √252) ≥ 0.5
+  4. **Deflated Sharpe** (Bailey & López de Prado, 2014) **> 0.95**, computed
+     with:
+     - K = 5 trials (the five liquidity-bucket cells)
+     - cross-trial Sharpe variance = the sample variance (ddof = 1) of the
+       five bucket-level net daily Sharpes
+     - skewness and **non-excess** kurtosis of the pooled n_t, as in the
+       Bailey–López de Prado formula
+     - T = the number of usable counted sessions
+     - all Sharpes daily and not annualized inside the formula
+- **Bucket-1 rule.** If C2 passes on the pooled series, recompute it with
+  bucket-1 stocks removed from **both** the basket and the benchmark: the
+  buckets 2–5 basket against the buckets 2–5 equal-weighted universe. If that
+  series has t < 2.0, the result is recorded as **negative**: the edge lives
+  only where trading costs are least trustworthy.
+- Bucket-level results are reported for all five buckets; they gate nothing.
+- *Declared limitation:* the benchmark is the equal-weighted study universe,
+  while a practical hedge (NIFTY index futures) is cap-weighted. The basis
+  between them is not modelled.
+
+**Primary endpoint:** the pooled series from the PDF arm with headline
+fallback, at 100% rebalancing. The deflation trial count is K = 5.
+
+**Secondary endpoints.** Reported, gate nothing, never promotable:
+- the headline arm alone
+- long-short drift (needs the T2T/ASM/GSM short filter, open item 4)
+- 25% rebalancing
+- the unhedged raw return (basket drift − c_t + hedge allowance)
+- the subset without fallbacks
+- close-to-close horizons of **1, 2 and 5 days**, with **delivery** costs (STT
+  0.1% each side plus stamp duty: about 22–25 bps round trip plus spread)
+
+v1's other model arms and non-LLM baselines are **not run** in v2.
+
+### Horizon, stopping rule and power
+
+- **Horizon:** C1 and C2 are evaluated **once, at 120 usable counted
+  sessions**. No extension, no second look. "Inconclusive" (|t| < 2) is a
+  declared outcome.
+- **Power, declared blind:**
+  - *Assumption:* e_t has a daily standard deviation of about **129 bps**. That
+    is the paper's long-short volatility (182 bps) divided by √2.
+  - At N = 120, t ≥ 2 needs a daily Sharpe of 0.183, i.e. **≈ 24 bps/day
+    gross excess**.
+  - The assumption is deliberately conservative. An equal-weighted basket of
+    tens of names against an equal-weighted universe is likely less volatile,
+    so the true detectable effect is likely smaller.
+  - The paper's US long leg earned ≈ 8 bps/day, so a US-sized long-only effect
+    may still read inconclusive.
+  - *Declared interpretation:* the declared round trip costs ≈ 8 bps of
+    explicit cost at ₹1,00,000, plus the spread, plus 1 bp hedge: roughly 15–30
+    bps in all. A long-only edge too small to detect here is also too small to
+    trade at this study's scale. "Inconclusive" is read as **"not worth trading
+    long-only"**, never as "no information".
+
+### The model and the free tier
+
+- **Model check (2026-10-18).** `gemini-3.5-flash-lite`:
+  - Google lists no shutdown date for it.
+  - It reported `modelVersion` equal to the requested name.
+  - It used no thinking tokens and accepted temperature 0.
+  - It gave identical verdicts on three repeats of three test headlines.
+- **Model drift.** A response counts only if both hold:
+  - it reports `modelVersion` exactly equal to `gemini-3.5-flash-lite` (any
+    other string, including a suffixed one such as `…-001`, is a different
+    model);
+  - it used **no thinking tokens** (a declared property of the instrument).
+
+  Otherwise scoring halts for that run: nothing more is written, and the run
+  turns red. Every stored verdict therefore comes from a matching response.
+  - Rows written before a halt remain valid.
+  - If a later run gets matching responses again, scoring resumes
+    automatically. That needs no decision, because every row is checked
+    individually.
+  - Every run appends its model check, one row per arm, to
+    `forward_log/model_checks/`. Statuses:
+    - `ok`: matching responses
+    - `drift`: another model, or thinking tokens
+    - `model_gone`: HTTP 404 for the model name
+    - `error`: any other stage failure
+    - `no_match`: calls attempted, none stored
+    - `quota`: daily cap spent
+    - `idle`: nothing to score
+  - **"Instrument withdrawn"** means one of two things. Either 10 consecutive
+    *counting days*, or Google's announced shutdown of the model.
+    - A counting day is a calendar day whose checks include `drift` or
+      `model_gone` and no `ok`.
+    - A day with any `ok` resets the count.
+    - Days with no check, or only `idle`, `quota`, `error` or `no_match`, are
+      operational: an expired key, a Google outage, a bug. They neither count
+      nor reset. An operational failure must never be able to end the study.
+    If either happens before 120 usable counted sessions have verdicts, the
+    study ends **"inconclusive: instrument withdrawn"**. Any continuation on
+    another model is catalan-v3, with its own clock.
+  - *Known limitation:* a silent change that keeps the same name, uses no
+    thinking tokens and still answers readably cannot be detected. The workflow
+    turns red when more than 20% of a run's answers have no readable verdict,
+    which is how such a change would most likely first show.
+- **Free tier.** About 500 requests/day. The pipeline needs ≈ 325 on a typical
+  day and up to ≈ 625 on peak results days.
+  - The PDF arm (the primary endpoint) is scored before the headline arm, so a
+    spent quota defers the control first. A spent quota defers the rest to the
+    next run. Scoring later cannot leak
+    outcomes: the model has no tools, no browsing, and a training cutoff before
+    the counted period.
+  - Moving to paid billing on the same model is the same instrument.
+  - Google may use free-tier inputs for training. The inputs are public NSE
+    filings.
+
+### The pilot, the owner's picks, and peeking
+
+- **Pilot.** Announcements dated 2026-08-07 → 2026-10-25.
+  - May be analysed only **after this amendment is committed**, and only to
+    validate the pipeline: entity linkage, the session join, the returns join.
+  - **Nothing learned from pilot returns may change a v2 parameter.** Doing so
+    requires catalan-v3.
+- **The owner's own buy decisions,** taken from the daily buy list
+  (`forward_log/buy_list/`):
+  - logged separately, starting after C0 passes;
+  - never part of any gate;
+  - reported as a distinct track.
+- **NO-PEEK.** Outside the pilot validation, no statistic joining v2 verdicts to
+  returns is computed before C0 (at 40 sessions) or C1/C2 (at 120). That
+  includes the buy-list files, which carry no prices by design.
+
+### Frozen parameters added or changed by v2
+
+Pinned by gate G2 (`tests/test_frozen_params.py`), together with golden tests of
+the dedup text rule and of the PDF text extraction.
+
+| Parameter | v2 value |
+|---|---|
+| `STUDY_VERSION` | `catalan-v2` |
+| `STUDY_CLOCK_START` | `2026-10-26` |
+| `PRIMARY_MODEL` | `gemini-3.5-flash-lite` |
+| `TEMPERATURE` / `TEMPERATURE_MODEL_PREFIXES` | 0.0 / `claude-haiku-4-5`, `gemini-3.5-flash-lite`; stored per score row |
+| `UNIVERSE_FILE` / `UNIVERSE_FILE_SHA256` | `data/universe/nifty500_2026-10-18.csv` / `2959bf20…5cb3` |
+| `UNIVERSE_SERIES` / `UNIVERSE_EXCLUDED` | `EQ` / DUMMYHEG, TRENT, CUB, HEGAM |
+| `DEDUP_SIMILARITY` | 1.0 (identical filing text), same category, attachment-size rule |
+| `PDF_PAGE_WINDOW` | 3 |
+| `PDF_MIN_PAGE_CHARS` | 50 |
+| `PDF_GARBLE_MAX` / `PDF_GARBLE_ALLOWED` | 0.15 / Devanagari, ₹ and typographic punctuation |
+| `PDF_MAX_CHARS` | 30,000 (truncation flagged) |
+| PDF readability | any unreadable page in the window → no PDF-arm verdict → headline fallback |
+| ZIP attachments | the first `.pdf` member by name |
+| `HEDGE_COST_BPS` | 1.0 |
+| `POSITION_NOTIONAL_INR` | 100,000 |
+| `SPREAD_ESTIMATOR` / `SPREAD_WINDOW_SESSIONS` | Abdi–Ranaldo (2017) / 20 |
+| Category / headline exclusions | frozen (`CATEGORY_EXCLUSIONS_FROZEN = True`) |
+| Prompts | headline arm `1cc1a88738863a44`; PDF arm `55503e79581ae655` |
 
 ---
 
@@ -193,6 +502,13 @@ pre-registration with its own horizon** — not by extending this one.
 
 ### Blocker on the clock
 
+> **Resolved 2026-09-27 (Amendment 1).** Turso `price_history` now runs to
+> 2026-09-25, and 497 of 500 PIT NIFTY500 members have prices on every date
+> checked from 2026-07-31. The v2 clock is defined by `STUDY_CLOCK_START`, not by
+> this overlap. Prices after 2026-09-25 are added with
+> `scripts/price_gap_backfill/` before C0 (40 sessions) and before C1/C2 (120).
+> The v1 text follows for the record.
+
 `price_history` ends **2026-08-04**; the forward log begins **2026-08-07**. They
 do not overlap, so **zero of the 120 days have been accrued** despite 8 days of
 headlines being collected and scored. The clock cannot start until the price
@@ -260,15 +576,15 @@ invalidates the run.
 
 | Parameter | Value |
 |---|---|
-| Universe | point-in-time NIFTY500 |
-| Overnight window | after 15:30 IST on t−1, or before 09:00 IST on t |
+| Universe | point-in-time NIFTY500. **v2:** NSE's NIFTY500 list frozen on 2026-10-18, EQ series only, minus TRENT/CUB/HEGAM/DUMMYHEG (491 symbols); only these are scored (Amendment 1). |
+| Overnight window | after 15:30 IST on t−1, or before 09:00 IST on t. **v2:** also any time on a non-session date (weekend, exchange holiday); weekend-dated bars are never sessions. |
 | Initial reaction | `close(t−1) → open(t)` — not tradable |
 | Drift | `open(t) → close(t)` — the tradable leg |
-| Dedup | same symbol, same day, Damerau–Levenshtein similarity > 0.6 → keep earliest |
-| Category exclusions | **NOT YET FROZEN** — must be decided against the full 105–122 value `desc` distribution, not a single month's top-12 |
-| Headline-text exclusions | **NOT YET FROZEN** — `config.HEADLINE_EXCLUSIONS`. Matched on the text, so a row reading "… Copy of Newspaper Publication" is dropped whatever `desc` NSE assigned it. Caught 0 extra rows on 2026-08-07; a guard against vendor-category drift, not a present leak. |
+| Dedup | ~~same symbol, same day, Damerau–Levenshtein similarity > 0.6 → keep earliest~~ **v2:** same symbol, IST day and category; identical filing text; different attachment sizes are different filings → keep earliest |
+| Category exclusions | **v2: FROZEN** — Trading Window, Copy of Newspaper Publication, Disclosure under SEBI Takeover Regulations. (v1: not yet frozen.) |
+| Headline-text exclusions | **v2: FROZEN** — `config.HEADLINE_EXCLUSIONS` ("copy of newspaper publication"). (v1: not yet frozen.) Matched on the text, so a row reading "… Copy of Newspaper Publication" is dropped whatever `desc` NSE assigned it. Caught 0 extra rows on 2026-08-07; a guard against vendor-category drift, not a present leak. |
 | Score mapping | YES → +1, UNKNOWN → 0, NO → −1 |
-| Prompt | the paper's, verbatim — **transcribed 2026-08-10** from Section 5, p.5. Hash `1cc1a88738863a44`. |
+| Prompt | the paper's, verbatim — **transcribed 2026-08-10** from Section 5, p.5. Hash `1cc1a88738863a44`. **v2:** this is the headline arm; the PDF arm's prompt is `55503e79581ae655` (Amendment 1). Both at temperature 0, on `gemini-3.5-flash-lite` with a served-model check on every call. |
 | Liquidity buckets | 5, within-date quintiles by 20-day ADV. **Orientation: 1 = LEAST liquid … 5 = MOST liquid.** |
 | ADV measure | **rupee turnover** (`close × volume`), 20 sessions, `min_periods` = the full window |
 | Corporate-action guard | `abs(init_ret) > 0.20` → null `init_ret` **and** `prev_close`; retain `open`, `close`, `drift_ret` |
@@ -344,6 +660,21 @@ never 1..k for k < 5. Assigning 1..4 would file a mid-cap under "bucket 1 =
 most illiquid", and bucket 1 is the cell this document reads its negative
 verdict off.
 
+## Observed pilot behaviour (2026-09-27 data audit, 26,585 records, no returns read)
+
+From `catalan/audit/output/`, and measured before Amendment 1 was written:
+
+| Statistic | Value |
+|---|---|
+| Records, 2026-08-07 → 2026-09-25 | 26,585; 2,370 symbols; 113 categories |
+| Inside PIT NIFTY500 | 26.6% |
+| Label-only headlines (text shared by ≥ 5 companies) | 51.9% |
+| Strict duplicates | 3.1% |
+| Dropped by the v1 dedup rule | 13.3% (63% of those differ in category from their keeper) |
+| Verdict split (first real verdict) | 47.5% NO, 33.7% UNKNOWN, 18.6% YES |
+| Re-scored headlines that changed verdict at temperature 1.0 | 42% (566 / 1,334) |
+| Overnight share (after 15:30 or before 09:00) | 68.5% |
+
 ## Observed corpus behaviour (2026-08-10, n=225, Haiku 4.5)
 
 Recorded here because it was measured *before* thresholds were set, and it
@@ -364,6 +695,14 @@ was peak results season, but if it persists the corpus projections (~500k rows
 2019→2026) are overstated.
 
 ## Open items blocking finalization
+
+> **Status under v2 (2026-10-18):**
+> - Item 3 is **closed** by Amendment 1: exclusions are frozen.
+> - Item 7 is **closed**: prices are backfilled.
+> - Item 4 no longer blocks the primary endpoint: long-only needs no short
+>   filter. It still blocks the long-short secondary.
+> - Item 1 remains open. It matters only for the historical arm; the forward
+>   arm post-dates every candidate model's training data.
 
 1. Verify documented training cutoffs for Haiku 4.5 / Sonnet 5 / Opus 5
 2. ~~Transcribe the paper's prompt verbatim~~ — done 2026-08-10

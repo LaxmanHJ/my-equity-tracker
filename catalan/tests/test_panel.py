@@ -355,6 +355,21 @@ def test_a_thin_date_is_rejected_as_a_phantom_session(db):
         (phantom.isoformat(),)).fetchone()["c"] == 0
 
 
+def test_a_full_breadth_weekend_session_is_not_a_session(db):
+    """Amendment 1 (D-S6): the one-hour Diwali Muhurat session (2026-11-08 is a
+    Sunday) trades nearly everything, so the breadth floor alone admits it.
+    Weekend-dated bars are never sessions; attribution rolls to Monday."""
+    muhurat = date(2026, 3, 22)            # a Sunday, every symbol trades
+    rows = _clean_rows()
+    rows += [_bar(sym, muhurat, close=100.0) for sym in SYMBOLS]
+
+    report = _build(db, rows)
+    assert (muhurat.isoformat(), len(SYMBOLS)) in report.sessions_rejected
+    assert db.execute(
+        "SELECT COUNT(*) c FROM panel WHERE date = ?",
+        (muhurat.isoformat(),)).fetchone()["c"] == 0
+
+
 def test_duplicate_bars_are_dropped_not_upserted_over(db):
     """price_history duplicates must be counted, not silently collapsed by the PK."""
     rows = _clean_rows()

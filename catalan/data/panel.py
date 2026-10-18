@@ -75,8 +75,19 @@ DROP_REASONS = ("phantom_session", "duplicate_bar", "no_usable_price",
 SUPPRESS_REASONS = ("corporate_action", "no_prev_close", "adv_short")
 
 
-def classify_session(announced_at: datetime) -> str:
+def classify_session(announced_at: datetime,
+                     trading_days: Optional[Sequence[date]] = None) -> str:
     """OVERNIGHT if the news cannot have been traded before the next open.
+
+    **A filing on a date that is not an NSE session is OVERNIGHT, whatever the
+    clock says** (Amendment 1, verifier D1). Nothing trades on a Saturday at
+    11:00, so that news reaches the market at the next open like any evening
+    filing. Without this rule ~40% of weekend and holiday filings (246 of 601
+    in the pilot) were classified intraday and silently dropped.
+
+    ``trading_days`` (a sorted session list, as from ``trading_sessions``)
+    decides what a session is. Without it, Monday-Friday is assumed. The
+    analysis always passes it, so exchange holidays count as non-sessions.
 
     Overnight = after MARKET_CLOSE (15:30 IST) on t-1, or before NEWS_CUTOFF
     (09:00 IST) on t. The 09:00 cutoff leaves 15 minutes before the 09:15
@@ -87,6 +98,15 @@ def classify_session(announced_at: datetime) -> str:
     VWAP, so news at the bell is inside the session); exactly 09:00:00 is
     already too late to count as overnight.
     """
+    day = announced_at.date()
+    if trading_days is not None:
+        i = bisect_left(trading_days, day)
+        is_session = i < len(trading_days) and trading_days[i] == day
+    else:
+        is_session = day.weekday() < 5
+    if not is_session:
+        return OVERNIGHT
+
     t = announced_at.time()
     if t > MARKET_CLOSE:
         return OVERNIGHT
@@ -304,8 +324,13 @@ def _session_grid(turso, frm: date, to: date) -> Tuple[List[date], List[Tuple[st
     floor = max(PANEL_MIN_SESSION_BREADTH_ABS,
                 PANEL_MIN_SESSION_BREADTH_REL * median(breadths))
 
-    sessions = [_as_date(d) for d, n in rows if n >= floor]
-    rejected = [(d, n) for d, n in rows if n < floor]
+    # Weekend-dated bars are never sessions (Amendment 1, verifier D-S6). NSE
+    # occasionally trades on a weekend: the one-hour Diwali Muhurat session
+    # (2026-11-08 is a Sunday), budget-day Saturdays. Admitting one would
+    # attribute Friday evening and Saturday news to an hour-long session.
+    # Attribution rolls to the next weekday session instead.
+    sessions = [_as_date(d) for d, n in rows if n >= floor and _as_date(d).weekday() < 5]
+    rejected = [(d, n) for d, n in rows if n < floor or _as_date(d).weekday() >= 5]
 
     if not sessions:
         raise ValueError(

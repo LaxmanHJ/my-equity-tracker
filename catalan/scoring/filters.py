@@ -37,7 +37,7 @@ except ImportError:                     # pragma: no cover - depends on env
 
     def _similarity(a: str, b: str) -> float:
         # Not Damerau-Levenshtein: SequenceMatcher scores differently, so the
-        # 0.6 threshold is not exactly the paper's under this backend. Install
+        # threshold does not mean exactly the same thing under this backend. Install
         # rapidfuzz (it is in requirements.txt) for the real thing; this exists
         # so the pipeline degrades rather than dies.
         return SequenceMatcher(None, a, b).ratio()
@@ -79,6 +79,42 @@ def is_excluded(row: Dict) -> bool:
             or is_excluded_headline(row.get("headline")))
 
 
+# NSE headlines open with the filer's name in whatever form the filer typed it,
+# then a fixed stem. Both are stripped before comparing, or the shared template
+# dominates the similarity and unrelated filings look alike (the 2026-09-27 data
+# audit measured exactly that under the old whole-headline rule).
+_FILER_RE = re.compile(r"^.{0,160}?\s+(?=has\s+(?:informed|submitted)\b)", re.IGNORECASE | re.DOTALL)
+_STEM_RE = re.compile(
+    r"^has\s+(?:informed|submitted)(?:\s+to)?(?:\s+the\s+exchange)?[\s,]*(?:about|regarding|that)?\s*",
+    re.IGNORECASE)
+_NO_SIZE = {"", "-", "0 bytes"}
+
+
+def filing_text(headline: str) -> str:
+    """The part of a headline that describes THIS filing: no filer name, no stem."""
+    text = _FILER_RE.sub("", headline or "", count=1)
+    return normalise_headline(_STEM_RE.sub("", text, count=1))
+
+
+def _doc_size(row: Dict):
+    """NSE's reported attachment size, or None when it tells us nothing."""
+    size = (row.get("attachment_size") or "").strip().lower()
+    return None if size in _NO_SIZE else size
+
+
+def _same_filing(a: Tuple[str, str, object], b: Tuple[str, str, object], thresh: float) -> bool:
+    """(filing_text, category, size) pairs. Different reported sizes mean
+    different documents, whatever the text says — that is what separates two
+    genuine "Schedule of meet" filings on one day from one filing posted twice."""
+    text_a, cat_a, size_a = a
+    text_b, cat_b, size_b = b
+    if cat_a != cat_b:
+        return False
+    if size_a is not None and size_b is not None and size_a != size_b:
+        return False
+    return _similarity(text_a, text_b) >= thresh
+
+
 def dedup_key(symbol: str, announced_at: str) -> Tuple[str, str]:
     """Dedup is scoped to the same symbol on the same day, per the paper."""
     return (symbol, (announced_at or "")[:10])
@@ -102,6 +138,11 @@ def drop_near_duplicates(
 ) -> Tuple[List[Dict], List[Dict]]:
     """Split ``rows`` into (kept, dropped) on same-symbol same-day similarity.
 
+    Two filings are the same when they share symbol, IST day and category, the
+    filing text (``filing_text``: no filer name, no "has informed the Exchange"
+    stem) is at least ``DEDUP_SIMILARITY`` similar (1.0 = identical), and NSE
+    does not report different attachment sizes for them.
+
     The earliest announcement in a near-duplicate cluster is kept — it is the
     one that carried the information first, and keeping a later restatement
     instead would attribute the reaction to the wrong timestamp.
@@ -119,8 +160,9 @@ def drop_near_duplicates(
     scoring run readmitted 151 rows this way.
 
     ``rows`` and ``context`` need ``symbol``, ``announced_at`` and ``headline``;
-    ``id`` is used to break timestamp ties. Returns dicts from the input
-    untouched.
+    ``category`` and ``attachment_size`` are used when present (a missing size
+    is "unknown", never "different"); ``id`` breaks timestamp ties. Returns
+    dicts from the input untouched.
     """
     thresh = DEDUP_SIMILARITY if threshold is None else threshold
 
@@ -136,14 +178,14 @@ def drop_near_duplicates(
 
     for bucket in tagged.values():
         bucket.sort(key=lambda pair: _order_key(pair[0]))
-        survivors: List[str] = []
+        survivors: List[Tuple[str, str, object]] = []
         for row, is_candidate in bucket:
-            norm = normalise_headline(row["headline"])
-            if any(_similarity(norm, seen) > thresh for seen in survivors):
+            sig = (filing_text(row["headline"]), row.get("category"), _doc_size(row))
+            if any(_same_filing(sig, seen, thresh) for seen in survivors):
                 if is_candidate:
                     dropped.append(row)
             else:
-                survivors.append(norm)
+                survivors.append(sig)
                 if is_candidate:
                     kept.append(row)
 

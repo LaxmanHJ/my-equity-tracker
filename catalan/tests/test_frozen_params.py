@@ -35,6 +35,10 @@ from catalan.scoring import prompt
 # study measures mid-run and leave no trace: score rows carry the prompt hash,
 # so mixed-prompt data would look like one clean arm rather than two.
 EXPECTED_PROMPT_HASH = "1cc1a88738863a44"
+# The PDF arm (2026-09 amendment): the paper's prompt with "headline" →
+# "announcement" and the first PDF pages appended. See prompt.PDF_PROMPT_TEMPLATE.
+EXPECTED_PDF_PROMPT_HASH = "55503e79581ae655"
+DECLARED_ARM_HASHES = {EXPECTED_PROMPT_HASH, EXPECTED_PDF_PROMPT_HASH}
 
 
 def test_prompt_hash_is_pinned_to_the_transcribed_paper_text():
@@ -46,6 +50,15 @@ def test_prompt_hash_is_pinned_to_the_transcribed_paper_text():
         "and every score row already collected is stamped with the old hash. "
         "If the change is deliberate, it is a NEW ARM: leave the old rows "
         "alone (scores are append-only) and record the new hash here."
+    )
+
+
+def test_pdf_arm_prompt_hash_is_pinned():
+    got = prompt.prompt_hash(prompt.PDF_PROMPT_TEMPLATE)
+    assert got == EXPECTED_PDF_PROMPT_HASH, (
+        f"the PDF-arm prompt now hashes to {got}, not {EXPECTED_PDF_PROMPT_HASH}. "
+        "It is the PDF arm's instrument, declared in the 2026-09 amendment. A "
+        "change is a new arm: declare it, never overwrite this pin to go green."
     )
 
 
@@ -69,10 +82,10 @@ def test_scored_rows_in_the_archive_carry_the_pinned_hash():
     hashes = {r[0] for r in rows}
     if not hashes:
         pytest.skip("nothing scored yet in this checkout")
-    assert hashes == {EXPECTED_PROMPT_HASH}, (
+    assert hashes <= DECLARED_ARM_HASHES, (
         f"the local store holds scores under prompt hashes {sorted(hashes)}, but "
-        f"only {EXPECTED_PROMPT_HASH} is declared. Either an undeclared arm was "
-        "run, or the pin above was updated without declaring the new arm."
+        f"only {sorted(DECLARED_ARM_HASHES)} are declared. Either an undeclared arm "
+        "was run, or a pin above was updated without declaring the new arm."
     )
 
 
@@ -81,7 +94,16 @@ def test_scored_rows_in_the_archive_carry_the_pinned_hash():
 # Deliberately NOT auto-derived from config.__dict__: that would silently absorb
 # any new constant, which is the failure this gate exists to catch.
 FROZEN = {
-    "STUDY_VERSION": "catalan-v1",
+    # v2: the 2026-09 amendment (long-only, PDF arm, dedup rule, temperature).
+    # v1's forward log (2026-08-07 on) is the declared pilot.
+    "STUDY_VERSION": "catalan-v2",
+    "STUDY_CLOCK_START": "2026-10-26",
+    # The instrument's model and the study universe (Amendment 1, 2026-10-18).
+    "PRIMARY_MODEL": "gemini-3.5-flash-lite",
+    "UNIVERSE_FILE": "data/universe/nifty500_2026-10-18.csv",
+    "UNIVERSE_FILE_SHA256": "2959bf206239284e145f7aecc65095b18d11556d2642323a70f2d26efe0f5cb3",
+    "UNIVERSE_SERIES": ["EQ"],
+    "UNIVERSE_EXCLUDED": ["DUMMYHEG", "TRENT", "CUB", "HEGAM"],
     "UNIVERSE_INDEX": "NIFTY500",
     # Session clock
     "MARKET_CLOSE": "15:30:00",
@@ -89,9 +111,11 @@ FROZEN = {
     "MARKET_OPEN": "09:15:00",
     # Corpus
     "HISTORY_START": "2019-01-01",
-    "DEDUP_SIMILARITY": 0.6,
+    "DEDUP_SIMILARITY": 1.0,
     # Scoring
     "SCORE_VALUES": {"YES": 1, "UNKNOWN": 0, "NO": -1},
+    "TEMPERATURE": 0.0,
+    "TEMPERATURE_MODEL_PREFIXES": ["claude-haiku-4-5", "gemini-3.5-flash-lite"],
     # Liquidity
     "LIQUIDITY_BUCKETS": 5,
     "ADV_WINDOW_DAYS": 20,
@@ -114,9 +138,26 @@ FROZEN = {
     "SEBI_TURNOVER_RATE": 0.000001,
     "GST_RATE": 0.18,
     "REBALANCE_FRACTIONS": [1.0, 0.25],
+    "HEDGE_COST_BPS": 1.0,
+    "POSITION_NOTIONAL_INR": 100_000,
+    "USABLE_SESSION_MIN_COVERAGE": 0.80,
+    "SPREAD_ESTIMATOR": "abdi_ranaldo_2017",
+    "SPREAD_WINDOW_SESSIONS": 20,
+    "SPREAD_MIN_PAIRS": 15,
+    # Frozen by Amendment 1 (catalan-v2); open item 3 closed.
+    "CATEGORY_EXCLUSIONS_FROZEN": True,
+    "CATEGORY_EXCLUSIONS": ["Trading Window", "Copy of Newspaper Publication",
+                            "Disclosure under SEBI Takeover Regulations"],
+    "HEADLINE_EXCLUSIONS": ["copy of newspaper publication"],
+    # PDF arm — which filings carry attachment text, and how much of it
+    "PDF_PAGE_WINDOW": 3,
+    "PDF_MIN_PAGE_CHARS": 50,
+    "PDF_GARBLE_MAX": 0.15,
+    "PDF_GARBLE_ALLOWED": "\u0900-\u097F₹–—’‘“”•●▪…©®°±×",
+    "PDF_MAX_CHARS": 30_000,
 }
 
-EXPECTED_PARAM_HASH = "6abcc018abcce2fa"
+EXPECTED_PARAM_HASH = "20fbff34ee4da733"   # catalan-v2 amendment set, 2026-10-18
 
 
 def _actual(name: str):
@@ -165,7 +206,9 @@ def test_the_frozen_parameter_SET_has_not_grown_or_shrunk():
 # construction, so it must be declared frozen. Without this sweep the gate is
 # only as complete as whoever last remembered to update FROZEN.
 FROZEN_PREFIXES = ("PANEL_", "ADV_", "LIQUIDITY_", "BROKERAGE_", "STT_",
-                   "EXCHANGE_TXN_", "STAMP_DUTY_", "SEBI_", "GST_")
+                   "EXCHANGE_TXN_", "STAMP_DUTY_", "SEBI_", "GST_", "PDF_",
+                   "DEDUP_", "TEMPERATURE", "STUDY_", "HEDGE_", "CATEGORY_", "HEADLINE_",
+                   "UNIVERSE_", "POSITION_", "SPREAD_", "PRIMARY_", "USABLE_")
 
 # Declared exemptions, each with a reason. An exemption is a claim that the
 # constant does not change what gets measured — not a way to silence the gate.
@@ -284,3 +327,70 @@ def test_the_stopping_rule_is_declared():
                    "underpowered — no result",
                    "A near-miss is a miss"):
         assert needle in text, f"the stopping rule no longer states: {needle!r}"
+
+
+# ── G2 extension: the CODE that implements frozen v2 rules (verifier, 2026-10-18)
+# The values above pin thresholds; these pin behaviour. A change to the filer /
+# stem stripping (dedup) or to the extracted-text format (the PDF arm's input)
+# changes what is measured even when no constant moves.
+
+GOLDEN_HEADLINES = [
+    "Centum Electronics Limited has informed the Exchange about Schedule of meet",
+    "The Bombay Burmah Trading Corporation Limited has submitted the Exchange a copy Srutinizers report of  Annual General Meeting held on August 13, 2026. Further, the company has informed the Exchange regarding voting results.",
+    "TGB Banquets And Hotels Limited has informed the Exchange about General Updates",
+    "TARC Limited has informed the Exchange regarding Outcome of Board Meeting held on August 11, 2026.",
+    "Arrow Greentech Limited has informed the Exchange regarding 'Presentation on Business Performance'.",
+    "Laxmi Dental Limited has informed the Exchange regarding a press release dated August 11, 2026, titled \"Intimation of Press Release\".",
+    "Pursuant to Regulation 30 of the SEBI (Listing Obligations and Disclosure Requirements) Regulations, 2015, Bata India Limited has informed about changes in SMP",
+    "Vedant Fashions Limited has informed the Exchange that Record date for the purpose of Dividend  is 21-Sep-2026.",
+    "Re-appointment of Mr. Nikhil Khandelwal as a Managing Director of the Company for a further period of three years w.e.f September 01, 2026, subject to the approval of the members in the ensuing AGM.",
+    "JSW Steel Limited has informed the Exchange about Resignation of Director/KMP/SMP",
+    "Adani Power Limited has informed the Exchange about Credit Rating",
+    "Zen Technologies Limited has informed the Exchange regarding Exercise of 1900  Options.",
+    "Disclosure under Regulation 32 of the SEBI (Listing Obligations and Disclosure Requirements) Regulations, 2015 - Monitoring Agency Report for the quarter ended June 30, 2026.",
+    "Texmaco Rail & Engineering Limited has informed the Exchange about receipt of Order worth Rs. 27.82 Crores (incl. taxes) from Hindalco Industries Limited",
+    "Neogen Chemicals Limited has informed the Exchange regarding allotment of 2660753 securities pursuant to Qualified Institution Placement at its meeting held on September 16, 2026",
+    "Significant increase in volume has been observed in Gandhi Special Tubes Limited. The Exchange, in order to ensure that investors have latest relevant information about the company and to inform the market place so that the interest of the investors is safeguarded, had written to the company. Gandhi Special Tubes Limited has submitted their response.",
+    "PNB GILTS LTD. has informed the Exchange regarding the Trading Window closure pursuant to SEBI (Prohibition of Insider Trading) Regulations, 2015",
+    "Chemcon Speciality Chemicals Limited has informed the Exchange regarding ''.",
+    "Board approves demerger of financial services business",
+]
+EXPECTED_FILING_TEXT_HASH = "2ba995f82b5774f8"
+EXPECTED_EXTRACT_HASH = "9643356483b5f040"
+
+
+def _filing_text_hash() -> str:
+    from catalan.scoring.filters import filing_text
+    return hashlib.sha256("\n".join(filing_text(h) for h in GOLDEN_HEADLINES).encode()).hexdigest()[:16]
+
+
+def _extract_hash() -> str:
+    import fitz
+    from catalan.data.pdf_text import extract
+    doc = fitz.open()
+    for body in ("Covering letter. Dear Sir, pursuant to Regulation 30 we enclose the results. " * 3,
+                 "Revenue grew 23.5% to Rs 2,828 crore; EBITDA margin rose 140 bps. " * 3,
+                 "Board approved a dividend of Rs 5 per share; record date 21-Sep-2026. " * 3,
+                 "PAGE FOUR MUST NOT APPEAR " * 5):
+        doc.new_page().insert_textbox(fitz.Rect(40, 40, 560, 800), body, fontsize=9)
+    res = extract(doc.tobytes())
+    doc.close()
+    blob = json.dumps({k: res[k] for k in ("status", "total_pages", "page_kinds", "text", "truncated")},
+                      sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def test_dedup_filing_text_behaviour_is_pinned():
+    got = _filing_text_hash()
+    assert got == EXPECTED_FILING_TEXT_HASH, (
+        f"filters.filing_text now produces {got}, not {EXPECTED_FILING_TEXT_HASH}. The v2 dedup "
+        "rule compares filing text, so this changes which filings enter the corpus: a frozen-"
+        "parameter change under Amendment 1. Do not re-pin without declaring it.")
+
+
+def test_pdf_extraction_output_is_pinned():
+    got = _extract_hash()
+    assert got == EXPECTED_EXTRACT_HASH, (
+        f"pdf_text.extract now produces {got}, not {EXPECTED_EXTRACT_HASH}. Its text is the PDF "
+        "arm's input: a change here (window, page markers, whitespace, readability rules, or a "
+        "PyMuPDF upgrade) changes the instrument. Do not re-pin without declaring it.")

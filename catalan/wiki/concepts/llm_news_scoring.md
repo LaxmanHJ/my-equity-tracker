@@ -101,6 +101,30 @@ oversight:
 they are unrecoverable if NSE rotates its archive. That keeps the PDF experiment
 available as a declared arm later without committing to it now.
 
+### Measured at scale — data audit, 2026-09-27 (26,585 records)
+
+Source: `catalan/audit/output/data_audit_report.md`. No returns were read.
+
+- **52% of headlines are label-only.** With the company name removed, the text is identical
+  across ≥5 companies: "…about Credit Rating" (291/291), "…the financial results for the period
+  ended Jun 30" (969). The model sees nothing company-specific, yet still gives a direction to 54%
+  of them. **40% of all YES/NO verdicts were given on label-only headlines.**
+- **44% of directional verdicts (a lower bound) have a rationale that says the filing is
+  "routine / neutral / no material information"**, and still vote. Mostly NO: the model returns
+  NO on 71% of shareholder-meeting filings.
+- **The instrument is noisy at default temperature.** The scorer sets no temperature, so Haiku
+  runs at 1.0. 1,334 headlines were accidentally scored ~15 times each: 42% changed verdict, and
+  222 got both YES and NO for identical input.
+- **Correction to the "first evidence" above:** the 87% of dispersion that survives *within* a
+  category is not clean evidence of information. Much of it can be sampling noise. That test
+  needs temperature 0, or repeated scoring, before it can be read.
+- **Results and credit ratings** are the worst headline inputs (64% / 83% label-only) and, per
+  the PDF sample, among the best document inputs. So "drop label-only headlines" is right for the
+  headline arm and wrong for a PDF arm.
+- **The paper's dedup rule does not transfer.** At 0.6 whole-headline similarity, NSE's shared
+  template makes unrelated filings look alike: 63% of drops differ in category from their keeper,
+  and 18 of 22 hand-read drops were distinct events.
+
 ## India adaptations
 
 The US definitions do not transfer unmodified.
@@ -127,6 +151,12 @@ Implemented in `catalan/`:
   `(model_id, prompt_hash, effort, run_id)`; re-scoring appends, never overwrites.
 - `analysis/costs.py`, `analysis/contamination.py` — the two mitigations above.
 - `PREREGISTRATION.md` — C0 comprehension / C1 gross / **C2 net = ship gate**.
+- `data/pdf_text.py` — the PDF arm's input (built 2026-09-27, not yet wired into
+  the pipeline): first 3 pages, a readability check (scans and broken font
+  maps; Devanagari allowed), all-or-nothing fallback to headline-only, and the
+  text archived to `forward_log/pdf_text/`.
+- `audit/data_audit.py` — read-only, reproducible audit of the collected corpus
+  (2026-09-27). See the section above.
 
 **Open:** the prompt is not yet transcribed from the paper; the `desc` exclusion
 list is not yet frozen; the T2T/ASM/GSM source for the shortability flag is not

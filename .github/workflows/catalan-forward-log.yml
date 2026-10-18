@@ -16,18 +16,22 @@
 # predicts was known. The pre-registration's contamination argument rests on it.
 #
 # Required repository secret:
-#   ANTHROPIC_API_KEY   — scoring. Without it, set SKIP_SCORE=true and the run
-#                         still collects (headlines are the irreplaceable part;
-#                         scoring can always be backfilled from them later).
+#   GEMINI_API_KEY      — scoring (catalan-v2 scores with gemini-3.5-flash-lite).
+#                         Without it the run still collects and extracts PDF
+#                         text; scoring is skipped and backfilled later from the
+#                         stored headlines.
 # Optional:
-#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN — only needed once the returns panel
-#                         lands (Phase 2). Collection does not read Turso.
+#   ANTHROPIC_API_KEY   — only if CATALAN_MODEL is set to a Claude model.
+# Optional:
+#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN — read-only. The buy list uses them for
+#                         the point-in-time NIFTY500 roster; without them the
+#                         list says so and collection is unaffected.
 
 name: CATALAN forward log
 
 on:
   schedule:
-    # 03:45 UTC = 09:15 IST, EVERY day. Collects the PREVIOUS calendar day, so a
+    # 01:07 UTC = 06:37 IST, EVERY day. Collects the PREVIOUS calendar day, so a
     # Tuesday run captures Monday's post-close filings and a Saturday run
     # captures Friday's. NSE announcements keep landing until ~23:59 IST
     # (observed: the latest row on 2026-08-07 was 23:57), so anything earlier
@@ -41,7 +45,13 @@ on:
     # biased subset (news released when the market cannot react), which is
     # exactly the population a news-reaction study must not silently drop.
     # `attribution_date()` already maps them onto the next trading day's open.
-    - cron: "45 3 * * *"
+    #
+    # WHY 01:07 UTC (moved from 03:45 on 2026-09-29): scheduled runs have landed
+    # 4-5 hours late (08:00-09:00 UTC, i.e. after the 09:15 IST open), and
+    # GitHub delays top-of-hour schedules most. An earlier, off-the-hour start
+    # gives the day's buy list a chance to exist before the open. The previous
+    # IST day is complete by 18:30 UTC, so starting earlier truncates nothing.
+    - cron: "7 1 * * *"
   workflow_dispatch:
     inputs:
       date:
@@ -89,8 +99,9 @@ jobs:
       - name: Install CATALAN dependencies
         run: python -m pip install -r catalan/requirements.txt
 
-      - name: Run pipeline (rebuild → collect → score → archive)
+      - name: Run pipeline (rebuild → collect → PDF text → score both arms → archive → buy list)
         env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -99,11 +110,13 @@ jobs:
           if [ -n "${{ github.event.inputs.date }}" ]; then
             ARGS="--date ${{ github.event.inputs.date }}"
           fi
-          if [ "${{ github.event.inputs.skip_score }}" = "true" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
+          if [ "${{ github.event.inputs.skip_score }}" = "true" ] || [ -z "$GEMINI_API_KEY" ]; then
             echo "::notice::scoring skipped — headlines still collected"
             ARGS="$ARGS --skip-score"
           fi
-          python -m catalan.pipeline $ARGS | tee "$RUNNER_TEMP/pipeline_result.json"
+          # The result goes to its own file: anything a library prints to
+          # stdout must never corrupt the JSON the health checks parse.
+          python -m catalan.pipeline $ARGS --result-file "$RUNNER_TEMP/pipeline_result.json"
 
       - name: Summarise
         if: always()
@@ -132,25 +145,37 @@ jobs:
           import json, os, pathlib
           p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pipeline_result.json"
           try:
-              score = json.loads(p.read_text()).get("score") or {}
+              result = json.loads(p.read_text())
           except Exception:
               print("::warning::could not read pipeline result to check scoring health")
               raise SystemExit(0)
-          if score.get("skipped"):
-              raise SystemExit(0)
-          failed, attempted = score.get("api_failed", 0), score.get("pending", 0)
-          if failed:
-              pct = 100.0 * failed / attempted if attempted else 100.0
-              print(f"::error::{failed}/{attempted} ({pct:.1f}%) scoring API calls FAILED. "
-                    "Headlines were still collected and are safe; these announcements "
-                    "remain pending and will be retried. Check the Anthropic credit "
-                    "balance first — that was the cause on 2026-08-14/17.")
-          if score.get("parse_missed"):
-              print(f"::warning::{score['parse_missed']} responses carried no readable "
-                    "verdict. Try `--reparse` before re-scoring; it costs nothing.")
+          for key, arm in (("score", "headline arm"), ("score_pdf", "PDF arm")):
+              score = result.get(key) or {}
+              if score.get("skipped"):
+                  continue
+              failed, attempted = score.get("api_failed", 0), score.get("pending", 0)
+              if failed:
+                  pct = 100.0 * failed / attempted if attempted else 100.0
+                  print(f"::error::{arm}: {failed}/{attempted} ({pct:.1f}%) scoring API calls "
+                        "FAILED. Headlines were still collected and are safe; these "
+                        "announcements remain pending and will be retried. Check the "
+                        "Anthropic credit balance first — the cause on 2026-08-14/17 and "
+                        "again from 2026-09-11.")
+              if score.get("parse_missed"):
+                  print(f"::warning::{arm}: {score['parse_missed']} responses carried no "
+                        "readable verdict. Try `--reparse` before re-scoring; it costs nothing.")
+              if score.get("quota_deferred"):
+                  print(f"::warning::{arm}: free-tier daily quota spent; "
+                        f"{score['quota_deferred']} announcements deferred to the next run.")
+          pdf = result.get("pdf_text") or {}
+          if pdf.get("fetch_failed"):
+              print(f"::warning::{pdf['fetch_failed']} PDF downloads failed; they stay "
+                    "pending and are retried on the next run.")
           PY
 
       - name: Commit the archive
+        # Collected data must be committed even if an earlier check step failed.
+        if: ${{ !cancelled() }}
         run: |
           git config user.name  "catalan-bot"
           git config user.email "catalan-bot@users.noreply.github.com"
@@ -210,4 +235,47 @@ jobs:
           print(json.dumps(r, indent=2))
           if fetched == 0:
               sys.exit("collector fetched 0 rows for %s — investigate" % r.get("date"))
+          PY
+
+      # AFTER the commit, so a red run can never cost collected data. Until
+      # 2026-09-29 a scoring outage only produced an annotation on a green run,
+      # and the 2026-09-11 credit outage went unnoticed for 16 days. A red run
+      # triggers GitHub's failure email.
+      - name: Fail the run if scoring failed
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+          p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pipeline_result.json"
+          try:
+              result = json.loads(p.read_text())
+          except Exception:
+              sys.exit("pipeline produced no result — investigate")
+          errors = {k: v["error"] for k, v in result.items() if isinstance(v, dict) and "error" in v}
+          if errors:
+              sys.exit(f"pipeline stages failed: {errors}. Headlines are committed; fix and re-run.")
+          pdf = result.get("pdf_text") or {}
+          if pdf.get("extract_error"):
+              sys.exit(f"{pdf['extract_error']} attachments crashed the PDF extractor — a bug, not "
+                       "a document fact. Data is committed; investigate.")
+          # Ten or more, so a quiet day holding a few permanently dead links is not an alarm.
+          if pdf.get("pending", 0) >= 10 and pdf.get("fetch_failed", 0) >= pdf.get("pending", 0):
+              sys.exit("every PDF download failed this run — the PDF arm (the primary endpoint) "
+                       "is silently becoming 100% headline fallback. Data is committed; investigate.")
+          for k in ("score_pdf", "score"):
+              sc = result.get(k) or {}
+              attempted = sc.get("pending", 0) - sc.get("quota_deferred", 0)
+              if attempted >= 10 and sc.get("parse_missed", 0) > 0.2 * attempted:
+                  # A sudden wave of unreadable answers is how a silent model
+                  # change under the same name would first show (verifier G1).
+                  sys.exit(f"{k}: {sc['parse_missed']}/{attempted} answers had no readable verdict. "
+                           "Data is committed; check for a silent model change.")
+          failed = sum((result.get(k) or {}).get("api_failed", 0) for k in ("score", "score_pdf"))
+          attempted = sum((result.get(k) or {}).get("pending", 0) - (result.get(k) or {}).get("quota_deferred", 0)
+                          for k in ("score", "score_pdf"))
+          # One stubborn filing failing every day is not an outage; five or more
+          # failures, or a tenth of the attempts, is.
+          if failed >= 5 or (attempted and failed > 0.1 * attempted):
+              sys.exit(f"{failed} scoring API calls failed (see the annotations). Data is committed; "
+                       "top up credits and re-run, or let tomorrow's run retry them.")
           PY

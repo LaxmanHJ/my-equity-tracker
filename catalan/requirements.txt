@@ -23,5 +23,9 @@ statsmodels>=0.14.0,<1.0.0  # firm+date FE regressions, double-clustered SEs
 
 anthropic>=0.40.0          # Message Batches API
 rapidfuzz>=3.6.0           # Damerau-Levenshtein dedup (headline near-duplicates)
+# PDF attachment text. Pinned to the minor version: a different extractor can
+# return different text for the same bytes, and the text is the PDF arm's input.
+# Every pdf_texts row records the exact version it was extracted with.
+pymupdf>=1.26.5,<1.27
 
 pytest>=7.4.0
