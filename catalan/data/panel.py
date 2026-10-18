@@ -54,15 +54,16 @@ INTRADAY = "intraday"     # landed mid-session; the paper's separate (blocked) a
 
 SOURCE = "panel"
 
-# Columns read from Turso. `high` and `low` are fetched but never stored: they
-# exist solely for the flat-bar guard, which needs all four OHLC fields to
-# recognise a RapidAPI-era row that copied one price into every field.
+# Columns read from Turso. `high` and `low` serve the flat-bar guard (which
+# needs all four OHLC fields to recognise a RapidAPI-era row that copied one
+# price into every field) and, from catalan-v2, are also stored: C2's spread
+# estimator (Abdi-Ranaldo, Amendment 1) reads them.
 _PRICE_COLS = ("symbol", "date", "open", "high", "low", "close", "volume")
 
 # Columns written to `panel`. `shortable` is deliberately absent from BOTH the
 # insert and the update list — see _upsert.
 _PANEL_COLS = ("symbol", "date", "prev_close", "open", "close", "init_ret",
-               "drift_ret", "in_universe", "adv_20d", "liquidity_bucket")
+               "drift_ret", "in_universe", "adv_20d", "liquidity_bucket", "high", "low")
 
 # Row-level drop reasons, in the order they are applied. FIRST MATCH WINS and
 # every dropped row is counted exactly once, which is what makes the
@@ -832,6 +833,8 @@ def _upsert(conn: sqlite3.Connection, frame) -> None:
             _i(r["in_universe"]) or 0,
             _f(r["adv_20d"]),
             _i(r["liquidity_bucket"]),
+            _f(r["high"]) if "high" in r else None,
+            _f(r["low"]) if "low" in r else None,
         )
         for _, r in frame.iterrows()
     ]
@@ -839,8 +842,8 @@ def _upsert(conn: sqlite3.Connection, frame) -> None:
     with conn:
         conn.executemany(
             "INSERT INTO panel (symbol, date, prev_close, open, close, init_ret, "
-            "                   drift_ret, in_universe, adv_20d, liquidity_bucket) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "                   drift_ret, in_universe, adv_20d, liquidity_bucket, high, low) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(symbol, date) DO UPDATE SET "
             "  prev_close       = excluded.prev_close, "
             "  open             = excluded.open, "
@@ -849,7 +852,9 @@ def _upsert(conn: sqlite3.Connection, frame) -> None:
             "  drift_ret        = excluded.drift_ret, "
             "  in_universe      = excluded.in_universe, "
             "  adv_20d          = excluded.adv_20d, "
-            "  liquidity_bucket = excluded.liquidity_bucket",
+            "  liquidity_bucket = excluded.liquidity_bucket, "
+            "  high             = excluded.high, "
+            "  low              = excluded.low",
             payload,
         )
 
@@ -873,7 +878,7 @@ def load_panel(start: Union[str, date], end: Union[str, date], *,
     conn = store() if own else conn
     try:
         sql = ("SELECT symbol, date, prev_close, open, close, init_ret, drift_ret, "
-               "in_universe, adv_20d, liquidity_bucket, shortable FROM panel "
+               "in_universe, adv_20d, liquidity_bucket, shortable, high, low FROM panel "
                "WHERE date >= ? AND date <= ?")
         params = [_as_date(start).isoformat(), _as_date(end).isoformat()]
         if in_universe_only:
@@ -883,7 +888,8 @@ def load_panel(start: Union[str, date], end: Union[str, date], *,
         rows = conn.execute(sql, params).fetchall()
         frame = _rows_to_frame(rows, (
             "symbol", "date", "prev_close", "open", "close", "init_ret",
-            "drift_ret", "in_universe", "adv_20d", "liquidity_bucket", "shortable"))
+            "drift_ret", "in_universe", "adv_20d", "liquidity_bucket", "shortable",
+            "high", "low"))
         if len(frame):
             frame["date"] = pd.to_datetime(frame["date"]).dt.date
         return frame

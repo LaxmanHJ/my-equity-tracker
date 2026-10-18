@@ -133,9 +133,10 @@ text is kept unchanged, as the record of what was declared first.
   - A basket stock whose stock-session is not valid is dropped for that day.
   - **An empty YES basket gives e_t = 0 and c_t = 0** (no position, so no cost
     and no hedge). The session still counts toward the 120.
-- **Liquidity bucket.** The within-date quintile of 20-session rupee ADV
-  (`adv_20d`) across that day's valid study-universe stock-sessions (1 = least
-  liquid). It is **recomputed at evaluation over `study_universe()`**. The
+- **Liquidity bucket.** The within-date quintile of rupee ADV over the **20
+  sessions before t** (the panel's `adv_20d` on session t−1, so day t's own
+  volume is never used) across that day's valid study-universe stock-sessions
+  (1 = least liquid; ties broken by symbol order). It is **recomputed at evaluation over `study_universe()`**. The
   panel's stored `in_universe` and `liquidity_bucket` columns come from the
   stale Turso roster and are **not** used. For bucket-level series, the
   benchmark is the bucket's own equal-weighted universe.
@@ -188,8 +189,8 @@ never reported without C2 beside it.
      - K = 5 trials (the five liquidity-bucket cells)
      - cross-trial Sharpe variance = the sample variance (ddof = 1) of the
        five bucket-level net daily Sharpes
-     - skewness and **non-excess** kurtosis of the pooled n_t, as in the
-       Bailey–López de Prado formula
+     - skewness and **non-excess** kurtosis of the pooled n_t (plain sample
+       moments, no bias correction), as in the Bailey–López de Prado formula
      - T = the number of usable counted sessions
      - all Sharpes daily and not annualized inside the formula
 - **Bucket-1 rule.** If C2 passes on the pooled series, recompute it with

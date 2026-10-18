@@ -36,6 +36,9 @@ _MIGRATIONS = (
     # NULL on every row scored before catalan-v2 (2026-10-18): those ran at the model
     # default (1.0 for Haiku), because no temperature was sent.
     ("scores", "temperature", "REAL"),
+    # catalan-v2: the panel keeps each bar's high and low for C2's spread estimate.
+    ("panel", "high", "REAL"),
+    ("panel", "low", "REAL"),
 )
 
 

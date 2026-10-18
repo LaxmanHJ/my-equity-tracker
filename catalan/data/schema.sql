@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS panel (
     adv_20d          REAL,
     liquidity_bucket INTEGER,
     shortable        INTEGER,         -- 0 when T2T / ASM / GSM bans intraday shorts
+    high             REAL,            -- for C2's Abdi-Ranaldo spread (catalan-v2)
+    low              REAL,
     PRIMARY KEY (symbol, date)
 );
 
