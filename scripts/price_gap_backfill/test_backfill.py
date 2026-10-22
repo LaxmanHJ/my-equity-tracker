@@ -95,3 +95,88 @@ def test_market_sessions_lone_weekend_bar_is_not_a_session():
     fetched["S0"] = {"2026-09-27", "2026-09-28"}           # one symbol with a Sunday bar
     sess, special, _, _ = bf.market_sessions(windows, fetched, "2026-09-28", {}, set())
     assert special == [] and sess == {"2026-09-28"}
+
+
+# ── seed mode ────────────────────────────────────────────────────────────────
+SEED_SESS = {"2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07"}
+
+
+def bhav_row(o, h, l, c, v):
+    return {"OpnPric": str(o), "HghPric": str(h), "LwPric": str(l), "ClsPric": str(c), "TtlTradgVol": str(v)}
+
+
+def seed_bars(dates, c=100.0, v=500):
+    return {d: (c, c + 1, c - 1, c, v) for d in dates}
+
+
+def official_for(angel, dates):
+    return {d: (bhav_row(*angel[d]) if d in angel else None) for d in dates}
+
+
+def test_spot_dates_spread_and_small_pools():
+    pool = [f"2026-08-{d:02d}" for d in range(3, 29)]
+    picks = bf.spot_dates(pool, "2026-08-28")
+    assert picks[-1] == "2026-08-28" and len(picks) == 3 and picks[0] < picks[1] < "2026-08-28"
+    assert bf.spot_dates(["2026-08-28"], "2026-08-28") == ["2026-08-28"]
+    assert bf.spot_dates(["2026-08-27", "2026-08-28"], "2026-08-28") == ["2026-08-27", "2026-08-28"]
+
+
+def test_bhav_check_categories():
+    angel = {"d1": (10, 11, 9, 10.5, 5), "d2": (10, 11, 9, 10.5, 5), "d3": (10, 11, 9, 10.5, 5)}
+    official = {"d1": bhav_row(10, 11, 9, 10.5, 5), "d2": bhav_row(10, 11, 9, 10.0, 5), "d3": None,
+                "d4": bhav_row(1, 1, 1, 1, 1), "d5": None}
+    r = bf.bhav_check(angel, official)
+    assert r["matched"] == ["d1"] and len(r["differ"]) == 1 and r["absent"] == ["d3"] and r["nse_only"] == ["d4"]
+
+
+def test_seed_exclusions_alias_placeholder_holdback():
+    overrides = {"HEG": {"angel_symbol": "HEGAM-EQ", "nse_symbol": "HEGAM"},
+                 "HFCL": {"angel_symbol": "HFCL-BE", "nse_symbol": "HFCL"}}
+    out = bf.seed_exclusions(["HEGAM", "DUMMYHEG", "TRENT", "CLEANMAX", "HFCL", "ODDNAME"],
+                             overrides, {"TRENT": {}}, {"ODDNAME": "DUM999A01011", "CLEANMAX": "INE0ABC01011"})
+    assert out["HEGAM"][0] == "alias" and "HEG" in out["HEGAM"][1]
+    assert out["DUMMYHEG"][0] == "placeholder" and out["ODDNAME"][0] == "placeholder"
+    assert out["TRENT"][0] == "held_back"
+    assert "CLEANMAX" not in out and "HFCL" not in out       # HFCL-BE strips to HFCL = itself, not an alias
+
+
+def test_seed_decision_good_path():
+    angel = seed_bars(sorted(SEED_SESS))
+    ok, cat, _, info = bf.seed_decision(angel, official_for(angel, ["2026-08-04", "2026-08-07"]),
+                                        SEED_SESS, "2026-08-03", "2026-08-07", [])
+    assert ok and cat == "seed" and info["sessions"] == 5 and not info["listed_in_window"]
+
+
+def test_seed_decision_listed_inside_window_is_ok():
+    angel = seed_bars(["2026-08-06", "2026-08-07"])
+    official = official_for(angel, ["2026-08-04", "2026-08-07"])        # NSE has no row on 08-04 either
+    ok, _, _, info = bf.seed_decision(angel, official, SEED_SESS, "2026-08-03", "2026-08-07", [])
+    assert ok and info["listed_in_window"] and info["first"] == "2026-08-06"
+
+
+def test_seed_decision_corporate_action_in_window_skips():
+    angel = seed_bars(sorted(SEED_SESS))
+    ok, cat, why, _ = bf.seed_decision(angel, official_for(angel, ["2026-08-07"]), SEED_SESS,
+                                       "2026-08-03", "2026-08-07", [("2026-08-05", "Face Value Split")])
+    assert not ok and cat == "corporate_action_in_window" and "--seed-from" in why
+
+
+def test_seed_decision_angel_missing_early_history():
+    angel = seed_bars(["2026-08-06", "2026-08-07"])
+    official = {"2026-08-04": bhav_row(90, 91, 89, 90, 400), **official_for(angel, ["2026-08-07"])}
+    ok, cat, _, _ = bf.seed_decision(angel, official, SEED_SESS, "2026-08-03", "2026-08-07", [])
+    assert not ok and cat == "seed_incomplete"
+
+
+def test_seed_decision_price_mismatch_and_unverified_and_gaps():
+    angel = seed_bars(sorted(SEED_SESS))
+    off = official_for(angel, ["2026-08-04", "2026-08-07"])
+    off["2026-08-04"] = bhav_row(100, 101, 99, 50, 500)                   # back-adjusted vs raw
+    assert bf.seed_decision(angel, off, SEED_SESS, "2026-08-03", "2026-08-07", [])[1] == "official_price_mismatch"
+    assert bf.seed_decision(angel, {}, SEED_SESS, "2026-08-03", "2026-08-07", [])[1] == "unverified"
+    one = official_for(angel, ["2026-08-07"])                              # 1 match when 2 dates were loaded? -> need 1
+    assert bf.seed_decision(angel, one, SEED_SESS, "2026-08-03", "2026-08-07", [])[0]
+    gappy = seed_bars(["2026-08-03", "2026-08-05", "2026-08-06", "2026-08-07"])
+    assert bf.seed_decision(gappy, official_for(gappy, ["2026-08-05", "2026-08-07"]), SEED_SESS,
+                            "2026-08-03", "2026-08-07", [])[1] == "validation"
+    assert bf.seed_decision({}, {}, SEED_SESS, "2026-08-03", "2026-08-07", [])[1] == "no_bars"

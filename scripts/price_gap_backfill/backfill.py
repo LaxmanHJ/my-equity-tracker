@@ -16,7 +16,6 @@ import collections
 import csv
 import io
 import json
-import random
 import re
 import statistics
 import subprocess
@@ -44,6 +43,9 @@ HOLIDAY_MAX_COVER = 0.1    # a listed weekday is an unannounced holiday if < 10%
 MIN_DENOM = 20             # below this many symbols, skip cross-sectional session inference
 BATCH = 500
 GAP_MS = 400               # Angel: <= 2.5 requests/s
+SEED_FROM = "2026-08-01"   # --seed default start
+SEED_MIN_BHAV = 2          # a seed needs this many official-price matches (fewer only if it listed late)
+SEED_SHORT = 20            # seeds with fewer sessions than this are flagged in the report
 CA_PATTERN = re.compile(r"split|sub-?division|bonus|demerger|consolidat|capital reduction|"
                         r"reduction of (share )?capital|scheme of arrangement|amalgamation", re.I)
 STOP_WORDS = ("quota", "limit", "blocked", "exceed", "forbidden", "payment", "upgrade", "denied")
@@ -159,6 +161,107 @@ def validate_bars(bars, expected, is_index):
         if not is_index and v == 0 and o == h == l == c:
             probs.append(f"flat zero-volume filler bar on {d}")
     return probs
+
+
+def spot_dates(pool, target, k=2):
+    """Official-price check dates: the target plus k dates spread evenly over the pool."""
+    pool = sorted(d for d in pool if d != target)
+    picks = pool if len(pool) <= k else [pool[int((i + 0.5) * len(pool) / k)] for i in range(k)]
+    return sorted(set([target] + picks))
+
+
+def official_row(bhav_day, name):
+    """The symbol's row in one day's bhavcopy (EQ, else BE, else any series), or None."""
+    rows = (bhav_day or {}).get(name)
+    if not rows:
+        return None
+    return rows.get("EQ") or rows.get("BE") or next(iter(rows.values()))
+
+
+def bhav_check(angel, official):
+    """angel: {date: (o,h,l,c,v)}. official: {date: bhavcopy row or None} for the loaded
+    bhavcopy dates inside the symbol's window. Returns dict of date lists:
+    matched, differ (as text), absent (Angel bar, no NSE row), nse_only (NSE row, no Angel bar)."""
+    res = {"matched": [], "differ": [], "absent": [], "nse_only": []}
+    for d in sorted(official):
+        row, bar = official[d], angel.get(d)
+        if bar is None and row is None:
+            continue
+        if bar is None:
+            res["nse_only"].append(d)
+            continue
+        if row is None:
+            res["absent"].append(d)
+            continue
+        off = [float(row["OpnPric"]), float(row["HghPric"]), float(row["LwPric"]), float(row["ClsPric"])]
+        vol = int(float(row["TtlTradgVol"]))
+        if all(abs(x - y) <= 0.011 for x, y in zip(bar[:4], off)) and int(bar[4]) == vol:
+            res["matched"].append(d)
+        else:
+            res["differ"].append(f"{d}: angel C={bar[3]} V={bar[4]} vs official C={off[3]} V={vol}")
+    return res
+
+
+def seed_exclusions(candidates, overrides, hold_back, isins):
+    """Symbols that must never be seeded, with the reason.
+    - hold_back entries (corporate-action seams)
+    - aliases: the NSE/Angel name of a symbol already stored under another name
+      (seeding it would start a second, duplicate series, e.g. HEGAM for stored HEG)
+    - NSE placeholder constituents for a pending demerger (DUMMY* symbol / DUM* ISIN)."""
+    alias_of = {}
+    for stored, o in overrides.items():
+        for name in (o.get("nse_symbol"), (o.get("angel_symbol") or "").rsplit("-", 1)[0]):
+            if name and name != stored:
+                alias_of[name] = stored
+    out = {}
+    for s in candidates:
+        if s in hold_back:
+            out[s] = ("held_back", "listed in symbol_overrides.json hold_back")
+        elif s in alias_of:
+            out[s] = ("alias", f"NSE/Angel name of {alias_of[s]}, which is already stored under that name "
+                               f"(symbol_overrides.json); seeding would start a duplicate series")
+        elif s.startswith("DUMMY") or (isins.get(s) or "").upper().startswith("DUM"):
+            out[s] = ("placeholder", f"NSE dummy constituent (ISIN {isins.get(s) or '?'}) standing in for a "
+                                     f"demerged entity until it lists; not a traded security")
+    return out
+
+
+def seed_decision(angel, official, sessions, seed_from, target, acts):
+    """Decide one seed (a symbol with NO stored rows). There is nothing stored to overlap,
+    so identity and basis are proven against the NSE bhavcopy instead.
+    angel: {date: (o,h,l,c,v)} as fetched; official: {date: row|None} for the loaded
+    bhavcopy dates in [seed_from, target]; acts: [(ex_date, subject)] matching CA_PATTERN.
+    Returns (ok, category, reason, info)."""
+    info = {}
+    in_window = sorted((ex, subj) for ex, subj in acts if seed_from <= ex <= target)
+    if in_window:
+        return (False, "corporate_action_in_window",
+                f"{in_window} inside the seed window: bars before the ex-date are on a different basis "
+                f"(raw or back-adjusted). Seed it with --symbols <SYM> --seed-from <first session after "
+                f"{in_window[-1][0]}>", info)
+    bars = sorted((d,) + tuple(angel[d]) for d in angel if seed_from <= d <= target)
+    if not bars:
+        return False, "no_bars", f"Angel returned no bars between {seed_from} and {target}", info
+    first = bars[0][0]
+    info.update(first=first, sessions=len(bars))
+    probs = validate_bars(bars, sorted(d for d in sessions if first <= d <= target), False)
+    if probs:
+        return False, "validation", "; ".join(probs), info
+    res = bhav_check({b[0]: b[1:] for b in bars}, official)
+    info["bhav"] = res
+    if res["nse_only"]:
+        return (False, "seed_incomplete", f"NSE bhavcopy has it on {res['nse_only']} but Angel has no bar there "
+                                          f"(Angel's first bar is {first})", info)
+    if res["differ"] or res["absent"]:
+        return (False, "official_price_mismatch",
+                "; ".join(res["differ"] + [f"{d}: Angel bar but no NSE bhavcopy row" for d in res["absent"]]), info)
+    need = min(SEED_MIN_BHAV, len([d for d in official if first <= d <= target]))
+    if need == 0 or len(res["matched"]) < need:
+        return (False, "unverified", f"{len(res['matched'])} official-price match(es) on {res['matched']}; need "
+                                     f"{max(need, 1)}. Is the NSE bhavcopy reachable?", info)
+    first_session = min((d for d in sessions if d >= seed_from), default=first)
+    info["listed_in_window"] = first > first_session
+    return True, "seed", f"{len(bars)} sessions from {first}; official price matched on {res['matched']}", info
 
 
 # ─────────────────────────────────────────────────────────────────── NSE (public)
@@ -350,9 +453,15 @@ def main(argv=None):
     ap.add_argument("--universe-file", default=str(ROOT / "catalan/data/universe/nifty500_2026-10-18.csv"),
                     help="extra symbols to keep current (NSE constituent CSV; EQ rows). Default: the "
                          "CATALAN v2 frozen universe, if present")
+    ap.add_argument("--seed", action="store_true",
+                    help="SEED mode: universe-file symbols with NO price_history rows get bars from "
+                         "--seed-from to the target (no overlap check; proven against the NSE bhavcopy)")
+    ap.add_argument("--seed-from", default=SEED_FROM, help=f"first date to seed (default {SEED_FROM})")
     ap.add_argument("--out-dir", default=str(ROOT / "data/archive/price_gap_backfill"),
                     help="where run artefacts go (default is gitignored)")
     a = ap.parse_args(argv)
+    if a.seed and a.no_bhavcopy:
+        raise SystemExit("--seed needs the NSE bhavcopy check: it is the only verification a seed has")
 
     today = datetime.now(IST).date()
     run_dir = Path(a.out_dir) / datetime.now(IST).strftime("%Y%m%dT%H%M%S")
@@ -370,8 +479,11 @@ def main(argv=None):
     overrides, hold_back = mapping["overrides"], mapping.get("hold_back", {})
     nse_name = {s: o.get("nse_symbol", s) for s, o in overrides.items()}
 
-    log(f"== price_history gap backfill  [{'APPLY' if a.apply else 'DRY RUN, nothing will be written'}]")
+    log(f"== price_history gap backfill  [{'SEED' if a.seed else 'EXTEND'} mode]  "
+        f"[{'APPLY' if a.apply else 'DRY RUN, nothing will be written'}]")
     log(f"   target session: {target}   run dir: {run_dir}")
+    if a.seed and a.seed_from > target:
+        raise SystemExit(f"--seed-from {a.seed_from} is after the target {target}")
 
     # ── scope (reads only) ─────────────────────────────────────────────────────
     conn = turso()
@@ -384,38 +496,64 @@ def main(argv=None):
     reg = MembershipRegistry.from_turso(conn, "NIFTY500")
     n500 = set(reg.members_on(date.fromisoformat(target), "NIFTY500"))
     uni_path = Path(a.universe_file) if a.universe_file else None
+    uni, uni_isin = set(), {}
     if uni_path and uni_path.exists():
         import csv as _csv
-        uni = {r["Symbol"].strip().upper() for r in _csv.DictReader(uni_path.read_text().splitlines())
-               if r.get("Series", "").strip() == "EQ"}
+        for r in _csv.DictReader(uni_path.read_text().splitlines()):
+            if r.get("Series", "").strip() == "EQ":
+                sym = r["Symbol"].strip().upper()
+                uni.add(sym)
+                uni_isin[sym] = (r.get("ISIN Code") or r.get("ISIN") or "").strip()
         notes.append(f"universe file {uni_path.name}: {len(uni)} EQ symbols added to the scope")
         n500 |= uni
+    elif a.seed:
+        raise SystemExit(f"--seed needs the universe file, not found: {uni_path}")
     want = {s.strip().upper() for s in a.symbols.split(",") if s.strip()} if a.symbols else set()
     found = last_bars(conn, active | n500 | want)
     lastbar = {s: L for s, L in found.items() if L}
     n500_nodata = sorted(s for s in n500 if not found.get(s))
-    scope = active | (n500 & set(lastbar))
-    if a.symbols:
-        unknown = sorted(want - set(lastbar))
-        if unknown:
-            notes.append(f"--symbols not in price_history (ignored): {unknown}")
-        scope = want & set(lastbar)
-    current = sorted(s for s in scope if lastbar[s] >= target)
-    todo = sorted(s for s in scope if lastbar[s] < target)
     log(f"   table MAX(date) {gmax}; recent-{SCOPE_SESSIONS}-session window {recent[-1]}..{recent[0]}")
-    log(f"   scope {len(scope)} symbols " + (f"(--symbols)" if a.symbols else
-        f"({len(active)} recently active, plus {len((n500 & set(lastbar)) - active)} other current NIFTY500 members)") + "; "
-        f"already at target {len(current)}; to fill {len(todo)}")
-    if n500_nodata:
-        log(f"   NIFTY500 members with NO price_history at all (not handled here): {n500_nodata}")
+    pre_skips, current = {}, []
+    if a.seed:
+        # Seeds: universe symbols with NO stored rows. `after` is the day before the seed
+        # window, so every date in [seed_from, target] counts as new.
+        cands = sorted(s for s in uni if not found.get(s))
+        if a.symbols:
+            have_rows = sorted(want & set(lastbar))
+            if have_rows:
+                notes.append(f"--symbols already stored, so not seeds (use extend mode): {have_rows}")
+            cands = [s for s in cands if s in want]
+        pre_skips = seed_exclusions(cands, overrides, hold_back, uni_isin)
+        todo = [s for s in cands if s not in pre_skips]
+        day_before = (date.fromisoformat(a.seed_from) - timedelta(days=1)).isoformat()
+        after = {s: day_before for s in todo}
+        log(f"   seed candidates: {len(cands)} universe symbols with no price_history; excluded by rule "
+            f"{len(pre_skips)}; to seed {len(todo)} from {a.seed_from}")
+    else:
+        scope = active | (n500 & set(lastbar))
+        if a.symbols:
+            unknown = sorted(want - set(lastbar))
+            if unknown:
+                notes.append(f"--symbols not in price_history (ignored; use --seed for unseeded symbols): {unknown}")
+            scope = want & set(lastbar)
+        current = sorted(s for s in scope if lastbar[s] >= target)
+        todo = sorted(s for s in scope if lastbar[s] < target)
+        after = {s: lastbar[s] for s in todo}
+        log(f"   scope {len(scope)} symbols " + (f"(--symbols)" if a.symbols else
+            f"({len(active)} recently active, plus {len((n500 & set(lastbar)) - active)} other current NIFTY500 members)") + "; "
+            f"already at target {len(current)}; to fill {len(todo)}")
+        if n500_nodata:
+            log(f"   NIFTY500/universe symbols with NO price_history at all (use --seed): {n500_nodata}")
     if not todo:
+        for s in sorted(pre_skips):
+            log(f"     {s:<12} [{pre_skips[s][0]}] {pre_skips[s][1]}")
         log("Nothing to do.")
         return 0
 
-    # last N stored bars per symbol
+    # last N stored bars per symbol (extend mode only; a seed has nothing stored)
     stored = collections.defaultdict(list)
     by_L = collections.defaultdict(list)
-    for s in todo:
+    for s in ([] if a.seed else todo):
         by_L[lastbar[s]].append(s)
     for L, syms in by_L.items():
         for part in chunks(syms, 300):
@@ -429,7 +567,7 @@ def main(argv=None):
     # ── fetch (Angel, read-only) ──────────────────────────────────────────────
     reqs = []
     for s in todo:
-        first = stored[s][0][0] if stored[s] else lastbar[s]
+        first = a.seed_from if a.seed else (stored[s][0][0] if stored[s] else lastbar[s])
         start = (date.fromisoformat(first) - timedelta(days=FETCH_LEAD_DAYS)).isoformat()
         reqs.append({"symbol": s, "from": start, "to": target})
     job, out = run_dir / "angel_job.json", run_dir / "angel_candles.json"
@@ -442,12 +580,12 @@ def main(argv=None):
     A = {s: {r[0]: tuple(r[1:]) for r in rows} for s, rows in F["data"].items()}
 
     # ── market calendar ───────────────────────────────────────────────────────
-    lo_year, hi_year = min(lastbar[s] for s in todo)[:4], target[:4]
+    lo_year, hi_year = min(after[s] for s in todo)[:4], target[:4]
     for y in range(int(lo_year), int(hi_year) + 1):
         if str(y) not in hol_years:
             notes.append(f"WARNING: no NSE holiday list for {y}; sessions for {y} inferred from the cross-section only")
-    windows = {s: lastbar[s] for s in todo if s in A}
-    fill_dates = {s: {d for d in A[s] if lastbar[s] < d <= target} for s in windows}
+    windows = {s: after[s] for s in todo if s in A}
+    fill_dates = {s: {d for d in A[s] if after[s] < d <= target} for s in windows}
     sessions, special, unannounced, cal_notes = market_sessions(windows, fill_dates, target, holidays, muhurat)
     notes += cal_notes
 
@@ -475,9 +613,8 @@ def main(argv=None):
     bhav_dates = []
     if all_fill and not a.no_bhavcopy:
         cover = collections.Counter(d for ds in fill_dates.values() for d in ds)
-        pool = [d for d in all_fill if d != target and cover[d] >= 0.5 * len(fill_dates)]
-        random.seed(target)
-        bhav_dates = sorted(set([target] + random.sample(pool, min(2, len(pool)))))
+        pool = [d for d in all_fill if cover[d] >= 0.5 * len(fill_dates)]
+        bhav_dates = spot_dates(pool, target)
     bhav = {}
     for d in bhav_dates:
         b = fetch_bhavcopy(sess, d)
@@ -487,9 +624,10 @@ def main(argv=None):
             bhav[d] = b
 
     # ── per-symbol decision ───────────────────────────────────────────────────
-    plan, skips, provisional, big, bhav_stats = {}, {}, [], [], collections.Counter()
+    plan, skips, provisional, big, bhav_stats = {}, dict(pre_skips), [], [], collections.Counter()
+    seed_info = {}
     for s in todo:
-        L = lastbar[s]
+        L = after[s]
         if s in F.get("unresolved", {}):
             u = F["unresolved"][s]
             skips[s] = ("unresolved", f"{u.get('error')}; candidates: {u.get('candidates') or 'none'} "
@@ -501,6 +639,27 @@ def main(argv=None):
         if s not in A:
             skips[s] = ("fetch_error", "no response recorded")
             continue
+        acts = [(ex, subj) for ex, subj in ca.get(s, []) if CA_PATTERN.search(subj)]
+        if a.seed:
+            official = {d: official_row(bhav[d], nse_name.get(s, s)) for d in bhav if a.seed_from <= d <= target}
+            ok, cat, why, info = seed_decision(A[s], official, sessions, a.seed_from, target, acts)
+            res = info.get("bhav") or {}
+            bhav_stats["match"] += len(res.get("matched", []))
+            bhav_stats["differ"] += len(res.get("differ", [])) + len(res.get("absent", []))
+            bhav_stats["nse_only"] += len(res.get("nse_only", []))
+            if not ok:
+                skips[s] = (cat, why)
+                continue
+            bars = sorted((d,) + A[s][d] for d in A[s] if a.seed_from <= d <= target)
+            prev = None
+            for b in bars:
+                if prev and abs(b[4] / prev - 1) > BIG_MOVE:
+                    big.append((s, b[0], prev, b[4], round((b[4] / prev - 1) * 100, 1)))
+                prev = b[4]
+            plan[s] = [(s, d, float(o), float(h), float(l), float(c), int(v)) for d, o, h, l, c, v in bars]
+            seed_info[s] = {k: v for k, v in info.items() if k != "bhav"}
+            seed_info[s]["matched"] = res.get("matched", [])
+            continue
         ok, cat, why, ratio = classify_overlap(stored[s], A[s])
         if s in hold_back:
             h = hold_back[s]
@@ -509,7 +668,6 @@ def main(argv=None):
                                      f"{f' ratio {ratio}' if ratio not in (None, 1.0) else ''}. Never extended by this "
                                      f"tool until its history is rewritten on one basis")
             continue
-        acts = [(ex, subj) for ex, subj in ca.get(s, []) if CA_PATTERN.search(subj)]
         explain = [(ex, subj) for ex, subj in ca.get(s, []) if CA_PATTERN.search(subj) or "right" in subj.lower()]
         if not ok:
             if cat == "corporate_action" and explain:
@@ -538,25 +696,15 @@ def main(argv=None):
         if probs:
             skips[s] = ("validation", "; ".join(probs))
             continue
-        bad_bhav = []
-        for d, b in bhav.items():
-            if s.startswith("^") or d not in A[s] or not (L < d <= target):
+        if not s.startswith("^"):
+            res = bhav_check({d: A[s][d] for d in A[s] if L < d <= target},
+                             {d: official_row(b, nse_name.get(s, s)) for d, b in bhav.items() if L < d <= target})
+            bhav_stats["match"] += len(res["matched"])
+            bhav_stats["differ"] += len(res["differ"])
+            bhav_stats["absent"] += len(res["absent"])
+            if res["differ"]:
+                skips[s] = ("official_price_mismatch", "; ".join(res["differ"]) + " (provisional candle or adjustment)")
                 continue
-            row = b.get(nse_name.get(s, s))
-            if not row:
-                bhav_stats["absent"] += 1
-                continue
-            row = row.get("EQ") or row.get("BE") or next(iter(row.values()))
-            off = [float(row["OpnPric"]), float(row["HghPric"]), float(row["LwPric"]), float(row["ClsPric"])]
-            o, h, l, c, v = A[s][d]
-            if all(abs(x - y) <= 0.011 for x, y in zip((o, h, l, c), off)) and int(v) == int(float(row["TtlTradgVol"])):
-                bhav_stats["match"] += 1
-            else:
-                bhav_stats["differ"] += 1
-                bad_bhav.append(f"{d}: angel C={c} V={v} vs official C={off[3]} V={row['TtlTradgVol']}")
-        if bad_bhav:
-            skips[s] = ("official_price_mismatch", "; ".join(bad_bhav) + " (provisional candle or adjustment)")
-            continue
         prev = stored[s][-1][4]
         for b in bars:
             if prev and abs(b[4] / prev - 1) > BIG_MOVE:
@@ -595,18 +743,28 @@ def main(argv=None):
             log(f"     {s:<12} [{skips[s][0]}] {skips[s][1]}")
     if provisional:
         log(f"   provisional last stored bar (allowed, not corrected): {[p[0] for p in provisional]}")
+    if seed_info:
+        log("   SEEDS (would be written):  symbol  first bar  sessions  official-price matches")
+        for s in sorted(seed_info):
+            i = seed_info[s]
+            flags = (" listed inside the window" if i.get("listed_in_window") else "") + \
+                    (f" SHORT (<{SEED_SHORT} sessions)" if i["sessions"] < SEED_SHORT else "")
+            log(f"     {s:<12} {i['first']}  {i['sessions']:>4}   {i['matched']}{flags}")
     if bhav:
         log(f"   official-price spot check {sorted(bhav)}: {dict(bhav_stats)}")
     if big:
         log(f"   daily moves > {int(BIG_MOVE * 100)}% (review; circuits/news are normal): {big}")
-    log("\n== rows per date (planned)   [PIT NIFTY500 with a bar after fill / members]")
+    log("\n== rows per date (planned)   [index_membership NIFTY500 with a bar after fill / members]"
+        + ("   [universe file with a bar after fill / size]" if uni else ""))
     for d in sorted(per_date):
         cov = ""
         if d in cov_dates:
             m = reg.members_on(date.fromisoformat(d), "NIFTY500")
-            cov = f"   [{len(m & have[d])}/{len(m)}]"
+            cov = f"   [{len(m & have[d])}/{len(m)}]" + (f"   [{len(uni & have[d])}/{len(uni)}]" if uni else "")
         log(f"   {d}  {per_date[d]:>4}{cov}")
-    report = {"target": target, "apply": a.apply, "notes": notes, "special_sessions": special,
+    report = {"mode": "seed" if a.seed else "extend", "seed_from": a.seed_from if a.seed else None,
+              "seed_info": seed_info, "bhavcopy_dates": sorted(bhav),
+              "target": target, "apply": a.apply, "notes": notes, "special_sessions": special,
               "unannounced_holidays": unannounced, "skips": skips, "provisional": provisional, "big_moves": big,
               "bhavcopy": dict(bhav_stats), "rows_per_date": per_date, "n500_no_data": n500_nodata,
               "plan": {s: v for s, v in plan.items()}}
@@ -624,9 +782,21 @@ def main(argv=None):
     wsyms = sorted(plan)
     existing = set()
     for part in chunks(wsyms, 300):
-        lo = min(lastbar[s] for s in part)
+        lo = min(after[s] for s in part)
         existing |= {(r[0], r[1]) for r in q(conn, f"SELECT symbol, date FROM price_history WHERE date > ? AND "
                                                    f"symbol IN ({','.join('?' * len(part))})", [lo] + part)}
+    if a.seed:
+        # A seed must still have NO rows at write time; if another writer got there first,
+        # the symbol now needs the extend mode's overlap check instead.
+        gained = sorted({k[0] for k in existing}) + sorted(s for s, L in last_bars(conn, set(wsyms)).items() if L)
+        gained = sorted(set(gained))
+        if gained:
+            log(f"   seeds that gained rows since the fetch, dropped (run extend mode for them): {gained}")
+            rows = [r for r in rows if r[0] not in gained]
+            wsyms = [s for s in wsyms if s not in gained]
+            if not rows:
+                log("Nothing to write.")
+                return 0
     pending = [r for r in rows if (r[0], r[1]) not in existing]
     if len(pending) != len(rows):
         log(f"   {len(rows) - len(pending)} planned rows already exist (another writer?); left untouched")

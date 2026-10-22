@@ -1,11 +1,15 @@
 # price_gap_backfill
 
-Extends Turso `price_history` (daily OHLCV, NSE) from each symbol's last stored
-bar up to the last completed NSE session. The source is Angel One daily candles,
-the same feed the existing rows came from. The tool is built to be safe to re-run:
+Keeps Turso `price_history` (daily OHLCV, NSE) current. The source is Angel One
+daily candles, the same feed the existing rows came from. It has two modes:
+
+- **Extend** (default): each stored symbol's series is extended from its last stored bar up to the last completed NSE session.
+- **Seed** (`--seed`): universe symbols with **no** stored rows get a short history, from `--seed-from` to the same target.
+
+The tool is built to be safe to re-run:
 
 - It only issues `INSERT OR IGNORE` into `price_history`.
-- It **never** writes a symbol it can't prove joins seamlessly onto what's already stored.
+- It **never** writes a symbol it can't prove joins seamlessly onto what's already stored (extend), or that it can't match against NSE's official prices (seed).
 - It's a **dry run unless you pass `--apply`**.
 
 ## The command
@@ -15,7 +19,13 @@ Run from the repo root:
 ```bash
 python3 scripts/price_gap_backfill/backfill.py            # 1. dry run: fetch, check, report. Writes nothing.
 python3 scripts/price_gap_backfill/backfill.py --apply    # 2. same run, then write
+
+python3 scripts/price_gap_backfill/backfill.py --seed           # new universe members: dry run
+python3 scripts/price_gap_backfill/backfill.py --seed --apply   # then write
 ```
+
+Run extend first, then seed. They don't overlap: a symbol with any stored row is
+never a seed, and a seed is extended by the normal mode from then on.
 
 Read the dry-run report before step 2. In particular, read the `SKIPPED` list and
 the calendar notes. A normal run takes about 5 minutes (one Angel request per
@@ -31,7 +41,11 @@ Options:
 | `--symbols A,B,C` | Restrict to these stored symbols (testing, re-running a skip). |
 | `--allow-today` | Permit `--to` = today. Not recommended: same-evening Angel candles have carried provisional closes. |
 | `--allow-missing-sessions` | Write a symbol even if some sessions are absent, e.g. a trading suspension. The gap stays a gap. |
-| `--no-bhavcopy` | Skip the NSE official-price check, e.g. if NSE blocks your IP. |
+| `--no-bhavcopy` | Skip the NSE official-price check, e.g. if NSE blocks your IP. Refused with `--seed`. |
+| `--allow-no-ca-feed` | Write even if the NSE corporate-actions feed could not be read. Without it, `--apply` **stops** when the feed is down (verifier rule C1): an unadjusted split inside the window would otherwise go undetected. |
+| `--universe-file CSV` | Extra symbols to keep current: an NSE constituent CSV, `Series` = EQ rows only. Default: the CATALAN frozen universe `catalan/data/universe/nifty500_2026-10-18.csv`, if present. It is also the seed candidate list. |
+| `--seed` | Seed mode (below). |
+| `--seed-from YYYY-MM-DD` | First date to seed. Default `2026-08-01`. |
 | `--out-dir DIR` | Where run artefacts go. Default `data/archive/price_gap_backfill/<timestamp>/`, which is gitignored. |
 
 Each run leaves `angel_job.json`, `angel_candles.json` (the raw fetch) and
@@ -46,14 +60,24 @@ Exit codes:
 
 ## Scope
 
-The run covers two groups of symbols:
+**Extend mode** covers three groups of symbols:
 
 - Every symbol with a `price_history` row in the table's **last 20 sessions** (recently active).
 - **Plus** every current point-in-time NIFTY500 member (`index_membership`, as of the target date) that has any stored history.
+- **Plus** every EQ symbol in `--universe-file` that has any stored history.
 
-NIFTY500 members with **no** stored history are only listed; seeding a full
-history is a different job (`scripts/backfill-angel-15y.mjs`). Delisted names
-drop out of scope by themselves once they stop trading.
+Symbols with **no** stored history are listed, and the list points to `--seed`.
+Delisted names drop out of scope by themselves once they stop trading.
+
+**Seed mode** covers `--universe-file` EQ symbols with no stored rows, minus
+three kinds that are excluded by rule and listed:
+
+- `held_back` symbols.
+- `alias`: the NSE or Angel name of a symbol already stored under another name. **HEGAM** is the new ticker of stored `HEG`; seeding it would start a second series.
+- `placeholder`: NSE `DUMMY*` constituents (ISIN `DUM…`), which stand in for a demerged entity until it lists, e.g. **DUMMYHEG**.
+
+A seed is a short window, not a full history. For a 15-year history, use
+`scripts/backfill-angel-15y.mjs`.
 
 ## What it checks, in order
 
@@ -71,6 +95,23 @@ drop out of scope by themselves once they stop trading.
 
 Daily moves over 18% are listed for review but do not block. Circuit limits and
 news days are normal. Every one seen so far matched the official bhavcopy.
+
+## Seed mode: what is checked instead of the overlap
+
+A seed has nothing stored, so there is nothing to overlap. Its identity and
+price basis are proven against NSE instead. Steps 1, 2, 6, 8 and 9 above apply
+unchanged: calendar, token resolution, bars, first-batch quota stop, and
+readback. Then:
+
+| Check | On failure |
+|---|---|
+| Exclusions: `held_back`, `alias`, `placeholder` (see Scope). | Listed, never fetched |
+| **No corporate action anywhere in `[--seed-from, target]`.** A split or bonus inside the window means the bars before the ex-date are on another basis, raw or back-adjusted. | `corporate_action_in_window`. The message gives the fix: `--seed --symbols SYM --seed-from <first session after the ex-date>` |
+| The CA feed must be readable for `--apply` (C1, as in extend mode). | `STOP:` |
+| **Official price.** On 3 dates (the target plus 2 spread over the window), every Angel bar must equal the NSE bhavcopy exactly. That needs at least 2 matches, or 1 if the stock listed late in the window. Any differing value, or an Angel bar with no NSE row, fails. Pre-ex-date bars that Angel back-adjusted would differ here. | `official_price_mismatch` / `unverified` |
+| **Complete from its first bar.** If NSE's bhavcopy lists the stock on a checked date before Angel's first bar, Angel is missing history. | `seed_incomplete` |
+| Sessions are checked from the seed's **first bar**, so a stock that listed inside the window passes and is flagged `listed inside the window`. Seeds with under 20 sessions are flagged `SHORT`. | Report only |
+| At `--apply` time each seed must **still** have no rows. A seed that gained rows since the fetch is dropped, and extend mode should handle it. | Dropped, listed |
 
 ## "Skipped for corporate action": what it means
 
@@ -99,9 +140,9 @@ new bars and Angel has **not** back-adjusted yet. Writing would put an
 unadjusted jump at the ex-date, so the symbol is skipped and re-evaluated on the
 next run.
 
-## Held back: TRENT, CUB, HEG
+## Held back: TRENT, CUB, HEG, NATCOPHARM, OLAELEC
 
-These three are listed in `hold_back` in `symbol_overrides.json`. The tool
+These are listed in `hold_back` in `symbol_overrides.json`. The tool
 skips them **unconditionally**, even if some future overlap check were to pass,
 until the entry is removed.
 
@@ -110,10 +151,16 @@ until the entry is removed.
 | TRENT | 2026-05-08 | 0.66667 | Bonus 1:2, ex 2026-06-04 |
 | CUB | 2026-06-02 | 0.75002 | Bonus 1:3, ex 2026-06-12 |
 | HEG (now HEGAM) | 2026-06-02 | 0.35702 | Demerger, ex 2026-09-07 |
+| NATCOPHARM | 2026-09-25 | 0.99185 | Rights issue (NSE CA feed 2026-10-01) |
+| OLAELEC | 2026-09-25 | 0.982 | Rights issue (NSE CA feed 2026-10-13) |
 
-**The CATALAN pre-registration excludes these three from its study universe
-unless their history is rewritten on a consistent basis.** This tool upholds
-that by never extending them. Remove a `hold_back` entry only after the full
+**The CATALAN pre-registration excludes TRENT, CUB and HEG from its study
+universe unless their history is rewritten on a consistent basis.** This tool
+upholds that by never extending them. NATCOPHARM and OLAELEC (added
+2026-10-23) are in that universe; with no bars after 2026-09-25 they drop out
+of its panel mechanically. A rights-issue ratio this close to 1 is still a
+seam: joining raw bars onto back-adjusted ones would put a fake ~1-2% move on
+the join day. Remove a `hold_back` entry only after the full
 rewrite described above.
 
 ## Known quirks
@@ -171,9 +218,31 @@ rewrite described above.
 - **`data/angel_scrip_master.json`** is left alone. `angelScripMaster.getToken()`
   rewrites that tracked file when its cache is over 24h old, so this tool
   resolves tokens from an in-memory download instead.
+- **TDPOWERSYS** (universe member, no stored rows) had a 1:2 split, ex
+  2026-08-24, inside the default seed window, so a default `--seed` skips it.
+  It was seeded on 2026-10-23 with `--seed --symbols TDPOWERSYS --seed-from
+  2026-08-25` (40 sessions); that window starts after the ex-date.
+- **JSWDULUX** had a 1:10 face-value split, ex 2026-10-22. Angel back-adjusted
+  its history, so extend skips it (`corporate_action`, ratio 0.1) from
+  2026-09-25 on. It is outside the CATALAN universe.
+- **BE-series universe rows** (`HFCL`, `MTARTECH`, `STLTECH` in the 2026-10-18
+  file) are not read from the universe file, which is EQ only. HFCL is extended
+  anyway because it is recently active. MTARTECH (stored through 2026-06-24)
+  and STLTECH (through 2026-05-13) are stale and outside scope; they are also
+  outside CATALAN's EQ-only universe.
 - **Network loss.** If 3 symbols in a row fail with no HTTP response
   (DNS/offline), the fetch aborts and nothing is written. Other per-symbol
   fetch errors show up as `fetch_error` skips; re-running picks them up.
+- **Angel throttling (HTTP 403/429).**
+  - Seen on 2026-10-18: after about 120 requests, Angel answered 403 for every
+    symbol for a few minutes.
+  - The fetcher treats a 403/429 that is not a session error as throttling. It
+    cools down (10s, 30s, 60s), slows its pace by 50% (to at most 2s/request)
+    and retries. If 5 symbols in a row are still refused, it aborts with
+    "retry later".
+  - It re-logs in only on a real session error (401, or AB1010/AB1004/AB8050).
+    Re-logging in on every 403 turned one throttle into a burst of logins.
+  - An aborted fetch writes nothing, so just re-run later.
 
 ## Adding a symbol mapping
 
@@ -197,9 +266,13 @@ handle it like a hold-back.
 | `angel_fetch.mjs` | Angel candle fetcher, run by `backfill.py`. Read-only; reuses `src/services/angelOneAuth.js`. |
 | `symbol_overrides.json` | Explicit symbol → Angel instrument mappings, and the `hold_back` list. |
 | `nse_holidays.json` | Bundled NSE CM trading holidays; `*` marks a Muhurat session. |
-| `test_backfill.py` | Unit tests for the decision logic: `python3 -m pytest scripts/price_gap_backfill/` |
+| `test_backfill.py` | Unit tests for the decision logic, extend and seed: `python3 -m pytest scripts/price_gap_backfill/` |
 
 History: built 2026-09-29 from the two manual fills of 2026-09-27. The first
 covered 453 symbols, 2026-08-04 → 2026-09-25 (16,976 rows). The second covered
 272 stale NIFTY500 members from 2026-05/06 → 2026-09-25 (25,072 rows), with
 TRENT, CUB and HEG withheld.
+
+2026-10-23: extend wrote 12,372 rows (723 symbols) through 2026-10-22, and seed
+wrote 880 rows (15 + TDPOWERSYS). Every readback matched; the bhavcopy check
+was 2,163/2,163 (extend) and 48/48 (seed).

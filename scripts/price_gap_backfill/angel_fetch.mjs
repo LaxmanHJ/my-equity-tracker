@@ -30,6 +30,7 @@ const CANDLE_URL = 'https://apiconnect.angelone.in/rest/secure/angelbroking/hist
 const CHUNK_DAYS = 1500;           // Angel caps ONE_DAY requests at ~2000 days
 const MAX_CONSECUTIVE_FAILS = 15;  // abort the run instead of hammering a broken API
 const MAX_NETWORK_FAILS = 3;       // no HTTP response at all (DNS/offline) -> network is down, abort
+const MAX_THROTTLE_FAILS = 5;      // symbols in a row still throttled after all cool-downs -> abort
 const INDEX_ALIASES = { '^NSEI': 'NIFTY', '^NSEBANK': 'BANKNIFTY', '^BSESN': 'SENSEX', 'INDIA VIX': 'INDIA VIX' };
 
 const [jobPath, outPath] = process.argv.slice(2);
@@ -81,47 +82,69 @@ function resolve(sym, scrip, overrides) {
 
 // ── candles ─────────────────────────────────────────────────────────────────
 let last = 0;
+let gap = GAP_MS;                      // grows after a throttle response, never shrinks
+const TOKEN_RE = /AB1010|AB1004|AB8050|invalid token|token.*(expired|invalid)|session.*(expired|invalid)/i;
+const THROTTLE_RE = /rate|exceed|too many|try after|access denied/i;
+const THROTTLE_WAIT_MS = [10000, 30000, 60000];
+
 async function candles(inst, from, to, attempt = 1) {
-    const wait = last + GAP_MS - Date.now();
+    const wait = last + gap - Date.now();
     if (wait > 0) await sleep(wait);
     last = Date.now();
     const session = await getSession();
+    let st, msg;
     try {
         const res = await axios.post(CANDLE_URL, {
             exchange: inst.exchange, symboltoken: inst.token, interval: 'ONE_DAY',
             fromdate: `${from} 00:00`, todate: `${to} 15:30`,
         }, { headers: getAuthHeaders(session.jwtToken), timeout: 20000 });
-        if (!res.data?.status) {
-            const msg = `${res.data?.errorcode || ''} ${res.data?.message || ''}`.trim();
-            if (attempt === 1 && /AB1010|AB1004|AB8050|token|session|unauthori/i.test(msg)) {
-                await invalidateSession(); await refreshSession();
+        if (res.data?.status) return res.data.data || [];
+        st = res.status;
+        msg = `${res.data?.errorcode || ''} ${res.data?.message || ''}`.trim();
+    } catch (e) {
+        st = e.response?.status;
+        const body = e.response?.data;
+        msg = body && typeof body === 'object' ? `${body.errorcode || ''} ${body.message || ''}`.trim()
+            : String(body || '').slice(0, 120);
+        if (!e.response) {                                   // no HTTP answer: network / DNS / timeout
+            if (attempt < 5) {
+                const back = 1000 * 2 ** attempt;           // 2s 4s 8s 16s
+                console.warn(`  retry ${inst.angel_symbol} in ${back}ms: ${e.message}`);
+                await sleep(back);
                 return candles(inst, from, to, attempt + 1);
             }
-            const err = new Error(`angel: ${msg}`); err.api = true; err.retryable = /rate|exceed|too many|try after/i.test(msg); throw err;
+            const err = new Error(e.message); err.network = true; throw err;
         }
-        return res.data.data || [];
-    } catch (e) {
-        const st = e.response?.status;
-        if (attempt === 1 && (st === 401 || st === 403)) {
-            await invalidateSession(); await refreshSession();
-            return candles(inst, from, to, attempt + 1);
-        }
-        const retryable = e.retryable || !st || st === 429 || st >= 500;
-        if (retryable && attempt < 5) {
-            const back = 1000 * 2 ** attempt;   // 2s 4s 8s 16s
-            console.warn(`  retry ${inst.angel_symbol} in ${back}ms: ${st || ''} ${e.message}`);
-            await sleep(back);
-            return candles(inst, from, to, attempt + 1);
-        }
-        throw e;
     }
+    // Re-login ONLY for a genuine session error. A 403 is usually throttling, and logging in
+    // again on every 403 (the previous behaviour) turned one throttle into a burst of logins.
+    if (attempt === 1 && (st === 401 || TOKEN_RE.test(msg || ''))) {
+        await invalidateSession(); await refreshSession();
+        return candles(inst, from, to, attempt + 1);
+    }
+    const throttled = st === 403 || st === 429 || THROTTLE_RE.test(msg || '');
+    if (throttled && attempt <= THROTTLE_WAIT_MS.length) {
+        const back = THROTTLE_WAIT_MS[attempt - 1];
+        gap = Math.min(Math.round(gap * 1.5), 2000);
+        console.warn(`  throttled (HTTP ${st} ${msg || 'no body'}) on ${inst.angel_symbol}: cooling down ` +
+            `${back / 1000}s, pace now ${gap}ms/request`);
+        await sleep(back);
+        return candles(inst, from, to, attempt + 1);
+    }
+    if (st >= 500 && attempt < 5) {
+        await sleep(1000 * 2 ** attempt);
+        return candles(inst, from, to, attempt + 1);
+    }
+    const err = new Error(`angel HTTP ${st}${msg ? ': ' + msg : ''}`);
+    err.throttled = throttled; err.api = true;
+    throw err;
 }
 
 function addDays(iso, n) { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 
 const scrip = await loadScrip();
 const out = { fetched_at: new Date().toISOString(), data: {}, resolved: {}, unresolved: {}, errors: {} };
-let fails = 0, netFails = 0, n = 0;
+let fails = 0, netFails = 0, throttleFails = 0, n = 0;
 for (const { symbol, from, to } of job.requests) {
     n++;
     const inst = resolve(symbol, scrip, job.overrides || {});
@@ -139,11 +162,13 @@ for (const { symbol, from, to } of job.requests) {
             }
         }
         out.data[symbol] = [...seen.values()].sort((x, y) => x[0].localeCompare(y[0]));
-        fails = 0; netFails = 0;
+        fails = 0; netFails = 0; throttleFails = 0;
     } catch (e) {
         out.errors[symbol] = e.message;
         console.warn(`  x ${symbol}: ${e.message}`);
-        netFails = (e.response || e.api) ? 0 : netFails + 1;
+        netFails = e.network ? netFails + 1 : 0;
+        throttleFails = e.throttled ? throttleFails + 1 : 0;
+        if (throttleFails >= MAX_THROTTLE_FAILS) { out.aborted = `Angel kept throttling (${throttleFails} symbols in a row still refused after cool-downs) — retry later`; break; }
         if (netFails >= MAX_NETWORK_FAILS) { out.aborted = `network unreachable (${netFails} symbols in a row with no HTTP response) — last: ${e.message}`; break; }
         if (++fails >= MAX_CONSECUTIVE_FAILS) { out.aborted = `${fails} consecutive failures — last: ${e.message}`; break; }
     }

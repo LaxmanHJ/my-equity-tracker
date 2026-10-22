@@ -50,6 +50,18 @@
       "action": "Demerger (as HEGAM), ex 2026-09-07",
       "ratio": 0.35702,
       "stored_through": "2026-06-02"
+    },
+    "NATCOPHARM": {
+      "since": "2026-10-23",
+      "action": "Rights issue (NSE CA feed 2026-10-01)",
+      "ratio": 0.99185,
+      "stored_through": "2026-09-25"
+    },
+    "OLAELEC": {
+      "since": "2026-10-23",
+      "action": "Rights issue (NSE CA feed 2026-10-13)",
+      "ratio": 0.982,
+      "stored_through": "2026-09-25"
     }
   }
 }
