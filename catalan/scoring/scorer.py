@@ -37,6 +37,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -47,10 +48,19 @@ from catalan.config import (
     PRIMARY_MODEL,
     SCORE_VALUES,
     SCORING_BATCH_SIZE,
+    TEMPERATURE,
+    TEMPERATURE_MODEL_PREFIXES,
 )
+from catalan.clock import now_ist, now_ist_dt
 from catalan.data.store import store
 from catalan.scoring import filters
-from catalan.scoring.prompt import PROMPT_TEMPLATE, prompt_hash, render
+from catalan.scoring.prompt import (
+    PDF_PROMPT_TEMPLATE,
+    PROMPT_TEMPLATE,
+    prompt_hash,
+    render,
+    render_pdf,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -58,9 +68,70 @@ logger = logging.getLogger(__name__)
 MAX_TOKENS = 200
 SYNC_CONCURRENCY = int(os.getenv("CATALAN_SYNC_CONCURRENCY", "8"))
 MAX_RETRIES = 4
+# Rows are written after every chunk, so a long run that dies (quota, crash,
+# model drift) keeps everything scored before it.
+SCORE_CHUNK = 25
+
+# ── Gemini (catalan-v2 primary model) ─────────────────────────────────────────
+# Operational settings, not study parameters: they change how fast requests are
+# sent, never what is asked. One request at a time, spaced under the free
+# tier's per-minute cap.
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+GEMINI_MIN_INTERVAL_SECONDS = float(os.getenv("CATALAN_GEMINI_MIN_INTERVAL", "4.5"))
+GEMINI_MAX_OUTPUT_TOKENS = 512
+GEMINI_TIMEOUT_SECONDS = 60
+FIXED_REFUSALS = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}
+# Stored instead of an answer when Google refuses. These are NEVER passed to
+# parse_response: placeholder text containing "no" or "unknown" would otherwise
+# become a fabricated verdict (verifier review 4).
+SENTINEL_PREFIXES = ("[prompt blocked:", "[empty answer:")
 
 TRANSPORT_SYNC = "sync"
 TRANSPORT_BATCH = "batch"
+
+# Two arms, one model. Each arm is its own instrument with its own prompt hash,
+# so its rows are separately analysable under the same primary key.
+ARM_HEADLINE = "headline"      # the paper's prompt over the NSE headline (control)
+ARM_PDF = "pdf"                # the same prompt over headline + first PDF pages
+ARMS = (ARM_HEADLINE, ARM_PDF)
+
+
+def arm_hash(arm: str) -> str:
+    if arm == ARM_HEADLINE:
+        return prompt_hash(PROMPT_TEMPLATE)
+    if arm == ARM_PDF:
+        return prompt_hash(PDF_PROMPT_TEMPLATE)
+    raise ValueError(f"unknown arm {arm!r}; expected one of {ARMS}")
+
+
+def temperature_for(model_id: str) -> Optional[float]:
+    """TEMPERATURE for models that accept it; None (omit it) for those that 400."""
+    return TEMPERATURE if model_id.startswith(TEMPERATURE_MODEL_PREFIXES) else None
+
+
+def is_gemini(model_id: str) -> bool:
+    return model_id.startswith("gemini-")
+
+
+class ModelDrift(RuntimeError):
+    """Google served a different model than the one requested.
+
+    Google has silently rerouted deprecated model names before (gemini-3.5-flash
+    went to 3.6-flash on 2026-10-08). Rows from another model would be a second
+    instrument mixed into this one, so scoring halts: nothing more is written,
+    and the pipeline records an error, which turns the run red.
+    """
+
+
+class ModelGone(ModelDrift):
+    """Google answered 404 for the model name: the model no longer exists for
+    this key. Halts like a drift, and is recorded separately in the model-check
+    log, where it counts toward "instrument withdrawn" (Amendment 1)."""
+
+
+class QuotaExhausted(RuntimeError):
+    """The free tier's daily request cap is spent. Not a failure: the remaining
+    announcements stay pending and are scored by the next run."""
 
 
 # ── Response parsing ──────────────────────────────────────────────────────────
@@ -70,13 +141,40 @@ TRANSPORT_BATCH = "batch"
 # a rationale reading "...this is not a NO for the stock" must not flip the score.
 _ANSWER_RE = re.compile(r"\b(YES|NO|UNKNOWN)\b", re.IGNORECASE)
 
+# A line that is ONLY a verdict, once markdown emphasis and trailing
+# punctuation are stripped: "**UNKNOWN**", "# NO", "`YES`", "UNKNOWN." all
+# qualify. Prose does not — "this is not a NO for the stock" is not a bare
+# token, and neither is "1. NO" (a digit cannot start the match). That is what
+# makes scanning past line 0 safe.
+_VERDICT_ONLY_RE = re.compile(r"^[\s*#>`_~\-]*(YES|NO|UNKNOWN)[\s*`_~.:!,]*$",
+                              re.IGNORECASE)
+
+# How far past the first line to look. The observed preambles are one or two
+# sentences ("I can help you analyze this headline for X."), so a handful of
+# lines is enough; scanning the whole response would start reading rationale.
+_VERDICT_SCAN_LINES = 6
+
 
 def parse_response(raw: str) -> Tuple[Optional[int], Optional[str]]:
     """Free-text response → (score, rationale), per the paper's format.
 
-    Returns (None, raw) when the first line carries no recognisable answer —
-    an abstention is recorded as such rather than silently coerced to 0, since
-    0 is a real UNKNOWN verdict and must stay distinguishable from a parse miss.
+    Returns (None, raw) when no recognisable answer is found — an abstention is
+    recorded as such rather than silently coerced to 0, since 0 is a real
+    UNKNOWN verdict and must stay distinguishable from a parse miss.
+
+    Two passes, and the order matters:
+
+    1. The paper's format puts the verdict on the first line, so that line is
+       searched first and loosely. Anchoring here is deliberate: a rationale
+       reading "...this is not a NO for the stock" must never flip the score.
+    2. If line 1 carries no verdict, look for a line that is *nothing but* a
+       verdict within the first few lines. Haiku frequently answers with a
+       preamble — "I can help you analyze this headline for X." — and then
+       "**UNKNOWN**" on its own line. Pass 1 alone discarded those as parse
+       misses, which is how a readable verdict became a NULL score.
+
+    The second pass is narrow on purpose. It matches only a bare token, so it
+    cannot pick a verdict out of prose the way a whole-response search would.
     """
     if not raw:
         return None, None
@@ -86,12 +184,21 @@ def parse_response(raw: str) -> Tuple[Optional[int], Optional[str]]:
         return None, None
 
     match = _ANSWER_RE.search(lines[0])
-    if not match:
-        return None, raw.strip()[:500]
+    if match:
+        score = SCORE_VALUES[match.group(1).upper()]
+        rationale = " ".join(lines[1:]).strip() or None
+        return score, (rationale[:500] if rationale else None)
 
-    score = SCORE_VALUES[match.group(1).upper()]
-    rationale = " ".join(lines[1:]).strip() or None
-    return score, (rationale[:500] if rationale else None)
+    for i, line in enumerate(lines[:_VERDICT_SCAN_LINES]):
+        verdict = _VERDICT_ONLY_RE.match(line)
+        if verdict:
+            score = SCORE_VALUES[verdict.group(1).upper()]
+            # Keep the preamble in the rationale — it is evidence about how the
+            # instrument behaved, and discarding it would hide the drift.
+            rest = " ".join(lines[:i] + lines[i + 1:]).strip() or None
+            return score, (rest[:500] if rest else None)
+
+    return None, raw.strip()[:500]
 
 
 # ── Anthropic client ──────────────────────────────────────────────────────────
@@ -124,25 +231,194 @@ def _log_api_error(context: str, exc: BaseException) -> None:
                  f" — {detail}" if detail else f" — {exc}")
 
 
-def _message_params(company: str, headline: str, model_id: str) -> Dict:
-    return {
+def _prompt(company: str, headline: str, document: Optional[str] = None) -> str:
+    return (render(company, headline) if document is None
+            else render_pdf(company, headline, document))
+
+
+def _message_params(company: str, headline: str, model_id: str,
+                    document: Optional[str] = None) -> Dict:
+    content = _prompt(company, headline, document)
+    params = {
         "model": model_id,
         "max_tokens": MAX_TOKENS,
-        # No temperature: Opus 5 rejects it with a 400. Determinism comes from
-        # pinning (model_id, prompt_hash, effort) instead — see prompt.py.
-        "messages": [{"role": "user", "content": render(company, headline)}],
+        "messages": [{"role": "user", "content": content}],
     }
+    # Pinning (model_id, prompt_hash) did NOT make the instrument deterministic:
+    # at Haiku's default of 1.0, 42% of headlines re-scored ~15x changed verdict
+    # (2026-09-27 data audit). Sent wherever accepted; Opus 5 and later 400 on it.
+    temperature = temperature_for(model_id)
+    if temperature is not None:
+        params["temperature"] = temperature
+    return params
+
+
+# ── Gemini transport ──────────────────────────────────────────────────────────
+
+_gemini_lock = threading.Lock()
+_gemini_last_call = [0.0]
+
+
+class _GeminiTransient(RuntimeError):
+    """A failure worth retrying: 5xx, timeout, or the per-minute cap."""
+
+    def __init__(self, msg: str, wait: float = 0.0):
+        super().__init__(msg)
+        self.wait = wait
+
+
+class _GeminiEmpty(RuntimeError):
+    """An empty answer with no fixed reason. Left pending, but not retried
+    within the run: an input that always comes back empty would otherwise burn
+    MAX_RETRIES requests of the daily quota every day."""
+
+
+class _Refusal(str):
+    """Placeholder text for a fixed refusal: stored as-is, never parsed."""
+
+
+def _retry_delay(err: Dict) -> float:
+    for d in err.get("details") or []:
+        delay = d.get("retryDelay")
+        if isinstance(delay, str) and delay.endswith("s"):
+            try:
+                return float(delay[:-1])
+            except ValueError:
+                pass
+    return 30.0
+
+
+def _gemini_generate(content: str, model_id: str) -> str:
+    """One generateContent call. Returns the answer text (never empty).
+
+    Raises ModelDrift, QuotaExhausted, _GeminiTransient, or RuntimeError for a
+    permanent request error (bad key, invalid request).
+    """
+    import requests
+
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set. CATALAN reads the repo .env; in GitHub "
+            "Actions it must be a repository secret.")
+    config = {"maxOutputTokens": GEMINI_MAX_OUTPUT_TOKENS}
+    temperature = temperature_for(model_id)
+    if temperature is not None:
+        config["temperature"] = temperature
+    body = {"contents": [{"role": "user", "parts": [{"text": content}]}],
+            "generationConfig": config}
+
+    with _gemini_lock:                      # one request at a time, spaced
+        wait = _gemini_last_call[0] + GEMINI_MIN_INTERVAL_SECONDS - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            r = requests.post(GEMINI_URL.format(model=model_id),
+                              headers={"x-goog-api-key": key}, json=body,
+                              timeout=GEMINI_TIMEOUT_SECONDS)
+        except requests.RequestException as exc:
+            raise _GeminiTransient(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            _gemini_last_call[0] = time.monotonic()
+
+    if r.status_code == 429:
+        try:
+            err = (r.json() if r.content else {}).get("error", {})
+        except ValueError:
+            err = {}
+        if "PerDay" in r.text:
+            raise QuotaExhausted(err.get("message", "daily quota exhausted")[:200])
+        raise _GeminiTransient("per-minute rate limit", wait=_retry_delay(err))
+    if r.status_code == 404 and ("not found" in r.text.lower() or model_id in r.text):
+        raise ModelGone(f"HTTP 404 for {model_id}: {r.text[:160]}")
+    if r.status_code >= 500:
+        raise _GeminiTransient(f"HTTP {r.status_code}")
+    if not r.ok:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+
+    try:
+        j = r.json()
+    except ValueError as exc:
+        raise _GeminiTransient(f"non-JSON body (HTTP {r.status_code})") from exc
+    candidates = j.get("candidates") or []
+    if not candidates:
+        # A blocked prompt is a fact about this input; Google may omit
+        # modelVersion here, so the drift check applies only to real answers.
+        reason = (j.get("promptFeedback") or {}).get("blockReason")
+        if not reason:
+            raise _GeminiEmpty("no candidates and no blockReason")
+        return _Refusal(f"[prompt blocked: {reason}]")
+    served = j.get("modelVersion")
+    if served != model_id:
+        raise ModelDrift(f"requested {model_id!r}, Google served {served!r}")
+    if ((j.get("usageMetadata") or {}).get("thoughtsTokenCount") or 0) > 0:
+        # "No thinking tokens" is a declared property of the instrument
+        # (Amendment 1). Thinking switched on under the same name is a silent
+        # model change, so it halts scoring rather than being recorded.
+        raise ModelDrift(f"{model_id} produced thinking tokens; it was declared to use none")
+    cand = candidates[0]
+    text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts", [])
+                   if not p.get("thought")).strip()
+    if text:
+        return text
+    finish = cand.get("finishReason")
+    if finish in FIXED_REFUSALS:
+        # A safety or recitation refusal is a fixed outcome for this input at
+        # temperature 0: recorded once as an abstention, not retried.
+        return _Refusal(f"[empty answer: finishReason={finish}]")
+    # Truncated or unexplained emptiness says nothing fixed about the input
+    # (verifier G1), so it stays pending instead of becoming a permanent row.
+    raise _GeminiEmpty(f"empty answer, finishReason={finish}")
+
+
+def _score_one_gemini(content: str, model_id: str) -> Tuple[Optional[int], Optional[str], bool]:
+    for attempt in range(MAX_RETRIES):
+        try:
+            text = _gemini_generate(content, model_id)
+            if isinstance(text, _Refusal):
+                return None, str(text), False          # an abstention, never parsed
+            score, rationale = parse_response(text)
+            return score, rationale, False
+        except (ModelDrift, QuotaExhausted):
+            raise
+        except _GeminiEmpty as exc:
+            logger.warning("gemini: %s; left pending for the next run", exc)
+            return None, None, True
+        except _GeminiTransient as exc:
+            if attempt == MAX_RETRIES - 1:
+                logger.error("gemini: giving up after %d attempts: %s", MAX_RETRIES, exc)
+                return None, None, True
+            time.sleep(max(exc.wait, 2 ** attempt))
+        except Exception as exc:                         # noqa: BLE001
+            # Anything unexpected is one failed call, never a lost run (G2).
+            logger.error("gemini: %s: %s", type(exc).__name__, exc)
+            return None, None, True
+    return None, None, True
 
 
 # ── Sync transport ────────────────────────────────────────────────────────────
 
-def _score_one_sync(company: str, headline: str, model_id: str) -> Tuple[Optional[int], Optional[str]]:
+def _score_one_sync(company: str, headline: str, model_id: str,
+                    document: Optional[str] = None) -> Tuple[Optional[int], Optional[str], bool]:
+    """Score one headline. Returns (score, rationale, api_failed).
+
+    THE THIRD ELEMENT IS THE WHOLE POINT. "The model answered and I could not
+    read a verdict" and "the call never succeeded" are completely different
+    events, and collapsing them into a bare None is what let a total API
+    outage be recorded as 1,077 completed scores on 2026-08-14/17 while the
+    job stayed green.
+
+    An observation that was never made must not be stored as an observation.
+    """
+    if is_gemini(model_id):
+        return _score_one_gemini(_prompt(company, headline, document), model_id)
     client = _anthropic()
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.messages.create(**_message_params(company, headline, model_id))
+            resp = client.messages.create(**_message_params(company, headline, model_id, document))
             text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-            return parse_response(text)
+            score, rationale = parse_response(text)
+            return score, rationale, False
         except Exception as exc:                          # noqa: BLE001
             transient = type(exc).__name__ in (
                 "RateLimitError", "APIStatusError", "APIConnectionError",
@@ -150,23 +426,35 @@ def _score_one_sync(company: str, headline: str, model_id: str) -> Tuple[Optiona
             )
             if not transient or attempt == MAX_RETRIES - 1:
                 _log_api_error(f"scoring {company!r}", exc)
-                return None, None
+                return None, None, True
             time.sleep(2 ** attempt)
-    return None, None
+    return None, None, True
 
 
-def score_texts(items: Sequence[Tuple[str, str]],
-                model_id: str = None) -> List[Tuple[Optional[int], Optional[str]]]:
-    """Score (company, headline) pairs concurrently. Order preserved.
+def score_texts(items: Sequence[Tuple],
+                model_id: str = None) -> List[Tuple[Optional[int], Optional[str], bool]]:
+    """Score (company, headline) or (company, headline, document) items
+    concurrently. Order preserved. A document selects the PDF-arm prompt.
 
     The public entry point for anything that is not a stored announcement —
     manual entry, the A/B harness, ad-hoc checks.
+
+    Each element is ``(score, rationale, api_failed)``. Callers MUST check
+    ``api_failed`` before persisting: a failed call is not a verdict and must
+    leave the announcement pending rather than consuming its provenance slot.
     """
     model_id = model_id or PRIMARY_MODEL
     if not items:
         return []
+    if is_gemini(model_id):
+        # Serial: the free tier is throttled anyway, and a ModelDrift or
+        # QuotaExhausted must stop the run at the item that raised it.
+        return [_score_one_sync(it[0], it[1], model_id, it[2] if len(it) > 2 else None)
+                for it in items]
     with ThreadPoolExecutor(max_workers=SYNC_CONCURRENCY) as pool:
-        return list(pool.map(lambda it: _score_one_sync(it[0], it[1], model_id), items))
+        return list(pool.map(
+            lambda it: _score_one_sync(it[0], it[1], model_id, it[2] if len(it) > 2 else None),
+            items))
 
 
 # ── Batch transport ───────────────────────────────────────────────────────────
@@ -233,10 +521,11 @@ def collect_batches(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]
                                if getattr(b, "type", None) == "text")
                 score, rationale = parse_response(text)
                 scored.append((ann_id, model_id, prompt_hash(), None,
-                               score, rationale, run_id,
-                               datetime.now().isoformat(timespec="seconds")))
+                               score, rationale, run_id, now_ist()))
 
-            written += _write_scores(conn, scored)
+            # Batches are headline-arm only; they were submitted with this
+            # model's temperature, so that is what produced these verdicts.
+            written += _write_scores(conn, scored, temperature=temperature_for(model_id))
             conn.execute(
                 "UPDATE score_batches SET status='collected', collected_at=? "
                 "WHERE batch_id=?",
@@ -257,22 +546,78 @@ def collect_batches(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]
 
 # ── Selection and persistence ─────────────────────────────────────────────────
 
+# An announcement is pending unless a real OBSERVATION exists for it under this
+# provenance. The distinction is load-bearing:
+#
+#   score IS NOT NULL                     → a verdict. Never re-score.
+#   score IS NULL, rationale IS NOT NULL  → the model answered, the parser could
+#                                           not read it. Deterministic, so
+#                                           re-calling the API would just burn
+#                                           money for the same text. Not pending.
+#   score IS NULL, rationale IS NULL      → NOTHING WAS EVER OBSERVED. The call
+#                                           failed. Still pending.
+#
+# The old version tested only for the row's existence, so an API outage that
+# wrote 1,077 empty rows marked those announcements permanently done.
 PENDING_SQL = """
-SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at
+SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at, a.attachment_size
 FROM announcements a
 WHERE NOT EXISTS (
     SELECT 1 FROM scores s
     WHERE s.announcement_id = a.id
       AND s.model_id = ?
       AND s.prompt_hash = ?
+      AND (s.score IS NOT NULL OR s.rationale IS NOT NULL)
+)
+ORDER BY a.announced_at DESC
+"""
+
+# The rest of the corpus for the days `pending` is selecting from. These rows
+# are NOT candidates for scoring — they are the cluster context that makes
+# near-duplicate dedup corpus-level instead of batch-level. Without them a
+# duplicate is suppressed on one run and admitted on the next, once the
+# cluster's keeper has been scored and left the pending set.
+COHORT_SQL = """
+SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at, a.attachment_size
+FROM announcements a
+WHERE substr(a.announced_at, 1, 10) IN ({days})
+"""
+
+# The PDF arm's candidates: only filings whose attachment text was extracted
+# cleanly. Dedup context is the same whole-day cohort as the headline arm, so
+# both arms keep and drop exactly the same filings.
+PDF_PENDING_SQL = """
+SELECT a.id, a.symbol, a.company, a.headline, a.category, a.announced_at,
+       a.attachment_size, p.text AS document
+FROM announcements a
+JOIN pdf_texts p ON p.announcement_id = a.id AND p.status = 'ok'
+WHERE NOT EXISTS (
+    SELECT 1 FROM scores s
+    WHERE s.announcement_id = a.id
+      AND s.model_id = ?
+      AND s.prompt_hash = ?
+      AND (s.score IS NOT NULL OR s.rationale IS NOT NULL)
 )
 ORDER BY a.announced_at DESC
 """
 
 
 def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
-            limit: Optional[int] = None, apply_filters: bool = True) -> List[Dict]:
+            limit: Optional[int] = None, apply_filters: bool = True,
+            arm: str = ARM_HEADLINE, since: Optional[str] = None,
+            universe: bool = False) -> List[Dict]:
     """Every announcement with no score under this exact provenance pair.
+
+    ``arm`` picks the instrument: the headline arm considers every
+    announcement, the PDF arm only those with cleanly extracted text.
+
+    ``since`` (YYYY-MM-DD) is a date floor on ``announced_at``, never a symbol
+    filter. The daily pipeline passes STUDY_CLOCK_START so it cannot bulk-score
+    the pilot by accident; the pilot is scored deliberately from the CLI.
+
+    ``universe=True`` keeps only the declared study universe
+    (``universe.study_universe()``, Amendment 1): one fixed, pre-registered
+    set, never an ad-hoc symbol list. The daily pipeline always passes it.
 
     Cross-sectional by construction — no symbol appears in this query.
 
@@ -285,57 +630,113 @@ def pending(model_id: str = None, conn: Optional[sqlite3.Connection] = None,
     model_id = model_id or PRIMARY_MODEL
     own = conn is None
     conn = conn or store()
+    # One connection for both queries. Rebinding `conn` above means a second
+    # `conn is None` test would see the (closed) handle we opened, not None.
     try:
-        rows = [dict(r) for r in conn.execute(PENDING_SQL, (model_id, prompt_hash()))]
+        sql_pending = PENDING_SQL if arm == ARM_HEADLINE else PDF_PENDING_SQL
+        rows = [dict(r) for r in conn.execute(sql_pending, (model_id, arm_hash(arm)))
+                if not since or (r["announced_at"] or "")[:10] >= since]
+        if universe:
+            from catalan.data.universe import study_universe
+            members = study_universe()
+            rows = [r for r in rows if r["symbol"] in members]
+
+        # Dedup must see the whole symbol-day, not just what is unscored, or
+        # duplicates leak back in one run at a time. Scoped to the days present
+        # in the pending set — typically one day, and never the whole corpus.
+        context: List[Dict] = []
+        if apply_filters:
+            days = sorted({(r["announced_at"] or "")[:10] for r in rows if r["announced_at"]})
+            if days:
+                sql = COHORT_SQL.format(days=",".join("?" * len(days)))
+                pending_ids = {r["id"] for r in rows}
+                context = [dict(r) for r in conn.execute(sql, days)
+                           if r["id"] not in pending_ids]
     finally:
         if own:
             conn.close()
 
     if apply_filters:
-        rows, counts = filters.apply_all(rows)
+        rows, counts = filters.apply_all(rows, context=context)
         logger.info(
-            "pending: %d candidates → %d after filters "
-            "(%d excluded category, %d excluded headline, %d near-duplicate)",
-            counts["input"], counts["kept"], counts["excluded_category"],
-            counts["excluded_headline"], counts["excluded_duplicate"],
+            "pending[%s]: %d candidates → %d after filters "
+            "(%d excluded category, %d excluded headline, %d near-duplicate; "
+            "%d cohort rows as dedup context)",
+            arm, counts["input"], counts["kept"], counts["excluded_category"],
+            counts["excluded_headline"], counts["excluded_duplicate"], len(context),
         )
 
     return rows[:limit] if limit else rows
 
 
-def _write_scores(conn: sqlite3.Connection, rows: Sequence[Tuple]) -> int:
-    """Append score rows. INSERT OR IGNORE — never overwrite an existing verdict."""
+def _write_scores(conn: sqlite3.Connection, rows: Sequence[Tuple],
+                  temperature: Optional[float] = None) -> int:
+    """Append score rows, and repair rows that record no observation.
+
+    Rows are ``(announcement_id, model_id, prompt_hash, effort, score,
+    rationale, run_id, scored_at)``, optionally with a 9th element, the
+    temperature. Rows without one take ``temperature`` (None = none was sent).
+
+    Append-only is preserved, and now enforced in SQL rather than by
+    convention. The DO UPDATE fires only where the stored row has BOTH a NULL
+    score and a NULL rationale — i.e. a row left behind by a failed API call,
+    which contains no observation to protect. A real verdict, and even a parse
+    miss with its response text, are untouchable.
+
+    That repair path exists for the 1,077 empty rows the pre-2026-08-19 code
+    wrote during the API outage. New failures are never persisted at all, so
+    going forward this behaves exactly like the INSERT OR IGNORE it replaces.
+    """
     if not rows:
         return 0
-    before = conn.execute("SELECT count(*) FROM scores").fetchone()[0]
-    conn.executemany(
-        "INSERT OR IGNORE INTO scores (announcement_id, model_id, prompt_hash, "
-        "effort, score, rationale, run_id, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    rows = [tuple(r) if len(r) == 9 else tuple(r) + (temperature,) for r in rows]
+    cur = conn.executemany(
+        "INSERT INTO scores (announcement_id, model_id, prompt_hash, "
+        "effort, score, rationale, run_id, scored_at, temperature) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(announcement_id, model_id, prompt_hash) DO UPDATE SET "
+        "  effort      = excluded.effort, "
+        "  score       = excluded.score, "
+        "  rationale   = excluded.rationale, "
+        "  run_id      = excluded.run_id, "
+        "  scored_at   = excluded.scored_at, "
+        "  temperature = excluded.temperature "
+        "WHERE scores.score IS NULL AND scores.rationale IS NULL",
         rows,
     )
     conn.commit()
-    return conn.execute("SELECT count(*) FROM scores").fetchone()[0] - before
+    return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else len(rows)
 
 
 def score_pending(model_id: str = None, transport: str = TRANSPORT_SYNC,
                   limit: Optional[int] = None, run_id: Optional[str] = None,
-                  conn: Optional[sqlite3.Connection] = None) -> Dict:
+                  conn: Optional[sqlite3.Connection] = None,
+                  arm: str = ARM_HEADLINE, since: Optional[str] = None,
+                  universe: bool = False) -> Dict:
     """Score every pending announcement across the whole cross-section.
 
     This is the automated path. It takes no symbol argument by design.
+    The PDF arm is sync-only: its prompts carry document text, and the daily
+    volume does not justify a second batch path.
     """
     model_id = model_id or PRIMARY_MODEL
-    run_id = run_id or f"run-{datetime.now():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
+    if arm == ARM_PDF and transport != TRANSPORT_SYNC:
+        raise ValueError("the PDF arm supports the sync transport only")
+    if is_gemini(model_id) and transport != TRANSPORT_SYNC:
+        raise ValueError("the batch transport is Anthropic-only; Gemini scores sync")
+    hash_ = arm_hash(arm)
+    run_id = run_id or f"run-{now_ist_dt():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:6]}"
     own = conn is None
     conn = conn or store()
 
     try:
-        todo = pending(model_id, conn=conn, limit=limit)
+        todo = pending(model_id, conn=conn, limit=limit, arm=arm, since=since, universe=universe)
         if not todo:
-            logger.info("nothing pending for %s @ %s", model_id, prompt_hash())
-            return {"run_id": run_id, "pending": 0, "scored": 0, "abstained": 0}
+            logger.info("nothing pending for %s @ %s (%s arm)", model_id, hash_, arm)
+            return {"run_id": run_id, "arm": arm, "pending": 0, "scored": 0, "abstained": 0}
 
-        logger.info("scoring %d announcements via %s (%s)", len(todo), transport, model_id)
+        logger.info("scoring %d announcements via %s (%s, %s arm)",
+                    len(todo), transport, model_id, arm)
 
         if transport == TRANSPORT_BATCH:
             batch_ids = [
@@ -346,23 +747,162 @@ def score_pending(model_id: str = None, transport: str = TRANSPORT_SYNC,
                     "batches": batch_ids,
                     "note": "run --collect once the batches finish"}
 
-        results = score_texts(
-            [(r["company"] or r["symbol"], r["headline"]) for r in todo], model_id
-        )
-        now = datetime.now().isoformat(timespec="seconds")
-        rows = [
-            (r["id"], model_id, prompt_hash(), None, score, rationale, run_id, now)
-            for r, (score, rationale) in zip(todo, results)
-        ]
-        written = _write_scores(conn, rows)
-        abstained = sum(1 for s, _ in results if s is None)
-        if abstained:
-            logger.warning("%d/%d abstained (parse miss or API failure) — these "
-                           "stay pending and will be retried next run",
-                           abstained, len(results))
+        # Scored and written chunk by chunk, so a run that stops early keeps
+        # everything before the stop. ONLY rows whose call actually completed
+        # are persisted: a failed call produced no observation, and writing it
+        # would consume the announcement's provenance slot and mark it
+        # permanently done (what happened on 2026-08-14/17). Unwritten rows stay
+        # pending and are retried on the next run.
+        results: List[Tuple[Optional[int], Optional[str], bool]] = []
+        written = 0
+        quota_deferred = 0
+        for start in range(0, len(todo), SCORE_CHUNK):
+            chunk = todo[start:start + SCORE_CHUNK]
+            items = [(r["company"] or r["symbol"], r["headline"]) + (
+                (r["document"],) if arm == ARM_PDF else ()) for r in chunk]
+            chunk_results: List[Tuple[Optional[int], Optional[str], bool]] = []
+            stop: Optional[BaseException] = None
+            try:
+                if is_gemini(model_id):
+                    # One at a time, so a quota stop or a model drift lands
+                    # exactly at the item that raised it.
+                    for item in items:
+                        try:
+                            chunk_results.extend(score_texts([item], model_id))
+                        except (QuotaExhausted, ModelDrift) as exc:
+                            stop = exc
+                            break
+                else:
+                    chunk_results = score_texts(items, model_id)
+            finally:
+                # Whatever happens, rows already scored in this chunk are kept.
+                now = now_ist()
+                rows = [(r["id"], model_id, hash_, None, score, rationale, run_id, now)
+                        for r, (score, rationale, failed) in zip(chunk, chunk_results)
+                        if not failed]
+                written += _write_scores(conn, rows, temperature=temperature_for(model_id))
+                results.extend(chunk_results)
+            if isinstance(stop, ModelDrift):
+                logger.error("MODEL DRIFT — scoring halted after %d rows: %s", written, stop)
+                stop.scored = written        # matching rows obtained before the halt
+                raise stop
+            if isinstance(stop, QuotaExhausted):
+                quota_deferred = len(todo) - len(results)
+                logger.warning("daily quota spent after %d calls; %d announcements "
+                               "stay pending for the next run (%s)",
+                               len(results), quota_deferred, stop)
+                break
 
-        return {"run_id": run_id, "pending": len(todo), "scored": written,
-                "abstained": abstained}
+        api_failed = sum(1 for _, _, failed in results if failed)
+        parse_missed = sum(1 for score, _, failed in results
+                           if score is None and not failed)
+
+        if parse_missed:
+            logger.warning(
+                "%d/%d parse misses — the model answered but no verdict could "
+                "be read. Stored with their response text for audit; they are "
+                "NOT retried, because the same text would parse the same way.",
+                parse_missed, len(results))
+
+        if api_failed and results:
+            # ERROR, not warning: this is an instrument outage, and the last
+            # one ran for four days at up to 100%/day without anyone noticing.
+            # It is surfaced in the returned dict too, so the Action's step
+            # summary carries it.
+            share = 100.0 * api_failed / max(len(results), 1)
+            logger.error(
+                "%d/%d (%.1f%%) API CALLS FAILED — these were NOT written and "
+                "remain pending. Check the error lines above for the cause "
+                "(credits, rate limit, key). If this share is large the day's "
+                "scoring is effectively missing, even though collection "
+                "succeeded.", api_failed, len(results), share)
+
+        return {"run_id": run_id, "arm": arm, "pending": len(todo), "scored": written,
+                "parse_missed": parse_missed, "api_failed": api_failed,
+                "quota_deferred": quota_deferred,
+                # Kept for backwards compatibility with anything reading the
+                # old key; it is the sum of the two distinct failure modes.
+                "abstained": parse_missed + api_failed}
+    finally:
+        if own:
+            conn.close()
+
+
+def reparse_stored(model_id: str = None,
+                   conn: Optional[sqlite3.Connection] = None,
+                   dry_run: bool = False, arm: str = ARM_HEADLINE) -> Dict:
+    """Re-read verdicts out of response text already stored. No API calls.
+
+    A parse miss stores the model's full response in ``rationale`` and leaves
+    ``score`` NULL. When the parser improves, those rows can be re-read for
+    free — the text is already on disk and the model is deterministic with
+    respect to it. This is strictly better than re-scoring: it costs nothing
+    and, more importantly, it does not change the instrument. Re-calling the
+    API would produce a *new* response, which is a different observation.
+
+    Only rows that record no verdict are touched, and only ever to fill one in.
+    A row with a score is never revisited.
+    """
+    model_id = model_id or PRIMARY_MODEL
+    own = conn is None
+    conn = conn or store()
+    try:
+        rows = conn.execute(
+            "SELECT announcement_id, rationale FROM scores "
+            "WHERE model_id = ? AND prompt_hash = ? "
+            "  AND score IS NULL AND rationale IS NOT NULL",
+            (model_id, arm_hash(arm)),
+        ).fetchall()
+
+        recovered = []
+        for ann_id, raw in rows:
+            if (raw or "").startswith(SENTINEL_PREFIXES):
+                continue                               # a refusal, not an unread answer
+            score, rationale = parse_response(raw)
+            if score is not None:
+                recovered.append((score, rationale, ann_id))
+
+        if recovered and not dry_run:
+            conn.executemany(
+                "UPDATE scores SET score = ?, rationale = ? "
+                "WHERE announcement_id = ? AND model_id = ? AND prompt_hash = ? "
+                "  AND score IS NULL",
+                [(sc, rt, aid, model_id, arm_hash(arm)) for sc, rt, aid in recovered],
+            )
+            conn.commit()
+
+        by_verdict: Dict[str, int] = {}
+        for sc, _, _ in recovered:
+            name = {1: "YES", 0: "UNKNOWN", -1: "NO"}[sc]
+            by_verdict[name] = by_verdict.get(name, 0) + 1
+
+        logger.info("reparse: %d candidates, %d verdicts recovered %s%s",
+                    len(rows), len(recovered), by_verdict,
+                    " (dry run — nothing written)" if dry_run else "")
+        return {"candidates": len(rows), "recovered": len(recovered),
+                "by_verdict": by_verdict, "dry_run": dry_run}
+    finally:
+        if own:
+            conn.close()
+
+
+def unobserved(model_id: str = None,
+               conn: Optional[sqlite3.Connection] = None, arm: str = ARM_HEADLINE) -> int:
+    """Count score rows that record NO observation — a failed call's leftovers.
+
+    Health metric. Under the current code this should stay at 0: failures are
+    no longer persisted. A non-zero value means either legacy rows from before
+    2026-08-19 or a regression in the write path.
+    """
+    model_id = model_id or PRIMARY_MODEL
+    own = conn is None
+    conn = conn or store()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM scores WHERE model_id = ? AND prompt_hash = ? "
+            "  AND score IS NULL AND rationale IS NULL",
+            (model_id, arm_hash(arm)),
+        ).fetchone()[0]
     finally:
         if own:
             conn.close()
@@ -380,23 +920,28 @@ def score_manual(company: str, headline: str, symbol: Optional[str] = None,
     point-in-time claim the forward log exists to make.
     """
     model_id = model_id or PRIMARY_MODEL
-    score, rationale = score_texts([(company, headline)], model_id)[0]
+    score, rationale, api_failed = score_texts([(company, headline)], model_id)[0]
 
     out = {
         "company": company, "symbol": symbol, "headline": headline,
         "model_id": model_id, "prompt_hash": prompt_hash(),
         "score": score, "rationale": rationale,
-        "verdict": {1: "YES", 0: "UNKNOWN", -1: "NO"}.get(score, "PARSE_FAILED"),
+        "verdict": {1: "YES", 0: "UNKNOWN", -1: "NO"}.get(
+            score, "API_FAILED" if api_failed else "PARSE_FAILED"),
+        "api_failed": api_failed,
         "persisted": False,
     }
-    if not persist or not symbol:
+    # Never persist a call that did not complete — the same rule as the bulk
+    # path. A manual entry that failed should be re-run, not recorded as a
+    # scored headline with no verdict.
+    if api_failed or not persist or not symbol:
         return out
 
     own = conn is None
     conn = conn or store()
     try:
-        stamp = announced_at or datetime.now().isoformat(timespec="seconds")
-        run_id = f"manual-{datetime.now():%Y%m%dT%H%M%S}"
+        stamp = announced_at or now_ist()
+        run_id = f"manual-{now_ist_dt():%Y%m%dT%H%M%S}"
         cur = conn.execute(
             "INSERT OR IGNORE INTO announcements (symbol, isin, company, announced_at, "
             "headline, category, industry, seq_id, source, ingested_at) "
@@ -408,7 +953,8 @@ def score_manual(company: str, headline: str, symbol: Optional[str] = None,
         ann_id = cur.lastrowid
         if ann_id:
             _write_scores(conn, [(ann_id, model_id, prompt_hash(), None,
-                                  score, rationale, run_id, stamp)])
+                                  score, rationale, run_id, stamp)],
+                          temperature=temperature_for(model_id))
             out.update(announcement_id=ann_id, persisted=True)
     finally:
         if own:
@@ -431,6 +977,13 @@ def main() -> None:
     ap.add_argument("--transport", choices=[TRANSPORT_SYNC, TRANSPORT_BATCH],
                     default=TRANSPORT_SYNC)
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--arm", choices=list(ARMS), default=ARM_HEADLINE,
+                    help="headline (control) or pdf (headline + first PDF pages)")
+    ap.add_argument("--since", help="only announcements dated on/after YYYY-MM-DD")
+    ap.add_argument("--all-companies", action="store_true",
+                    help="ignore the declared study universe (default: universe only)")
+    ap.add_argument("--reparse", action="store_true",
+                    help="re-read verdicts from stored response text; no API calls")
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would be scored, call nothing")
     args = ap.parse_args()
@@ -439,17 +992,23 @@ def main() -> None:
         result = score_manual(args.company or args.symbol or "the company",
                               args.headline, symbol=args.symbol, model_id=args.model)
         print(json.dumps(result, indent=2))
+    elif args.reparse:
+        print(json.dumps(reparse_stored(args.model, dry_run=args.dry_run, arm=args.arm), indent=2))
+
     elif args.collect:
         print(json.dumps(collect_batches(), indent=2))
     elif args.pending:
         if args.dry_run:
-            todo = pending(args.model, limit=args.limit)
-            print(json.dumps({"would_score": len(todo),
+            todo = pending(args.model, limit=args.limit, arm=args.arm, since=args.since,
+                           universe=not args.all_companies)
+            print(json.dumps({"would_score": len(todo), "arm": args.arm,
                               "model": args.model,
-                              "prompt_hash": prompt_hash()}, indent=2))
+                              "prompt_hash": arm_hash(args.arm),
+                              "temperature": temperature_for(args.model)}, indent=2))
         else:
-            print(json.dumps(score_pending(args.model, args.transport, args.limit),
-                             indent=2))
+            print(json.dumps(score_pending(args.model, args.transport, args.limit,
+                                           arm=args.arm, since=args.since,
+                                           universe=not args.all_companies), indent=2))
     else:
         ap.error("one of --pending, --collect or --headline is required")
 

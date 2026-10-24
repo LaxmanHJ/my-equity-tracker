@@ -20,6 +20,7 @@ conflict-free:
 
     catalan/data/forward_log/announcements/YYYY-MM-DD.ndjson.gz
     catalan/data/forward_log/scores/YYYY-MM-DD.ndjson.gz
+    catalan/data/forward_log/pdf_text/YYYY-MM-DD.ndjson.gz   (by extraction day)
 
 Gzip is measured, not assumed: a full NSE day is 540 KB raw and 69 KB gzipped,
 so the archive costs ~17 MB/year instead of ~135 MB. These are append-only data
@@ -54,6 +55,8 @@ logger = logging.getLogger(__name__)
 ARCHIVE_ROOT = Path(CATALAN_ROOT) / "data" / "forward_log"
 ANNOUNCEMENTS_DIR = ARCHIVE_ROOT / "announcements"
 SCORES_DIR = ARCHIVE_ROOT / "scores"
+PDF_TEXT_DIR = ARCHIVE_ROOT / "pdf_text"
+MODEL_CHECK_DIR = ARCHIVE_ROOT / "model_checks"
 
 ANNOUNCEMENT_COLS = ("symbol", "isin", "company", "announced_at", "headline",
                      "category", "industry", "seq_id", "source", "ingested_at",
@@ -62,7 +65,9 @@ ANNOUNCEMENT_COLS = ("symbol", "isin", "company", "announced_at", "headline",
                      "attachment_url", "attachment_size", "has_xbrl",
                      "disseminated_at")
 SCORE_COLS = ("announcement_id", "model_id", "prompt_hash", "effort", "score",
-              "rationale", "run_id", "scored_at")
+              "rationale", "run_id", "scored_at", "temperature")
+PDF_TEXT_COLS = ("status", "total_pages", "page_kinds", "text", "truncated",
+                 "sha256", "extractor", "extracted_at")
 
 
 def read_ndjson(path: Path) -> List[Dict]:
@@ -157,10 +162,13 @@ def export_scores(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
                 "symbol": r[0], "seq_id": r[1], "model_id": r[2],
                 "prompt_hash": r[3], "effort": r[4], "score": r[5],
                 "rationale": r[6], "run_id": r[7], "scored_at": r[8],
+                # Absent (not null) on rows archived before catalan-v2 (2026-10-18): those
+                # were produced with no temperature sent.
+                "temperature": r[9],
             }
             for r in conn.execute(
                 "SELECT a.symbol, a.seq_id, s.model_id, s.prompt_hash, s.effort, "
-                "s.score, s.rationale, s.run_id, s.scored_at "
+                "s.score, s.rationale, s.run_id, s.scored_at, s.temperature "
                 "FROM scores s JOIN announcements a ON a.id = s.announcement_id "
                 "WHERE substr(s.scored_at, 1, 10) = ? ORDER BY s.scored_at",
                 (day,),
@@ -175,6 +183,47 @@ def export_scores(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
     logger.info("archive: %s scores +%d added, %d enriched (%d in store)",
                 day, r["added"], r["enriched"], len(rows))
     return r["added"]
+
+
+def export_pdf_texts(day: str, conn: Optional[sqlite3.Connection] = None) -> int:
+    """Write attachment text extracted on ``day`` to the archive.
+
+    Keyed by extraction day, like scores by scoring day: the file date records
+    when the text was captured, which is the honest claim. Text extracted in a
+    backfill lands on the backfill's date, not the announcement's.
+    """
+    own = conn is None
+    conn = conn or store()
+    try:
+        rows = [
+            {"symbol": r[0], "seq_id": r[1], **dict(zip(PDF_TEXT_COLS, r[2:]))}
+            for r in conn.execute(
+                f"SELECT a.symbol, a.seq_id, {', '.join('p.' + c for c in PDF_TEXT_COLS)} "
+                "FROM pdf_texts p JOIN announcements a ON a.id = p.announcement_id "
+                "WHERE substr(p.extracted_at, 1, 10) = ? ORDER BY p.extracted_at, a.seq_id",
+                (day,),
+            )
+        ]
+    finally:
+        if own:
+            conn.close()
+
+    r = _append_ndjson(PDF_TEXT_DIR / f"{day}.ndjson.gz", rows, ("symbol", "seq_id"))
+    logger.info("archive: %s pdf_text +%d added, %d enriched (%d in store)",
+                day, r["added"], r["enriched"], len(rows))
+    return r["added"]
+
+
+def append_model_checks(day: str, records: List[Dict]) -> int:
+    """Append each run's model check (one row per arm) to the archive.
+
+    The evidence for Amendment 1's "instrument withdrawn" rule. A drift halt
+    writes no score rows, and GitHub run logs expire after 90 days, so without
+    this record "no matching response for 10 days" could not be checked from
+    git (verifier review 4).
+    """
+    return _append_ndjson(MODEL_CHECK_DIR / f"{day}.ndjson.gz", records,
+                          ("checked_at", "arm"))["added"]
 
 
 def rebuild(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:
@@ -197,10 +246,19 @@ def rebuild(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:
             ann += len(rows)
         conn.commit()
 
-        sc = 0
+        # Replayed through the scorer's own write rule, in archive order. The
+        # archive holds 1,077 empty rows left by failed API calls during the
+        # 2026-08 outage, each followed later by a real verdict. A plain INSERT
+        # OR IGNORE let the empty row win the primary key on every rebuild, so
+        # CI saw ~1,300 scored announcements as pending and re-scored them on
+        # every daily run from 08-20 to 09-11. Same rule as live scoring: an
+        # empty row is filled by the first real verdict; a verdict is never
+        # overwritten.
+        from catalan.scoring.scorer import _write_scores
+
+        score_rows = []
         for path in sorted(SCORES_DIR.glob("*.ndjson.gz")):
-            rows = read_ndjson(path)
-            for r in rows:
+            for r in read_ndjson(path):
                 hit = conn.execute(
                     "SELECT id FROM announcements WHERE symbol=? AND seq_id=?",
                     (r["symbol"], r["seq_id"]),
@@ -209,14 +267,29 @@ def rebuild(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:
                     logger.warning("archived score has no announcement: %s/%s",
                                    r["symbol"], r["seq_id"])
                     continue
+                score_rows.append((hit[0], r["model_id"], r["prompt_hash"], r.get("effort"),
+                                   r.get("score"), r.get("rationale"), r["run_id"],
+                                   r["scored_at"], r.get("temperature")))
+        _write_scores(conn, score_rows)
+        sc = len(score_rows)
+
+        pt = 0
+        for path in sorted(PDF_TEXT_DIR.glob("*.ndjson.gz")):
+            for r in read_ndjson(path):
+                hit = conn.execute(
+                    "SELECT id FROM announcements WHERE symbol=? AND seq_id=?",
+                    (r["symbol"], r["seq_id"]),
+                ).fetchone()
+                if not hit:
+                    logger.warning("archived pdf_text has no announcement: %s/%s",
+                                   r["symbol"], r["seq_id"])
+                    continue
                 conn.execute(
-                    "INSERT OR IGNORE INTO scores (announcement_id, model_id, "
-                    "prompt_hash, effort, score, rationale, run_id, scored_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (hit[0], r["model_id"], r["prompt_hash"], r.get("effort"),
-                     r.get("score"), r.get("rationale"), r["run_id"], r["scored_at"]),
+                    f"INSERT OR IGNORE INTO pdf_texts (announcement_id, {', '.join(PDF_TEXT_COLS)}) "
+                    f"VALUES (?, {', '.join('?' * len(PDF_TEXT_COLS))})",
+                    (hit[0], *(r.get(c) for c in PDF_TEXT_COLS)),
                 )
-                sc += 1
+                pt += 1
         conn.commit()
 
         total_a = conn.execute("SELECT count(*) FROM announcements").fetchone()[0]
@@ -226,7 +299,7 @@ def rebuild(conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:
             conn.close()
 
     logger.info("rebuild: %d announcements, %d scores in store", total_a, total_s)
-    return {"announcements_read": ann, "scores_read": sc,
+    return {"announcements_read": ann, "scores_read": sc, "pdf_texts_read": pt,
             "announcements_in_store": total_a, "scores_in_store": total_s}
 
 
@@ -243,7 +316,8 @@ def main() -> None:
         print(json.dumps(rebuild(), indent=2))
     elif args.export:
         print(json.dumps({"announcements": export_announcements(args.export),
-                          "scores": export_scores(args.export)}, indent=2))
+                          "scores": export_scores(args.export),
+                          "pdf_text": export_pdf_texts(args.export)}, indent=2))
     else:
         ap.error("one of --rebuild or --export is required")
 

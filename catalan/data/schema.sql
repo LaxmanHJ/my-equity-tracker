@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS scores (
     rationale       TEXT,
     run_id          TEXT NOT NULL,
     scored_at       TEXT NOT NULL,
+    temperature     REAL,             -- NULL = none sent (model default; 1.0 on Haiku)
     PRIMARY KEY (announcement_id, model_id, prompt_hash)
 );
 
@@ -97,10 +98,30 @@ CREATE TABLE IF NOT EXISTS panel (
     adv_20d          REAL,
     liquidity_bucket INTEGER,
     shortable        INTEGER,         -- 0 when T2T / ASM / GSM bans intraday shorts
+    high             REAL,            -- for C2's Abdi-Ranaldo spread (catalan-v2)
+    low              REAL,
     PRIMARY KEY (symbol, date)
 );
 
 CREATE INDEX IF NOT EXISTS idx_panel_date ON panel(date);
+
+-- ── PDF attachment text ──────────────────────────────────────────────────────
+-- The first PDF_PAGE_WINDOW pages of each attachment, extracted once. The TEXT
+-- is archived, not just the URL: NSE rotates its archive, and the study must be
+-- rebuildable without it. Only deterministic outcomes of a successful download
+-- are stored; a network failure leaves the row pending so it is retried, never
+-- recorded as a verdict on the document (the scorer's 2026-08 lesson).
+CREATE TABLE IF NOT EXISTS pdf_texts (
+    announcement_id INTEGER PRIMARY KEY REFERENCES announcements(id),
+    status          TEXT NOT NULL,     -- 'ok' | 'unreadable' | 'not_pdf'
+    total_pages     INTEGER,
+    page_kinds      TEXT,              -- JSON list per window page: TEXT | NO_TEXT | GARBLED
+    text            TEXT,              -- NULL unless status = 'ok'
+    truncated       INTEGER NOT NULL DEFAULT 0,
+    sha256          TEXT,              -- of the downloaded bytes
+    extractor       TEXT NOT NULL,     -- e.g. 'pymupdf-1.26.5'
+    extracted_at    TEXT NOT NULL
+);
 
 -- ── Ingest bookkeeping ───────────────────────────────────────────────────────
 -- A silently-dead forward collector is the main failure mode of this study:

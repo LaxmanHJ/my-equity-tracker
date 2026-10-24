@@ -1,0 +1,22 @@
+category,records,info_type,completeness_%,validity_%,uniqueness_%,specific_headline_%,informative_signal_%,stability_%,rescored_n,completeness_band,validity_band,uniqueness_band,specific_headline_band,informative_signal_band,stability_band
+Analysts/Institutional Investor Meet/Con. Call Updates,3918,analyst_meet_notice,98.9,100.0,91.9,27.4,8.7,56.9,295,High,High,Med,Low,Low,Med
+Shareholders meeting,3442,shareholder_meeting,99.2,100.0,99.6,20.3,11.7,49.4,162,High,High,High,Low,Low,Low
+General Updates,3034,generic_unclassified,98.6,100.0,97.6,72.4,34.1,54.0,189,High,High,High,High,Med,Med
+Outcome of Board Meeting,1973,financial_results,96.8,99.9,97.6,17.4,14.8,41.1,124,Med,High,High,Low,Low,Low
+Updates,1893,generic_unclassified,98.4,99.2,95.0,96.1,37.6,55.6,108,High,High,Med,High,Med,Med
+Press Release,1029,press_release,97.9,100.0,99.7,94.6,67.3,76.1,71,Med,High,High,High,High,High
+Appointment,592,management_change,97.8,100.0,93.8,100.0,66.8,42.4,33,Med,High,Med,High,High,Low
+Investor Presentation,547,investor_presentation,96.2,100.0,97.3,0.0,31.3,16.2,37,Med,High,High,Low,Med,Low
+Record Date,540,corporate_action,97.8,100.0,98.7,18.7,68.8,66.7,33,Med,High,High,Low,High,Med
+Change in Management,363,management_change,98.1,100.0,98.9,44.4,87.4,70.6,17,High,High,High,Med,High,Med
+Resignation of Director/KMP/SMP,337,management_change,98.2,100.0,95.5,0.0,99.4,100.0,10,High,High,Med,Low,High,High
+Credit Rating,291,credit_rating,98.6,100.0,99.3,0.0,8.1,44.4,18,High,High,High,Low,Low,Low
+ESOP/ESOS/ESPS,287,esop,99.7,100.0,98.6,39.7,87.3,30.0,10,High,High,High,Med,High,Low
+Monitoring Agency Report,218,routine_compliance,95.0,100.0,100.0,59.6,14.9,79.3,29,Med,High,High,Med,Low,High
+Resignation,209,management_change,99.0,100.0,97.6,99.5,99.3,,9,High,High,High,High,High,n/a
+Bagging/Receiving of orders/contracts,199,business_operations,98.0,100.0,95.5,36.2,100.0,100.0,14,High,High,Med,Med,High,High
+Change in Director(s),197,management_change,97.0,100.0,98.0,0.0,100.0,,8,Med,High,High,Low,High,n/a
+Allotment of Securities,196,fund_raising,99.5,100.0,98.0,55.6,90.8,,6,High,High,High,Med,High,n/a
+Change in Auditors,185,management_change,98.4,100.0,95.1,0.0,99.2,,3,High,High,Med,Low,High,n/a
+Spurt in Volume,183,exchange_query,100.0,100.0,100.0,100.0,90.0,,5,High,High,High,High,High,n/a
+Acquisition,160,m_and_a,98.1,100.0,99.4,64.4,83.3,,8,High,High,High,Med,High,n/a

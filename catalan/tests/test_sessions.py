@@ -67,3 +67,22 @@ def test_news_past_the_calendar_raises_rather_than_guessing():
     sessions = [date(2026, 8, 6), date(2026, 8, 7)]
     with pytest.raises(ValueError, match="beyond the last known trading day"):
         attribution_date(dt(2026, 8, 20, 18, 0, 0), sessions)
+
+
+# ── Amendment 1 (verifier D1, D-S6): non-session dates ───────────────────────
+
+def test_a_weekend_daytime_filing_is_overnight():
+    """Saturday 2026-08-08, 11:00: nothing trades, so it reaches the Monday open."""
+    assert classify_session(dt(2026, 8, 8, 11, 0, 0)) == OVERNIGHT
+
+
+def test_an_exchange_holiday_is_not_a_session_when_the_calendar_is_given():
+    sessions = [date(2026, 10, 19), date(2026, 10, 21)]       # 10-20 is Dussehra
+    assert classify_session(dt(2026, 10, 20, 12, 0, 0), sessions) == OVERNIGHT
+    assert classify_session(dt(2026, 10, 21, 12, 0, 0), sessions) == INTRADAY
+
+
+def test_weekday_rules_are_unchanged_when_the_calendar_is_given():
+    sessions = [date(2026, 8, 6), date(2026, 8, 7)]
+    assert classify_session(dt(2026, 8, 7, 9, 0, 0), sessions) == INTRADAY
+    assert classify_session(dt(2026, 8, 7, 8, 59, 59), sessions) == OVERNIGHT
