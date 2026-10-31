@@ -37,7 +37,7 @@ except ImportError:                     # pragma: no cover - depends on env
 
     def _similarity(a: str, b: str) -> float:
         # Not Damerau-Levenshtein: SequenceMatcher scores differently, so the
-        # 0.6 threshold is not exactly the paper's under this backend. Install
+        # threshold does not mean exactly the same thing under this backend. Install
         # rapidfuzz (it is in requirements.txt) for the real thing; this exists
         # so the pipeline degrades rather than dies.
         return SequenceMatcher(None, a, b).ratio()
@@ -79,55 +79,139 @@ def is_excluded(row: Dict) -> bool:
             or is_excluded_headline(row.get("headline")))
 
 
+# NSE headlines open with the filer's name in whatever form the filer typed it,
+# then a fixed stem. Both are stripped before comparing, or the shared template
+# dominates the similarity and unrelated filings look alike (the 2026-09-27 data
+# audit measured exactly that under the old whole-headline rule).
+_FILER_RE = re.compile(r"^.{0,160}?\s+(?=has\s+(?:informed|submitted)\b)", re.IGNORECASE | re.DOTALL)
+_STEM_RE = re.compile(
+    r"^has\s+(?:informed|submitted)(?:\s+to)?(?:\s+the\s+exchange)?[\s,]*(?:about|regarding|that)?\s*",
+    re.IGNORECASE)
+_NO_SIZE = {"", "-", "0 bytes"}
+
+
+def filing_text(headline: str) -> str:
+    """The part of a headline that describes THIS filing: no filer name, no stem."""
+    text = _FILER_RE.sub("", headline or "", count=1)
+    return normalise_headline(_STEM_RE.sub("", text, count=1))
+
+
+def _doc_size(row: Dict):
+    """NSE's reported attachment size, or None when it tells us nothing."""
+    size = (row.get("attachment_size") or "").strip().lower()
+    return None if size in _NO_SIZE else size
+
+
+def _same_filing(a: Tuple[str, str, object], b: Tuple[str, str, object], thresh: float) -> bool:
+    """(filing_text, category, size) pairs. Different reported sizes mean
+    different documents, whatever the text says — that is what separates two
+    genuine "Schedule of meet" filings on one day from one filing posted twice."""
+    text_a, cat_a, size_a = a
+    text_b, cat_b, size_b = b
+    if cat_a != cat_b:
+        return False
+    if size_a is not None and size_b is not None and size_a != size_b:
+        return False
+    return _similarity(text_a, text_b) >= thresh
+
+
 def dedup_key(symbol: str, announced_at: str) -> Tuple[str, str]:
     """Dedup is scoped to the same symbol on the same day, per the paper."""
     return (symbol, (announced_at or "")[:10])
 
 
+def _order_key(row: Dict):
+    """Deterministic ordering within a dedup bucket.
+
+    `announced_at` alone is not enough: NSE routinely stamps several filings
+    from one company to the same second, and which of them wins the cluster
+    would otherwise depend on the order the database happened to return rows
+    in. `id` is the ingest sequence and breaks the tie stably.
+    """
+    return (row.get("announced_at") or "", row.get("id") or 0)
+
+
 def drop_near_duplicates(
     rows: Sequence[Dict],
     threshold: float = None,
+    context: Sequence[Dict] = (),
 ) -> Tuple[List[Dict], List[Dict]]:
-    """Split rows into (kept, dropped) on same-symbol same-day similarity.
+    """Split ``rows`` into (kept, dropped) on same-symbol same-day similarity.
+
+    Two filings are the same when they share symbol, IST day and category, the
+    filing text (``filing_text``: no filer name, no "has informed the Exchange"
+    stem) is at least ``DEDUP_SIMILARITY`` similar (1.0 = identical), and NSE
+    does not report different attachment sizes for them.
 
     The earliest announcement in a near-duplicate cluster is kept — it is the
     one that carried the information first, and keeping a later restatement
     instead would attribute the reaction to the wrong timestamp.
 
-    ``rows`` need ``symbol``, ``announced_at`` and ``headline``. Returns dicts
-    from the input untouched.
+    ``context`` rows take part in forming clusters but are never returned in
+    either list. **This is what makes the rule corpus-level rather than
+    batch-level**, and it is not an optimisation — it is the declared rule.
+
+    Without it, dedup only sees whichever rows the caller happened to be
+    holding. A caller that passes just its unscored rows suppresses a duplicate
+    on the first pass, then — once the cluster's keeper has been scored and
+    left that set — stops suppressing it on the next, and the duplicate enters
+    the corpus after all. Corpus size then depends on how many times the caller
+    ran, which a pre-registered study cannot defend. Observed 2026-08-20: one
+    scoring run readmitted 151 rows this way.
+
+    ``rows`` and ``context`` need ``symbol``, ``announced_at`` and ``headline``;
+    ``category`` and ``attachment_size`` are used when present (a missing size
+    is "unknown", never "different"); ``id`` breaks timestamp ties. Returns
+    dicts from the input untouched.
     """
     thresh = DEDUP_SIMILARITY if threshold is None else threshold
 
-    buckets: Dict[Tuple[str, str], List[Dict]] = {}
+    # False = context (participates, never returned), True = candidate.
+    tagged: Dict[Tuple[str, str], List[Tuple[Dict, bool]]] = {}
+    for row in context:
+        tagged.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append((row, False))
     for row in rows:
-        buckets.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append(row)
+        tagged.setdefault(dedup_key(row["symbol"], row["announced_at"]), []).append((row, True))
 
     kept: List[Dict] = []
     dropped: List[Dict] = []
 
-    for bucket in buckets.values():
-        bucket.sort(key=lambda r: r["announced_at"])
-        survivors: List[Tuple[str, Dict]] = []
-        for row in bucket:
-            norm = normalise_headline(row["headline"])
-            if any(_similarity(norm, seen) > thresh for seen, _ in survivors):
-                dropped.append(row)
+    for bucket in tagged.values():
+        bucket.sort(key=lambda pair: _order_key(pair[0]))
+        survivors: List[Tuple[str, str, object]] = []
+        for row, is_candidate in bucket:
+            sig = (filing_text(row["headline"]), row.get("category"), _doc_size(row))
+            if any(_same_filing(sig, seen, thresh) for seen in survivors):
+                if is_candidate:
+                    dropped.append(row)
             else:
-                survivors.append((norm, row))
-                kept.append(row)
+                survivors.append(sig)
+                if is_candidate:
+                    kept.append(row)
 
-    kept.sort(key=lambda r: (r["announced_at"], r["symbol"]))
+    kept.sort(key=_order_key)
     return kept, dropped
 
 
-def apply_all(rows: Iterable[Dict], dedup: bool = True) -> Tuple[List[Dict], Dict[str, int]]:
+def apply_all(rows: Iterable[Dict], dedup: bool = True,
+              context: Iterable[Dict] = ()) -> Tuple[List[Dict], Dict[str, int]]:
     """Category exclusions then dedup. Returns (kept, counts) for reporting.
 
     The counts matter: a filter that silently removes most of the corpus should
     be visible in the run log, not discovered later in a coverage plot.
+
+    ``context`` is the rest of the corpus for the same symbol-days — rows the
+    caller is not selecting from, but which must still take part in forming
+    near-duplicate clusters. Pass it whenever ``rows`` is a *subset* of a day's
+    announcements (e.g. only the unscored ones); omit it when ``rows`` already
+    is the whole corpus under consideration. See ``drop_near_duplicates``.
+
+    Exclusions are applied to ``context`` too, and for the same reason they are
+    applied to ``rows``: an excluded-category filing is not part of the corpus,
+    so it must not become the keeper that suppresses a filing that is.
     """
     rows = list(rows)
+    context = [r for r in context if not is_excluded(r)]
 
     # Counted separately so the run log shows which rule is doing the work.
     # If the headline rule ever starts catching a lot, that is NSE's `desc`
@@ -139,7 +223,7 @@ def apply_all(rows: Iterable[Dict], dedup: bool = True) -> Tuple[List[Dict], Dic
     kept_rows = [r for r in rows if not is_excluded(r)]
 
     if dedup:
-        kept, dupes = drop_near_duplicates(kept_rows)
+        kept, dupes = drop_near_duplicates(kept_rows, context=context)
     else:
         kept, dupes = kept_rows, []
 

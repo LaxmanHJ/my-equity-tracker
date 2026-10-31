@@ -112,18 +112,30 @@ def test_a_row_hit_by_both_rules_is_not_double_counted():
     assert counts["kept"] == 0
 
 
-def test_near_duplicates_keep_the_earliest():
+def test_duplicates_keep_the_earliest():
     """The first announcement carried the information; a later restatement
     would attribute the reaction to the wrong timestamp."""
     rows = [
         _row("REL", "Board approves demerger of financial services business",
              at="2026-08-07T18:00:00"),
-        _row("REL", "Board approves demerger of financial services businesses",
+        _row("REL", "Board approves demerger of financial services business",
              at="2026-08-07T19:30:00"),
     ]
     kept, counts = filters.apply_all(rows)
     assert counts["excluded_duplicate"] == 1
     assert kept[0]["announced_at"] == "2026-08-07T18:00:00"
+
+
+def test_a_one_character_difference_is_a_different_filing():
+    """v2 (2026-10-18): only identical filing text is a duplicate. Near-matches
+    differed by exactly the detail that made them separate events."""
+    rows = [
+        _row("KIRLOSKAR", "Kirloskar has informed the Exchange about meet at 10.30 AM",
+             at="2026-08-07T18:00:00"),
+        _row("KIRLOSKAR", "Kirloskar has informed the Exchange about meet at 3.30 PM",
+             at="2026-08-07T18:05:00"),
+    ]
+    assert filters.apply_all(rows)[1]["excluded_duplicate"] == 0
 
 
 def test_dedup_is_scoped_to_same_symbol_same_day():
@@ -185,6 +197,23 @@ def test_pending_applies_filters_by_default(db):
     assert {r["symbol"] for r in rows} == {"RELIANCE", "TCS"}
 
 
+def test_pending_opens_its_own_connection_when_none_is_given(tmp_path, monkeypatch):
+    """The CLI --dry-run and the UI status endpoint call pending() with no
+    connection. It used to close the one it opened and then reuse that closed
+    handle for the dedup-context query."""
+    path = tmp_path / "own.db"
+    seed = store(path)
+    seed.execute(
+        "INSERT INTO announcements (symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES "
+        "('TCS', 'TCS', '2026-08-07T18:00:00', 'Q1 revenue up', "
+        "'Board Meeting Outcome', 's1', 'test', '2026-08-07T18:00:00')")
+    seed.commit()
+    seed.close()
+    monkeypatch.setattr(scorer, "store", lambda: store(path))
+    assert {r["symbol"] for r in scorer.pending("test-model")} == {"TCS"}
+
+
 def test_scored_rows_stop_being_pending(db):
     scorer._write_scores(db, [(1, "test-model", prompt_hash(), None, 1,
                                "why", "run-1", "2026-08-10T09:00:00")])
@@ -207,3 +236,397 @@ def test_scores_are_append_only(db):
                                       "run-2", "2026-08-10T10:00:00")]) == 0
     stored = db.execute("SELECT score, rationale FROM scores").fetchone()
     assert (stored[0], stored[1]) == (1, "first")
+
+
+# ── The silent-failure fix (2026-08-19) ───────────────────────────────────────
+#
+# Between 08-11 and 08-17 the NULL-verdict rate went 0.6% → 100% and the daily
+# job stayed green. Three defects compounded: an API failure was returned as a
+# bare None, that None was persisted as a completed score, and the pending
+# query tested only for a row's existence — so 1,077 announcements were marked
+# permanently done with no verdict. These tests pin each half of the repair.
+
+import sqlite3
+
+from catalan.data.store import store as _store
+from catalan.scoring.scorer import prompt_hash as _phash
+
+
+@pytest.fixture
+def sdb(tmp_path):
+    conn = _store(tmp_path / "scoring.db")
+    conn.execute(
+        "INSERT INTO announcements (id, symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES "
+        "(1,'RELIANCE','Reliance','2026-08-07T18:00:00','Board approves demerger',"
+        "'Board Meeting Outcome','s1','nse_announcements','2026-08-07T19:00:00')")
+    conn.commit()
+    yield conn
+    conn.close()
+
+
+def _score_row(ann_id, score, rationale, model="m", run="r"):
+    return (ann_id, model, _phash(), None, score, rationale, run, "2026-08-07T20:00:00")
+
+
+# ── Parser: verdicts behind a preamble ────────────────────────────────────────
+
+def test_verdict_on_its_own_line_is_recovered_from_behind_a_preamble():
+    """Haiku often answers "I can help you analyze this..." then "**UNKNOWN**".
+
+    Anchoring to line 1 alone discarded those as parse misses, which is how a
+    perfectly readable verdict became a NULL score.
+    """
+    raw = ("I can help you analyze this headline for Laxmi Dental Limited.\n\n"
+           "**UNKNOWN**\n\n"
+           "The headline merely announces a scheduled meeting notification.")
+    score, rationale = scorer.parse_response(raw)
+    assert score == 0
+    assert "I can help you analyze" in rationale, \
+        "the preamble is evidence about the instrument and must be retained"
+
+
+@pytest.mark.parametrize("line", ["**NO**", "# YES", "`UNKNOWN`", "UNKNOWN.", "__NO__"])
+def test_markdown_wrapped_verdicts_are_recovered(line):
+    score, _ = scorer.parse_response(f"Some preamble sentence.\n{line}\nReasoning.")
+    assert score is not None
+
+
+def test_the_second_pass_matches_only_a_BARE_verdict_never_prose():
+    """The widening must not reintroduce the bug it is guarded against.
+
+    A whole-response search would read the "NO" out of this rationale and
+    invert the row. Only a line that is nothing but a verdict counts.
+    """
+    raw = ("I am unable to give a view on this one.\n"
+           "This is not a NO for the stock price, but I cannot say more.\n"
+           "There is no clear read here.")
+    assert scorer.parse_response(raw)[0] is None
+
+
+def test_a_numbered_list_item_is_not_a_verdict():
+    assert scorer.parse_response("Preamble.\n1. NO\nMore text.")[0] is None
+
+
+# ── An API failure is not an observation ──────────────────────────────────────
+
+def test_api_failure_is_not_persisted_and_stays_pending(sdb, monkeypatch):
+    """THE CORE BUG. A call that never succeeded must not consume the
+    announcement's provenance slot."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, None, True)])
+
+    result = scorer.score_pending(model_id="m", conn=sdb)
+
+    assert result["api_failed"] == 1
+    assert result["scored"] == 0
+    assert sdb.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 0, \
+        "a failed call must write no row at all"
+    assert len(scorer.pending("m", conn=sdb, apply_filters=False)) == 1, \
+        "the announcement must still be pending for the next run"
+
+
+def test_parse_miss_IS_persisted_and_is_not_retried(sdb, monkeypatch):
+    """The opposite case: the model answered, so the response is evidence and
+    is kept — and re-calling the API would burn money for the same text."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, "the raw reply", False)])
+
+    result = scorer.score_pending(model_id="m", conn=sdb)
+
+    assert result["parse_missed"] == 1 and result["api_failed"] == 0
+    assert sdb.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 1
+    assert scorer.pending("m", conn=sdb, apply_filters=False) == []
+
+
+def test_the_two_failure_modes_are_reported_apart(sdb, monkeypatch):
+    """Collapsing them is what hid a four-day outage behind a 'parse miss' label."""
+    monkeypatch.setattr(scorer, "score_texts",
+                        lambda items, model_id=None: [(None, None, True)])
+    r = scorer.score_pending(model_id="m", conn=sdb)
+    assert r["parse_missed"] == 0
+    assert r["abstained"] == 1, "legacy key stays the sum of both"
+
+
+# ── Write path: append-only, enforced in SQL ──────────────────────────────────
+
+def test_a_verdict_is_never_overwritten(sdb):
+    scorer._write_scores(sdb, [_score_row(1, 1, "good news")])
+    scorer._write_scores(sdb, [_score_row(1, -1, "CONTRADICTORY", run="r2")])
+    got = sdb.execute("SELECT score, rationale, run_id FROM scores").fetchone()
+    assert (got[0], got[1], got[2]) == (1, "good news", "r"), \
+        "scores are append-only — an existing verdict is immutable"
+
+
+def test_a_parse_miss_is_also_protected(sdb):
+    """It holds the model's response text, which is a real observation."""
+    scorer._write_scores(sdb, [_score_row(1, None, "the model's reply")])
+    scorer._write_scores(sdb, [_score_row(1, 1, "overwrite attempt", run="r2")])
+    assert sdb.execute("SELECT rationale FROM scores").fetchone()[0] == "the model's reply"
+
+
+def test_a_row_recording_no_observation_CAN_be_filled(sdb):
+    """The narrow repair path for the 1,077 rows the outage left behind.
+
+    Nothing is protected here, because nothing was ever observed.
+    """
+    scorer._write_scores(sdb, [_score_row(1, None, None)])
+    scorer._write_scores(sdb, [_score_row(1, -1, "now scored", run="r2")])
+    got = sdb.execute("SELECT score, rationale FROM scores").fetchone()
+    assert (got[0], got[1]) == (-1, "now scored")
+
+
+def test_rows_recording_no_observation_are_pending_again(sdb):
+    scorer._write_scores(sdb, [_score_row(1, None, None)])
+    assert len(scorer.pending("m", conn=sdb, apply_filters=False)) == 1
+    assert scorer.unobserved("m", conn=sdb) == 1
+
+
+# ── Free repair ───────────────────────────────────────────────────────────────
+
+def test_reparse_recovers_verdicts_without_calling_the_api(sdb):
+    sdb.execute("INSERT INTO announcements (id, symbol, company, announced_at, "
+                "headline, category, seq_id, source, ingested_at) VALUES "
+                "(2,'TCS','TCS','2026-08-07T18:00:00','h','c','s2','nse','x')")
+    scorer._write_scores(sdb, [
+        _score_row(1, None, "Preamble sentence.\n**NO**\nBecause of the fine."),
+        _score_row(2, 1, "already scored"),
+    ])
+    out = scorer.reparse_stored("m", conn=sdb)
+
+    assert out["recovered"] == 1 and out["by_verdict"] == {"NO": 1}
+    assert sdb.execute("SELECT score FROM scores WHERE announcement_id=1").fetchone()[0] == -1
+    assert sdb.execute("SELECT score FROM scores WHERE announcement_id=2").fetchone()[0] == 1, \
+        "a row that already had a verdict is never revisited"
+
+
+def test_reparse_dry_run_writes_nothing(sdb):
+    scorer._write_scores(sdb, [_score_row(1, None, "Preamble.\n**YES**\nReason.")])
+    out = scorer.reparse_stored("m", conn=sdb, dry_run=True)
+    assert out["recovered"] == 1 and out["dry_run"] is True
+    assert sdb.execute("SELECT score FROM scores").fetchone()[0] is None
+
+
+# ── Dedup is corpus-level, not batch-level (2026-08-20) ───────────────────────
+#
+# `pending()` used to hand the dedup filter only its unscored rows. A duplicate
+# was therefore suppressed on one run and admitted on the next — once the
+# cluster's keeper had been scored and left the pending set. Corpus size became
+# a function of how many times scoring ran, which a pre-registered study cannot
+# defend. One real run readmitted 151 rows this way.
+
+def _ann(conn, ann_id, symbol, headline, at, category="Board Meeting Outcome"):
+    conn.execute(
+        "INSERT INTO announcements (id, symbol, company, announced_at, headline, "
+        "category, seq_id, source, ingested_at) VALUES (?,?,?,?,?,?,?, 'nse', 'x')",
+        (ann_id, symbol, symbol, at, headline, category, f"seq{ann_id}"))
+    conn.commit()
+
+
+def test_a_duplicate_stays_suppressed_after_its_keeper_is_scored(sdb):
+    """THE REGRESSION. Scoring the keeper must not readmit its duplicate."""
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 2, "ACME", "ACME LTD has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:05:00")
+    sdb.commit()
+
+    first = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in first] == [1], "the earliest of the cluster is the keeper"
+
+    # Score the keeper — exactly what the daily run does.
+    scorer._write_scores(sdb, [_score_row(1, 1, "good news")])
+
+    second = scorer.pending("m", conn=sdb)
+    assert second == [], (
+        "the duplicate was readmitted once its keeper left the pending set — "
+        "dedup is being applied to the pending subset instead of the corpus")
+
+
+def test_dedup_context_never_leaks_into_the_returned_rows(sdb):
+    """Context rows shape clusters but are not candidates for scoring."""
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited announces a rights issue of equity shares",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange about a board meeting",
+         "2026-08-07T18:05:00")
+    sdb.commit()
+    scorer._write_scores(sdb, [_score_row(1, 1, "scored")])
+
+    todo = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in todo] == [2], "only the unscored, non-duplicate row is returned"
+
+
+def test_an_excluded_row_cannot_become_the_cluster_keeper(sdb):
+    """Exclusions run before dedup, and that order is load-bearing.
+
+    An excluded-category filing is not part of the corpus, so it must not
+    suppress a filing that is — otherwise the exclusion list would silently
+    delete real observations as collateral.
+    """
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 1, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00", category="Trading Window")          # excluded
+    _ann(sdb, 2, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:05:00", category="Trading Window")          # also excluded...
+    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:10:00")                                      # ...this one is not
+    sdb.commit()
+
+    todo = scorer.pending("m", conn=sdb)
+    assert [r["id"] for r in todo] == [3], \
+        "an excluded row suppressed a real one — exclusions must precede dedup"
+
+
+def test_same_timestamp_ties_break_deterministically_on_ingest_id(sdb):
+    """NSE stamps several filings from one company to the same second.
+
+    Without an explicit tie-break, which one wins the cluster depends on the
+    order the database returned rows in — so the corpus would differ run to run.
+    """
+    sdb.execute("DELETE FROM announcements")
+    _ann(sdb, 7, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00")
+    _ann(sdb, 3, "ACME", "Acme Limited has informed the Exchange regarding Appointment of Mr X",
+         "2026-08-07T18:00:00")
+    sdb.commit()
+    assert [r["id"] for r in scorer.pending("m", conn=sdb)] == [3], \
+        "the lower ingest id must win an exact timestamp tie"
+
+
+# ── catalan-v2 amendment (2026-09-29): temperature, the PDF arm, the dedup rule ─
+
+def test_temperature_zero_is_sent_to_haiku():
+    params = scorer._message_params("Acme", "Board approves demerger", "claude-haiku-4-5-20251001")
+    assert params["temperature"] == 0.0
+
+
+def test_no_temperature_is_sent_to_models_that_reject_it():
+    """Opus 5 and later return a 400 on `temperature`."""
+    assert "temperature" not in scorer._message_params("Acme", "x", "claude-opus-5")
+
+
+def test_a_document_selects_the_pdf_prompt():
+    head = scorer._message_params("Acme", "Results", "claude-haiku-4-5")["messages"][0]["content"]
+    pdf = scorer._message_params("Acme", "Results", "claude-haiku-4-5",
+                                 document="Revenue grew 23%")["messages"][0]["content"]
+    assert "Announcement text" not in head and "Is this headline good or bad" in head
+    assert "Revenue grew 23%" in pdf and "Is this announcement good or bad" in pdf
+
+
+def test_the_arms_have_distinct_pinned_hashes():
+    assert scorer.arm_hash(scorer.ARM_HEADLINE) == _phash()
+    assert scorer.arm_hash(scorer.ARM_PDF) != scorer.arm_hash(scorer.ARM_HEADLINE)
+    with pytest.raises(ValueError):
+        scorer.arm_hash("other")
+
+
+def test_every_score_row_records_its_temperature(sdb):
+    scorer._write_scores(sdb, [_score_row(1, 1, "yes")], temperature=0.0)
+    assert sdb.execute("SELECT temperature FROM scores").fetchone()[0] == 0.0
+
+
+def test_a_ninth_element_carries_a_rows_own_temperature(sdb):
+    """How archive.rebuild replays history: old rows keep NULL (none was sent)."""
+    scorer._write_scores(sdb, [_score_row(1, 1, "yes") + (None,)], temperature=0.0)
+    assert sdb.execute("SELECT temperature FROM scores").fetchone()[0] is None
+
+
+def _pdf_text(conn, ann_id, status="ok", text="[page 1]\nRevenue grew 23%"):
+    conn.execute(
+        "INSERT INTO pdf_texts (announcement_id, status, text, extractor, extracted_at) "
+        "VALUES (?, ?, ?, 'test', '2026-10-02T09:00:00')",
+        (ann_id, status, text if status == "ok" else None))
+    conn.commit()
+
+
+def test_the_pdf_arm_only_sees_cleanly_extracted_filings(sdb):
+    _ann(sdb, 2, "TCS", "Tata Consultancy Services has submitted results", "2026-08-07T19:00:00")
+    _pdf_text(sdb, 1)
+    _pdf_text(sdb, 2, status="unreadable")
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, arm=scorer.ARM_PDF)] == [1]
+    assert {r["id"] for r in scorer.pending("m", conn=sdb)} == {1, 2}   # headline arm: all
+
+
+def test_the_arms_do_not_satisfy_each_other(sdb):
+    """A headline verdict must not stop the PDF arm scoring the same filing."""
+    _pdf_text(sdb, 1)
+    scorer._write_scores(sdb, [_score_row(1, 1, "headline verdict")])
+    assert scorer.pending("m", conn=sdb) == []
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, arm=scorer.ARM_PDF)] == [1]
+
+
+def test_score_pending_on_the_pdf_arm_writes_its_own_rows(sdb, monkeypatch):
+    _pdf_text(sdb, 1)
+    seen = []
+
+    def fake(items, model_id=None):
+        seen.extend(items)
+        return [(1, "strong quarter", False) for _ in items]
+
+    monkeypatch.setattr(scorer, "score_texts", fake)
+    out = scorer.score_pending("claude-haiku-4-5-20251001", conn=sdb, arm=scorer.ARM_PDF)
+    assert out["scored"] == 1 and out["arm"] == "pdf"
+    assert seen[0][2] == "[page 1]\nRevenue grew 23%", "the document must reach the prompt"
+    row = sdb.execute("SELECT prompt_hash, temperature FROM scores").fetchone()
+    assert (row[0], row[1]) == (scorer.arm_hash(scorer.ARM_PDF), 0.0)
+
+
+def test_the_pdf_arm_refuses_the_batch_transport(sdb):
+    with pytest.raises(ValueError):
+        scorer.score_pending("m", transport=scorer.TRANSPORT_BATCH, conn=sdb, arm=scorer.ARM_PDF)
+
+
+def _drow(symbol, headline, category="Appointment", size=None, at="2026-10-01T18:00:00", i=0):
+    return {"id": i, "symbol": symbol, "headline": headline, "category": category,
+            "attachment_size": size, "announced_at": at}
+
+
+def test_filing_text_strips_the_filer_and_the_stem():
+    assert filters.filing_text(
+        "PNB GILTS LTD. has informed the Exchange regarding Appointment of Mr X") == "appointment of mr x"
+    assert filters.filing_text("Board approves demerger") == "board approves demerger"
+
+
+def test_different_categories_are_never_the_same_filing():
+    """The audit's main false positive: an ESOP allotment 'duplicating' a meet schedule."""
+    rows = [_drow("A", "Acme has informed the Exchange about Schedule of meet", "Analysts meet", i=1),
+            _drow("A", "Acme has informed the Exchange about Schedule of meet", "Updates", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 0
+
+
+def test_different_document_sizes_mean_different_filings():
+    """Two genuine 'Schedule of meet' filings on one day are two meetings."""
+    rows = [_drow("A", "Acme has informed the Exchange about Schedule of meet", size="410.2 KB", i=1),
+            _drow("A", "Acme has informed the Exchange about Schedule of meet", size="388.9 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 0
+
+
+def test_the_same_document_posted_twice_is_a_duplicate():
+    rows = [_drow("A", "Acme Ltd has informed the Exchange about Schedule of meet", size="410.2 KB", i=1),
+            _drow("A", "ACME LIMITED has informed the Exchange regarding Schedule of meet",
+                  size="410.2 KB", i=2)]
+    kept, dropped = filters.drop_near_duplicates(rows)
+    assert [r["id"] for r in kept] == [1] and [r["id"] for r in dropped] == [2]
+
+
+def test_a_zero_byte_size_is_unknown_not_different():
+    rows = [_drow("A", "Acme has informed the Exchange about Price movement", "Price movement", "0 Bytes", i=1),
+            _drow("A", "Acme has informed the Exchange about Price movement", "Price movement", "12.1 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[1]) == 1
+
+
+def test_two_different_appointments_survive_when_sizes_differ():
+    rows = [_drow("A", "Acme has informed the Exchange regarding Appointment of Ms. Neha Rajvanshi as CFO",
+                  size="220.1 KB", i=1),
+            _drow("A", "Acme has informed the Exchange regarding Appointment of Shri Ravi Gupta as CS",
+                  size="231.7 KB", i=2)]
+    assert len(filters.drop_near_duplicates(rows)[0]) == 2
+
+
+def test_since_is_a_date_floor_never_a_symbol_filter(sdb):
+    """The daily run passes STUDY_CLOCK_START so it cannot bulk-score the pilot."""
+    _ann(sdb, 2, "TCS", "Tata Consultancy Services has submitted results", "2026-10-19T18:00:00")
+    assert [r["id"] for r in scorer.pending("m", conn=sdb, since="2026-10-19")] == [2]
+    assert {r["id"] for r in scorer.pending("m", conn=sdb)} == {1, 2}

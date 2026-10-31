@@ -1,0 +1,386 @@
+{
+  "records": 26585,
+  "window": [
+    "2026-08-07",
+    "2026-09-25"
+  ],
+  "symbols": 2370,
+  "categories": 113,
+  "roster_last_effective_from": "2026-07-17",
+  "symbols_with_multiple_isins": [],
+  "isins_with_multiple_symbols": [
+    "INE477B01010"
+  ],
+  "symbols_with_multiple_company_names": 2,
+  "empty_headlines": 19,
+  "url_ext": {
+    "pdf": 25405,
+    "(none)": 813,
+    "zip": 367
+  },
+  "has_xbrl_equals_has_attachment": true,
+  "attachment_size_bytes": {
+    "median": 754155.52,
+    "p90": 6826229.76,
+    "p99": 18475699.404799882,
+    "max": 144745431.04,
+    "under_20KB": 1,
+    "over_20MB": 175
+  },
+  "timestamps": {
+    "announced_at_unparseable": 0,
+    "disseminated_at_unparseable": 480,
+    "ingested_at_unparseable": 0,
+    "announced_day_ne_file_day": 0,
+    "exact_midnight": 0,
+    "dissemination_lag_s": {
+      "negative": 0,
+      "zero": 3155,
+      "1s": 19693,
+      "2-60s": 3256,
+      "1-60min": 1,
+      "over_1h": 0,
+      "null": 480,
+      "max_h": 0.0
+    },
+    "ingest_clock_files": {
+      "local": 1,
+      "UTC": 34
+    },
+    "ingested_before_announced_after_tz_fix": 0,
+    "ingested_before_announced_naive": 0,
+    "ingest_lag_h": {
+      "median": 20.2,
+      "p90": 28.5,
+      "max": 73.0
+    },
+    "url_timestamp_parsed": 25417,
+    "announced_minus_url_upload_s": {
+      "median": 29.0,
+      "p10": 10.0,
+      "p90": 175.0,
+      "negative": 0
+    },
+    "session_bucket": {
+      "00:00-09:00 (pre-open, tradable at open)": 258,
+      "09:00-09:15 (after cutoff)": 57,
+      "09:15-15:30 (market hours)": 8332,
+      "15:30-24:00 (post-close)": 17938
+    },
+    "weekend_records": 480,
+    "seq_order_inversions_gt_60s": 281,
+    "timestamps_shared_by_5plus_records": 11,
+    "max_records_on_one_timestamp": 7,
+    "symbol_timestamp_pairs_with_2plus": 232
+  },
+  "missing_weekdays": [
+    "2026-09-04",
+    "2026-09-11"
+  ],
+  "missing_weekend_days": [
+    "2026-08-09",
+    "2026-08-15",
+    "2026-08-16",
+    "2026-08-22",
+    "2026-08-23",
+    "2026-08-29",
+    "2026-08-30",
+    "2026-09-05",
+    "2026-09-06",
+    "2026-09-12",
+    "2026-09-13",
+    "2026-09-19",
+    "2026-09-20"
+  ],
+  "duplicates": {
+    "dup_key": 0,
+    "dup_seq_other_symbol": 0,
+    "dup_same_url": 5,
+    "dup_same_ts_headline": 109,
+    "dup_same_text_same_size": 362,
+    "dup_exact": 380,
+    "dup_near_same_day": 180,
+    "dup_cross_day": 255,
+    "dup_any": 815,
+    "repeat_text_different_doc": 378,
+    "project_filter_drop": 3534,
+    "project_filter_drop_other_category": 2218,
+    "unique_records": 25770,
+    "dup_any_%": 3.1
+  },
+  "templated_headlines": {
+    "label_only": 13806,
+    "label_only_%": 51.9,
+    "templated": 14890,
+    "templated_%": 56.0,
+    "specific": 11695,
+    "specific_%": 44.0,
+    "with_amount_or_pct": 425
+  },
+  "ai": {
+    "score_rows_in_archive": 36519,
+    "empty_failed_call_rows": 1653,
+    "real_calls": 34866,
+    "announcements_processed": 15656,
+    "redundant_rescore_calls": 19210,
+    "announcements_rescored": 1334,
+    "rescored_with_verdict_flip": 566,
+    "not_processed_not_excluded": 6495,
+    "processed_but_excluded_category": 0,
+    "verdicts": {
+      "NO": 7435,
+      "UNKNOWN": 5270,
+      "YES": 2917,
+      "ABSTAIN": 34
+    },
+    "no_info_signals": 4592,
+    "no_info_signal_%_of_signals": 44.4,
+    "signals_on_label_only_headlines": 4151,
+    "signals_on_label_only_headlines_%": 40.1,
+    "signal_%_label_only": 53.8,
+    "signal_%_specific": 77.5,
+    "no_%_label_only": 43.4,
+    "no_%_specific": 50.7,
+    "yes_%_label_only": 10.3,
+    "yes_%_specific": 26.8,
+    "rescored_verdict_sets": {
+      "(-1,)": 325,
+      "(-1, 0)": 311,
+      "(0,)": 268,
+      "(1,)": 175,
+      "(-1, 1)": 140,
+      "(-1, 0, 1)": 82,
+      "(0, 1)": 22,
+      "(0, 9)": 8
+    },
+    "rescored_yes_and_no_both_seen": 222,
+    "rescored_mean_modal_agreement_%": 90.8,
+    "rescored_calls_per_announcement_median": 15.0,
+    "est_cost_actual_usd": 14.49,
+    "est_cost_if_scored_once_usd": 6.5,
+    "est_cost_per_call_usd": 0.000416
+  },
+  "universe": {
+    "pit_nifty500_records": 7081,
+    "pit_nifty500_%": 26.6,
+    "records_symbol_has_price_data": 9889,
+    "records_symbol_has_price_data_%": 37.2,
+    "processed_calls_on_non_nifty500": 25665
+  },
+  "redundancy": {
+    "scorable_records": 22151,
+    "symbol_days": 14158,
+    "symbol_days_with_2plus": 4450,
+    "records_in_multi_record_symbol_days": 12443,
+    "records_in_multi_record_symbol_days_%": 56.2,
+    "same_symbol_day_same_type_extras": 2909,
+    "same_symbol_day_same_type_extras_%": 13.1,
+    "results_days": 1550,
+    "results_echo_records": 807,
+    "results_echo_by_type": {
+      "press_release": 303,
+      "investor_presentation": 259,
+      "board_meeting_outcome": 181,
+      "analyst_meet_notice": 64
+    },
+    "top_type_pairs_same_symbol_day": [
+      [
+        "financial_results",
+        "management_change",
+        353
+      ],
+      [
+        "routine_compliance",
+        "shareholder_meeting",
+        332
+      ],
+      [
+        "corporate_action",
+        "shareholder_meeting",
+        307
+      ],
+      [
+        "financial_results",
+        "press_release",
+        290
+      ],
+      [
+        "management_change",
+        "shareholder_meeting",
+        278
+      ],
+      [
+        "financial_results",
+        "investor_presentation",
+        251
+      ],
+      [
+        "generic_unclassified",
+        "shareholder_meeting",
+        238
+      ],
+      [
+        "board_meeting_outcome",
+        "management_change",
+        214
+      ],
+      [
+        "investor_presentation",
+        "press_release",
+        198
+      ],
+      [
+        "financial_results",
+        "generic_unclassified",
+        194
+      ],
+      [
+        "financial_results",
+        "routine_compliance",
+        183
+      ],
+      [
+        "financial_results",
+        "shareholder_meeting",
+        157
+      ]
+    ]
+  },
+  "pdf_sample": {
+    "n": 150,
+    "missing_from_cache": 5,
+    "status": {
+      "ok": 131,
+      "unreadable": 14,
+      "missing_from_cache": 5
+    },
+    "p1_cover_letter_%": 97.9,
+    "single_page_%": 26.2,
+    "pages_median": 4.0,
+    "tok_first3_median": 1068,
+    "tok_first3_p90": 1879,
+    "tok_whole_median": 1768,
+    "tok_whole_mean": 13385,
+    "tok_whole_max": 364420,
+    "sha256_mismatch": 0
+  },
+  "defects": {
+    "empty_headline": 19,
+    "missing_attachment": 480,
+    "non_pdf_attachment": 367,
+    "missing_isin": 0,
+    "missing_industry": 16582,
+    "timestamp_invalid_or_negative_lag": 0,
+    "exact_duplicate": 380,
+    "no_price_data_for_symbol": 16696,
+    "any_core_defect": 1226,
+    "any_core_defect_%": 4.6
+  },
+  "tiers": {
+    "T1_already_excluded": {
+      "records": 4434,
+      "records_%": 16.7,
+      "actual_calls": 0,
+      "actual_calls_%": 0.0,
+      "calls_if_once": 0,
+      "signal_%": 0.0,
+      "no_info_signal_%": 0.0,
+      "label_only_%": 68.1,
+      "pit_nifty500_%": 17.5
+    },
+    "T2_procedural_types": {
+      "records": 9417,
+      "records_%": 35.4,
+      "actual_calls": 14836,
+      "actual_calls_%": 42.6,
+      "calls_if_once": 6450,
+      "signal_%": 53.9,
+      "no_info_signal_%": 75.8,
+      "label_only_%": 57.7,
+      "pit_nifty500_%": 30.9
+    },
+    "T2a_procedural_and_label_only": {
+      "records": 5433,
+      "records_%": 20.4,
+      "actual_calls": 8659,
+      "actual_calls_%": 24.8,
+      "calls_if_once": 3681,
+      "signal_%": 42.8,
+      "no_info_signal_%": 80.9,
+      "label_only_%": 100.0,
+      "pit_nifty500_%": 29.7
+    },
+    "T3_priority_types": {
+      "records": 6221,
+      "records_%": 23.4,
+      "actual_calls": 10751,
+      "actual_calls_%": 30.8,
+      "calls_if_once": 4754,
+      "signal_%": 82.5,
+      "no_info_signal_%": 32.1,
+      "label_only_%": 38.0,
+      "pit_nifty500_%": 26.4
+    },
+    "T4_everything_else": {
+      "records": 6513,
+      "records_%": 24.5,
+      "actual_calls": 9279,
+      "actual_calls_%": 26.6,
+      "calls_if_once": 4452,
+      "signal_%": 66.4,
+      "no_info_signal_%": 23.6,
+      "label_only_%": 45.9,
+      "pit_nifty500_%": 26.8
+    },
+    "low_value_types": [
+      "analyst_meet_notice",
+      "analyst_meet_record",
+      "routine_compliance",
+      "shareholder_meeting"
+    ],
+    "priority_types": [
+      "business_operations",
+      "corporate_action",
+      "credit_rating",
+      "financial_results",
+      "fund_raising",
+      "m_and_a",
+      "press_release",
+      "regulatory_legal"
+    ]
+  },
+  "results_by_week": {
+    "2026-08-03/2026-08-09": {
+      "all": 196,
+      "pit_nifty500": 30
+    },
+    "2026-08-10/2026-08-16": {
+      "all": 1176,
+      "pit_nifty500": 109
+    },
+    "2026-08-17/2026-08-23": {
+      "all": 39,
+      "pit_nifty500": 3
+    },
+    "2026-08-24/2026-08-30": {
+      "all": 36,
+      "pit_nifty500": 3
+    },
+    "2026-08-31/2026-09-06": {
+      "all": 80,
+      "pit_nifty500": 3
+    },
+    "2026-09-07/2026-09-13": {
+      "all": 69,
+      "pit_nifty500": 1
+    },
+    "2026-09-14/2026-09-20": {
+      "all": 54,
+      "pit_nifty500": 1
+    },
+    "2026-09-21/2026-09-27": {
+      "all": 33,
+      "pit_nifty500": 1
+    }
+  }
+}

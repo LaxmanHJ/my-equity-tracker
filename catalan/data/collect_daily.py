@@ -37,10 +37,16 @@ from catalan.config import (
     NSE_ANNOUNCEMENTS_URL,
     NSE_WARMUP_PAGE,
 )
+from catalan.clock import now_ist  # noqa: F401  (re-exported; buy_list imports it from here)
 from catalan.data.store import store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+# ingested_at: until catalan-v2 (2026-10-18) this was the machine clock. The CI
+# runner's clock is UTC, so 34 of the first 35 archived day files carry
+# UTC-naive ingested_at next to IST-naive announced_at (2026-09-27 data audit).
+# From v2 on it is IST wherever it runs; see catalan/clock.py.
 
 SOURCE = "nse_announcements"
 
@@ -123,7 +129,7 @@ def normalise(row: Dict[str, Any]) -> Optional[Tuple]:
         (row.get("smIndustry") or "").strip() or None,
         _seq_id(row, announced_at, headline),
         SOURCE,
-        datetime.now().isoformat(timespec="seconds"),
+        now_ist(),
         # Captured but not read. `headline` (attchmntText) is the filing
         # description; the substance lives in this PDF. Storing the URL costs
         # nothing and cannot be recovered if NSE rotates its archive — whether

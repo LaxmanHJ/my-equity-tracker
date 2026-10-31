@@ -22,6 +22,8 @@ def env(tmp_path, monkeypatch):
     """Isolated archive dirs + store, so tests never touch the real corpus."""
     monkeypatch.setattr(archive, "ANNOUNCEMENTS_DIR", tmp_path / "announcements")
     monkeypatch.setattr(archive, "SCORES_DIR", tmp_path / "scores")
+    monkeypatch.setattr(archive, "PDF_TEXT_DIR", tmp_path / "pdf_text")
+    monkeypatch.setattr(archive, "MODEL_CHECK_DIR", tmp_path / "model_checks")
     conn = store(tmp_path / "t.db")
     now = datetime.now().isoformat(timespec="seconds")
     conn.executemany(
@@ -174,3 +176,53 @@ def test_orphan_score_is_skipped_not_crashed(env, tmp_path, caplog):
         assert result["scores_in_store"] == 0
     finally:
         fresh.close()
+
+
+def test_a_failed_call_row_does_not_shadow_the_later_real_verdict(env):
+    """The 2026-08 outage left empty rows in the archive, each followed days
+    later by a real verdict. Rebuild must keep the verdict, or the announcement
+    looks unscored and is paid for again on every run (1,334 were, 16-17 times)."""
+    from catalan.scoring import scorer
+
+    conn, tmp = env
+    archive.export_announcements("2026-08-07", conn=conn)
+    rows = [  # TCS: empty failed-call row first, then two real runs
+        {"symbol": "TCS", "seq_id": "s2", "model_id": "m1", "prompt_hash": scorer.prompt_hash(),
+         "effort": None, "score": None, "rationale": None,
+         "run_id": "run-outage", "scored_at": "2026-08-15T04:17:21"},
+        {"symbol": "TCS", "seq_id": "s2", "model_id": "m1", "prompt_hash": scorer.prompt_hash(),
+         "effort": None, "score": 1, "rationale": "strong quarter",
+         "run_id": "run-real", "scored_at": "2026-08-20T01:19:42"},
+        {"symbol": "TCS", "seq_id": "s2", "model_id": "m1", "prompt_hash": scorer.prompt_hash(),
+         "effort": None, "score": -1, "rationale": "a later re-score",
+         "run_id": "run-dup", "scored_at": "2026-08-21T04:28:11"},
+    ]
+    for r in rows:
+        archive._append_ndjson(tmp / "scores" / f"{r['scored_at'][:10]}.ndjson.gz", [r],
+                               ("symbol", "seq_id", "model_id", "prompt_hash"))
+
+    fresh = store(tmp / "rebuilt.db")
+    archive.rebuild(conn=fresh)
+    got = fresh.execute(
+        "SELECT s.score, s.rationale, s.run_id FROM scores s JOIN announcements a "
+        "ON a.id = s.announcement_id WHERE a.symbol = 'TCS'").fetchall()
+    assert [tuple(g) for g in got] == [(1, "strong quarter", "run-real")]
+    still_pending = scorer.pending("m1", conn=fresh, apply_filters=False)
+    assert "TCS" not in {r["symbol"] for r in still_pending}
+    fresh.close()
+
+
+def test_score_temperature_survives_the_round_trip(env):
+    conn, tmp = env
+    conn.execute("INSERT INTO scores (announcement_id, model_id, prompt_hash, effort, score, "
+                 "rationale, run_id, scored_at, temperature) VALUES (2, 'm1', 'h1', NULL, -1, "
+                 "'weak', 'run-2', '2026-10-02T09:00:00', 0.0)")
+    conn.commit()
+    archive.export_announcements("2026-08-07", conn=conn)
+    archive.export_scores("2026-08-10", conn=conn)
+    archive.export_scores("2026-10-02", conn=conn)
+    fresh = store(tmp / "rebuilt.db")
+    archive.rebuild(conn=fresh)
+    got = dict(fresh.execute("SELECT run_id, temperature FROM scores").fetchall())
+    assert got == {"run-1": None, "run-2": 0.0}, "old rows stay NULL; new rows keep 0.0"
+    fresh.close()
