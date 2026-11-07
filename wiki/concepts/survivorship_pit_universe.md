@@ -194,3 +194,24 @@ The order doesn't change; the absolute numbers move down. The PIT fix
 won't change *which* track wins, but it will move the absolute deflated
 Sharpe of the leader from "comfortable" to "borderline" — exactly the
 direction that should make us more conservative about sizing.
+
+## Keeping `price_history` current for the PIT universe (2026-09)
+
+A PIT membership table is only useful if every member's prices are current. On
+2026-09-27, the table's large-cap half (191 current NIFTY500 members) turned out
+to stop at 2026-05-08, and 84 more at 2026-06-02. Point-in-time NIFTY500
+coverage was **225/500** in August–September. Two manual fills brought it to
+**497/500**.
+
+Extending prices is now one command,
+[`scripts/price_gap_backfill/`](../../scripts/price_gap_backfill/README.md):
+`python3 scripts/price_gap_backfill/backfill.py` for a dry run, then `--apply`.
+Its scope is the recently active symbols plus the current PIT NIFTY500 members
+from `index_membership`. It lists members with no history rather than seeding
+them.
+
+Survivorship-relevant caveats recorded there:
+
+- TRENT, CUB and HEG are withheld (corporate-action seams).
+- TRIVENI's stored series contains an unadjusted demerger jump.
+- GSPL and JBCHEPHARM, both former members, have old gaps.

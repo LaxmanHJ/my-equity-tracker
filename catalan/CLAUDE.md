@@ -16,6 +16,26 @@ moving in the LLM's direction for 1–2 days, 34 bps/day gross, and the strategy
 **dies at 20 bps round-trip cost**. Everything here is built to find out whether
 the Indian version survives its own cost model.
 
+## Current study version: catalan-v2 (Amendment 1, 2026-09-29)
+
+**Read `PREREGISTRATION.md` → Amendment 1 before touching anything.**
+- Long-only YES basket vs the equal-weighted study universe, open→close.
+- **Model: `gemini-3.5-flash-lite`** (owner's choice; free tier,
+  `GEMINI_API_KEY` in `.env` and as a repo secret). The scorer halts on any
+  served-model mismatch.
+- **Universe:** NSE's NIFTY500 list frozen on 2026-10-18
+  (`data/universe/nifty500_2026-10-18.csv`): EQ series only, minus TRENT, CUB,
+  HEGAM and DUMMYHEG. 491 symbols. Only these are scored.
+- PDF arm (headline + first 3 PDF pages) with headline fallback, at
+  temperature 0.
+- Counted data starts at announcements dated 2026-10-26 (first counted session
+  2026-10-27). 2026-08-07 → 10-25 is the pilot.
+- **NO-PEEK:** no verdict is joined to any return before C0 (40 sessions) or
+  C1/C2 (120 sessions), except the declared pilot validation.
+- **Budget rule (owner, 2026-09-29):** about $150–200 of API spend to reach the
+  verdict. Every redesign or re-run decision gets a second pass from a separate
+  verifier agent before it executes, and bulk runs are dry-run first.
+
 ## What CATALAN is NOT
 
 It does **not** build on, extend, validate, or reuse conclusions from the
@@ -32,7 +52,7 @@ The one exception is **infrastructure**, listed below.
 | **Never write to Turso.** Reads only, via `catalan.data.store.turso_ro()`. | Free-tier write quota exhausted 2026-08-05. `tests/test_no_turso_writes.py` enforces it. |
 | **The system of record is `catalan/data/forward_log/` (committed NDJSON), not the database.** `catalan.db` is a rebuildable cache. | CI runners are ephemeral and Turso is blocked. More importantly, git commit timestamps are tamper-evident proof a headline was recorded *before* its outcome was known — the evidence the whole forward-log design exists to produce. |
 | Never rewrite or reorder archive rows. Append only. | It is evidence. `test_archive.py` asserts a repeat export is byte-identical. |
-| Scoring is **cross-sectional**. No function in `scoring/` may take a symbol filter. | The study scores the whole corpus every run; per-symbol scoring would introduce selection the pre-registration does not declare. |
+| Scoring is **cross-sectional**. No function in `scoring/` may take an ad-hoc symbol filter. The ONE exception is the declared study universe (`universe=True` → `universe.study_universe()`, Amendment 1): a fixed, pre-registered set, never a list chosen at run time. | Per-symbol scoring would introduce selection the pre-registration does not declare. A pre-declared universe is selection made before any data, which is what pre-registration is for. |
 | Own port: **5100**. Never touch 3000 (Node) or 5001 (quant engine). | Runs alongside, not inside. |
 | Own UI: `catalan/ui/`, served by CATALAN's own FastAPI. Do not add pages to `public/`. | The main dashboard is a different product. |
 | Nothing under `catalan/` may be imported by `src/` or `quant_engine/`. Dependency arrow points one way only. | Deleting `catalan/` must never break the main app. |
@@ -89,14 +109,17 @@ after. Index new pages in `catalan/wiki/README.md`.
 python3 -m uvicorn catalan.main:app --host 0.0.0.0 --port 5100 --reload
 
 # THE DAILY PIPELINE — what the GitHub Action runs.
-# rebuild → collect → score (whole cross-section) → archive
+# rebuild → collect → PDF text → score both arms (whole cross-section) → archive → buy list
 python3 -m catalan.pipeline                        # yesterday
 python3 -m catalan.pipeline --date 2026-08-07
 python3 -m catalan.pipeline --skip-score           # no Anthropic calls
 
 # Individual stages
 python3 -m catalan.data.collect_daily --date <YYYY-MM-DD>
-python3 -m catalan.scoring.scorer --pending                    # sync, fast
+python3 -m catalan.data.pdf_text --pending --since 2026-10-26 # PDF text, free
+python3 -m catalan.scoring.scorer --pending                    # headline arm, sync
+python3 -m catalan.scoring.scorer --pending --arm pdf          # PDF arm (sync only)
+python3 -m catalan.buy_list --date <YYYY-MM-DD> --print        # the day's YES list
 python3 -m catalan.scoring.scorer --pending --transport batch  # 50% cheaper, ≤24h
 python3 -m catalan.scoring.scorer --collect                    # gather batches
 python3 -m catalan.scoring.scorer --pending --dry-run          # count, call nothing
@@ -107,6 +130,12 @@ python3 -m catalan.scoring.scorer --headline "..." --company "..." [--symbol REL
 # Archive
 python3 -m catalan.data.archive --rebuild          # restore db from git
 zcat catalan/data/forward_log/announcements/2026-08-07.ndjson.gz | head
+
+# Data audit (read-only; never reads returns)
+python3 -m catalan.audit.data_audit
+
+# Price data for the study (main-repo tool; writes Turso price_history only)
+# See scripts/price_gap_backfill/README.md. Dry run is the default.
 
 # Tests
 python3 -m pytest catalan/tests/
