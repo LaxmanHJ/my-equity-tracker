@@ -1,0 +1,128 @@
+{
+  "_source": "https://www.nseindia.com/api/holiday-master?type=trading  (segment CM), fetched 2026-09-27",
+  "_note": "Bundled so a run can still check sessions if NSE blocks the live call. backfill.py merges this with the live list every run and prints any disagreement. A trailing '*' in NSE's description means a Muhurat special session is held on that date, so a bar on it is expected, not a phantom.",
+  "holidays": {
+    "2026": [
+      {
+        "date": "2026-01-15",
+        "weekday": "Thursday",
+        "description": "Municipal Corporation Election - Maharashtra",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-01-26",
+        "weekday": "Monday",
+        "description": "Republic Day",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-02-15",
+        "weekday": "Sunday",
+        "description": "Mahashivratri",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-03-03",
+        "weekday": "Tuesday",
+        "description": "Holi",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-03-21",
+        "weekday": "Saturday",
+        "description": "Id-Ul-Fitr (Ramadan Eid)",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-03-26",
+        "weekday": "Thursday",
+        "description": "Shri Ram Navami",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-03-31",
+        "weekday": "Tuesday",
+        "description": "Shri Mahavir Jayanti",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-04-03",
+        "weekday": "Friday",
+        "description": "Good Friday",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-04-14",
+        "weekday": "Tuesday",
+        "description": "Dr. Baba Saheb Ambedkar Jayanti",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-05-01",
+        "weekday": "Friday",
+        "description": "Maharashtra Day",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-05-28",
+        "weekday": "Thursday",
+        "description": "Bakri Id",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-06-26",
+        "weekday": "Friday",
+        "description": "Muharram",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-08-15",
+        "weekday": "Saturday",
+        "description": "Independence Day",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-09-14",
+        "weekday": "Monday",
+        "description": "Ganesh Chaturthi",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-10-02",
+        "weekday": "Friday",
+        "description": "Mahatma Gandhi Jayanti",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-10-20",
+        "weekday": "Tuesday",
+        "description": "Dussehra",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-11-08",
+        "weekday": "Sunday",
+        "description": "Diwali Laxmi Pujan*",
+        "muhurat_session": true
+      },
+      {
+        "date": "2026-11-10",
+        "weekday": "Tuesday",
+        "description": "Diwali-Balipratipada",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-11-24",
+        "weekday": "Tuesday",
+        "description": "Prakash Gurpurb Sri Guru Nanak Dev",
+        "muhurat_session": false
+      },
+      {
+        "date": "2026-12-25",
+        "weekday": "Friday",
+        "description": "Christmas",
+        "muhurat_session": false
+      }
+    ]
+  }
+}

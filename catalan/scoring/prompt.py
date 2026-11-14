@@ -48,9 +48,12 @@ SYSTEM_PREFIX = ""
 # Two deliberate engineering deviations from the paper, both recorded here
 # because they change the instrument and must be reported as such:
 #
-# 1. The paper set temperature=0 for reproducibility. Opus 5 rejects
-#    `temperature` with a 400, so determinism instead comes from pinning
-#    (model_id, prompt_hash, effort) and recording all three on every row.
+# 1. The paper set temperature=0 for reproducibility. Until catalan-v2 no
+#    temperature was sent (Opus 5 rejects it with a 400), on the theory that
+#    pinning (model_id, prompt_hash, effort) gave determinism. It did not: at
+#    Haiku's default of 1.0, 42% of re-scored headlines changed verdict. From v2
+#    on, config.TEMPERATURE (0) is sent to every model that accepts it, and
+#    each score row records the temperature it was produced at.
 #
 # 2. The paper parsed the first line of free text. Structured outputs
 #    (output_config.format + JSON schema) are more robust, but they change the
@@ -83,3 +86,43 @@ def render(company_name: str, headline: str) -> str:
         .replace("_company_name_", company_name)
         .replace("_headline_", headline)
     )
+
+
+# ── The PDF arm's instrument (2026-09 amendment) ─────────────────────────────
+#
+# The paper's prompt, changed in exactly two places and nowhere else:
+#   1. "Is this headline good or bad" → "Is this announcement good or bad",
+#      because the model now reads the filing, not only its label;
+#   2. the first PDF_PAGE_WINDOW pages of the attachment are appended after the
+#      headline, labelled as such.
+# The 2026-09-27 data audit is why: 52% of NSE headlines are label-only text
+# shared by >= 5 companies ("...has submitted the financial results for the
+# period ended Jun 30"), so the headline arm often has nothing to read.
+#
+# The headline arm keeps PROMPT_TEMPLATE unchanged and runs alongside as the
+# control. A filing whose PDF is unreadable has no PDF-arm row; the PDF arm
+# falls back to its headline-arm verdict, flagged, per the pre-registration.
+PDF_PROMPT_TEMPLATE = (
+    'Forget all your previous instructions. Pretend you are a financial expert. '
+    'You are a financial expert with stock recommendation experience. '
+    'Answer "YES" if good news, "NO" if bad news, or "UNKNOWN" if uncertain in '
+    'the first line. Then elaborate with one short and concise sentence on the '
+    'next line. Is this announcement good or bad for the stock price of '
+    '_company_name_ in the short term?\n'
+    'Headline: _headline_\n'
+    'Announcement text (first pages of the filing):\n'
+    '_document_'
+)
+
+
+def render_pdf(company_name: str, headline: str, document: str) -> str:
+    """Fill the PDF-arm template.
+
+    The document is appended after substitution rather than replaced in, so
+    filing text that happens to contain "_headline_" or "_company_name_" can
+    never be rewritten.
+    """
+    head, marker, tail = PDF_PROMPT_TEMPLATE.partition("_document_")
+    assert marker, "PDF_PROMPT_TEMPLATE lost its _document_ placeholder"
+    head = head.replace("_company_name_", company_name).replace("_headline_", headline)
+    return head + document + tail

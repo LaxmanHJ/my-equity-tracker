@@ -1,0 +1,151 @@
+seq_id,stratum,status,sha256_match,total_pages,window_kinds,p1_cover_letter,tok_first3,tok_whole,symbol,category,info_type,label_only
+106738906,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,522.75,522.75,SHILCTECH,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106754133,floored,ok,True,1.0,"[""TEXT""]",True,398.25,398.25,TALBROAUTO,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106744663,floored,ok,True,1.0,"[""TEXT""]",True,481.25,481.25,INDGN,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106735328,floored,ok,True,1.0,"[""TEXT""]",True,291.5,291.5,EVEREADY,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106733941,floored,ok,True,1.0,"[""TEXT""]",True,358.5,358.5,BSOFT,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106734154,floored,ok,True,1.0,"[""TEXT""]",True,377.0,377.0,GULFOILLUB,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106754706,floored,ok,True,1.0,"[""TEXT""]",True,565.5,565.5,URBANCO,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106748627,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,732.25,732.25,KRN,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106747154,floored,ok,True,1.0,"[""TEXT""]",True,476.25,476.25,MTARTECH,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106734928,floored,ok,True,1.0,"[""TEXT""]",True,443.25,443.25,VENTIVE,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106759723,floored,unreadable,True,18.0,"[""TEXT"", ""GARBLED"", ""GARBLED""]",True,6930.25,42462.25,GMRP&UI,Shareholders meeting,shareholder_meeting,True
+106740039,floored,ok,True,6.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1839.25,3394.25,CORDELIA,Shareholders meeting,shareholder_meeting,True
+106751334,floored,unreadable,True,41.0,"[""TEXT"", ""NO_TEXT"", ""NO_TEXT""]",True,386.75,6250.25,GABRIEL,Shareholders meeting,shareholder_meeting,True
+106772806,floored,unreadable,True,150.0,"[""TEXT"", ""NO_TEXT"", ""NO_TEXT""]",True,915.25,113812.0,TERASOFT,Shareholders meeting,shareholder_meeting,True
+106758987,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1792.25,1792.25,KILITCH,Shareholders meeting,shareholder_meeting,True
+106756484,floored,ok,True,24.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,3022.0,26562.0,JBMA,Shareholders meeting,shareholder_meeting,False
+106731600,floored,unreadable,True,12.0,"[""TEXT"", ""NO_TEXT"", ""NO_TEXT""]",True,308.25,308.25,ASKAUTOLTD,Shareholders meeting,shareholder_meeting,False
+106747429,floored,ok,True,13.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1906.75,12275.5,CHEMFAB,Shareholders meeting,shareholder_meeting,False
+106760471,floored,unreadable,True,6.0,"[""TEXT"", ""TEXT"", ""NO_TEXT""]",True,804.0,804.0,GANESHBE,General Updates,generic_unclassified,False
+106745646,floored,ok,True,1.0,"[""TEXT""]",True,496.25,496.25,POLYMED,General Updates,generic_unclassified,True
+106732255,floored,ok,True,10.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2124.75,5981.5,SUBROS,General Updates,generic_unclassified,True
+106776213,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,606.0,606.0,BMWVENTLTD,General Updates,generic_unclassified,True
+106743705,floored,ok,True,42.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,242.25,7067.75,KRISHNADEF,General Updates,financial_results,False
+106777165,floored,ok,True,5.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1400.0,2235.25,CGCL,General Updates,fund_raising,False
+106738004,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1320.75,1320.75,VIDYAWIRES,General Updates,m_and_a,False
+106755124,floored,ok,True,4.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1412.75,1979.5,WABAG,General Updates,business_operations,False
+106737287,floored,ok,True,10.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1559.0,3083.25,DCMFINSERV,Outcome of Board Meeting,board_meeting_outcome,True
+106745160,floored,unreadable,True,7.0,"[""NO_TEXT"", ""NO_TEXT"", ""NO_TEXT""]",False,0.0,0.0,GICL,Outcome of Board Meeting,financial_results,True
+106765141,floored,ok,True,4.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1865.25,2749.25,ACMESOLAR,Outcome of Board Meeting,board_meeting_outcome,True
+106741797,floored,ok,True,16.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1523.5,11118.75,WELSPUNLIV,Outcome of Board Meeting,financial_results,False
+106735177,floored,ok,True,9.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1606.5,4535.0,KAPSTON,Outcome of Board Meeting,financial_results,False
+106741753,floored,ok,True,18.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2676.5,10486.25,MADHAV,Outcome of Board Meeting,financial_results,True
+106735245,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1768.25,1768.25,ICICIAMC,Outcome of Board Meeting,board_meeting_outcome,True
+106734593,floored,ok,True,34.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2998.0,30256.5,AROGRANITE,Updates,shareholder_meeting,True
+106775762,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1373.25,1373.25,TCC,Updates,shareholder_meeting,False
+106734148,floored,unreadable,True,157.0,"[""TEXT"", ""NO_TEXT"", ""TEXT""]",True,701.5,101374.5,EASTSILK,Updates,shareholder_meeting,False
+106758744,floored,ok,True,7.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1490.25,4397.75,SDBL,Updates,financial_results,False
+106734532,floored,ok,True,148.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,920.5,96850.75,TAINWALCHM,Updates,shareholder_meeting,False
+106735962,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1272.0,1272.0,VARDMNPOLY,Press Release,press_release,False
+106740201,floored,ok,True,30.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1611.0,15314.25,APOLLOHOSP,Press Release,press_release,False
+106760236,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1584.5,1584.5,OLAELEC,Press Release,press_release,False
+106737520,floored,ok,True,23.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1018.5,5657.0,LANDMARK,Investor Presentation,investor_presentation,True
+106731918,floored,unreadable,True,45.0,"[""TEXT"", ""TEXT"", ""NO_TEXT""]",False,58.75,9803.5,KEI,Investor Presentation,investor_presentation,True
+106740422,floored,ok,True,1.0,"[""TEXT""]",True,442.0,442.0,BBOX,Record Date,corporate_action,True
+106754694,floored,ok,True,1.0,"[""TEXT""]",True,524.25,524.25,ADSL,Record Date,corporate_action,True
+106737833,floored,ok,True,31.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2371.0,17503.25,GSPCROP,Appointment,management_change,False
+106755837,floored,ok,True,6.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1575.75,3034.25,FEDFINA,Appointment,management_change,False
+106735060,floored,ok,True,12.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1283.25,9526.25,BOMDYEING,Change in Management,management_change,True
+106735558,floored,ok,True,13.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1339.0,7811.0,EUROPRATIK,Change in Management,management_change,True
+106737303,floored,unreadable,True,11.0,"[""TEXT"", ""GARBLED"", ""GARBLED""]",True,1432.75,5827.0,MAXIND,Monitoring Agency Report,routine_compliance,False
+106732277,floored,ok,True,12.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,689.0,6008.0,PDSL,Monitoring Agency Report,routine_compliance,False
+106731803,floored,missing_from_cache,,,,,,,ASHOKAMET,Resignation of Director/KMP/SMP,management_change,True
+106739142,floored,missing_from_cache,,,,,,,SIEMENS,Resignation of Director/KMP/SMP,management_change,True
+106774473,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1150.0,1150.0,TRACXN,ESOP/ESOS/ESPS,esop,False
+106765136,floored,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1139.5,1139.5,PAYTM,ESOP/ESOS/ESPS,esop,False
+106737108,floored,ok,True,1.0,"[""TEXT""]",True,390.75,390.75,NAM-INDIA,Credit Rating,credit_rating,True
+106735433,floored,ok,True,1.0,"[""TEXT""]",True,382.25,382.25,NLCINDIA,Credit Rating,credit_rating,True
+106765108,floored,ok,True,7.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1442.75,3373.75,WHEELS,Corrigendum,correction,False
+106768390,floored,missing_from_cache,,,,,,,VOEPL,Clarification - Financial Results,financial_results,False
+106760767,floored,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1029.25,1029.25,MUTHOOTMF,Committee Meeting Updates,generic_unclassified,False
+106768445,proportional,ok,True,1.0,"[""TEXT""]",True,310.25,310.25,BETA,General Updates,shareholder_meeting,False
+106758979,proportional,ok,True,10.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,809.5,1964.0,EXPLEOSOL,Shareholders meeting,shareholder_meeting,True
+106736856,proportional,ok,True,18.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1399.75,12710.25,EMIL,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106773482,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1088.0,1088.0,GLOTTIS,General Updates,generic_unclassified,False
+106739596,proportional,ok,True,19.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1786.25,12243.75,ELECTCAST,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106752966,proportional,ok,True,540.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2670.25,364419.5,BALRAMCHIN,Shareholders meeting,shareholder_meeting,False
+106734472,proportional,ok,True,8.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1505.5,3266.0,CARYSIL,Change in Management,management_change,False
+106736807,proportional,ok,True,10.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,631.75,1882.5,FUSION,Shareholders meeting,shareholder_meeting,True
+106744496,proportional,ok,True,12.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1119.5,9112.0,PURVA,Change in Management,management_change,False
+106742647,proportional,ok,True,20.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1755.0,8807.75,GAUDIUMIVF,Outcome of Board Meeting,financial_results,False
+106751321,proportional,ok,True,216.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,661.75,123288.0,NINSYS,Shareholders meeting,shareholder_meeting,True
+106742931,proportional,ok,True,1.0,"[""TEXT""]",True,505.0,505.0,SAMMAANCAP,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106735874,proportional,ok,True,27.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1217.5,16335.75,VINCOFE,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106755727,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1103.75,1103.75,HMAAGRO,Change in Auditors,management_change,True
+106739163,proportional,ok,True,8.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2500.5,6144.0,SUNTV,Outcome of Board Meeting,financial_results,True
+106774518,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1228.5,1228.5,HCLTECH,Updates,business_operations,False
+106759317,proportional,ok,True,5.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1186.5,2384.5,SHIVAMILLS,Updates,shareholder_meeting,False
+106754268,proportional,ok,True,1.0,"[""TEXT""]",True,320.5,320.5,AARTIIND,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106752157,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1390.75,1390.75,ACEINTEG,General Updates,generic_unclassified,False
+106756173,proportional,ok,True,1.0,"[""TEXT""]",True,290.75,290.75,MALLCOM,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106738217,proportional,ok,True,25.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,671.75,4471.75,EPACK,Investor Presentation,investor_presentation,True
+106737720,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1295.0,5505.0,NPST,Monitoring Agency Report,routine_compliance,False
+106758820,proportional,ok,True,1.0,"[""TEXT""]",True,501.0,501.0,AWL,Credit Rating,credit_rating,True
+106737356,proportional,ok,True,10.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1559.0,3083.25,DCMFINSERV,Appointment,management_change,False
+106763237,proportional,ok,True,45.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1736.75,10225.25,LEAPIND,Investor Presentation,investor_presentation,True
+106753975,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1667.0,1667.0,TATAPOWER,Press Release,press_release,False
+106741674,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1702.0,1702.0,OSWALPUMPS,Press Release,press_release,False
+106742345,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,946.75,946.75,MANALIPETC,Record Date,corporate_action,True
+106757617,proportional,ok,True,1.0,"[""TEXT""]",True,541.25,541.25,CIPLA,ESOP/ESOS/ESPS,esop,False
+106762036,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1085.0,1085.0,KARURVYSYA,Press Release,press_release,False
+106741030,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,873.75,873.75,INDUSINDBK,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106773331,proportional,ok,True,1.0,"[""TEXT""]",True,560.0,560.0,TVVISION,General Updates,generic_unclassified,True
+106745726,proportional,ok,True,16.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1167.0,11501.25,ARE&M,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106745565,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1917.25,10487.75,EASEMYTRIP,Outcome of Board Meeting,financial_results,True
+106757501,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1303.25,1303.25,MANKIND,Outcome of Board Meeting,board_meeting_outcome,False
+106774718,proportional,ok,True,1.0,"[""TEXT""]",True,428.75,428.75,PROTEAN,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106746871,proportional,ok,True,34.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1403.0,21283.5,GOPAL,General Updates,routine_compliance,False
+106743874,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1312.25,1312.25,VISL,Action(s) taken or orders passed,regulatory_legal,True
+106737739,proportional,ok,True,4.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1839.25,1921.0,KFINTECH,Press Release,press_release,False
+106745687,proportional,ok,True,1.0,"[""TEXT""]",True,533.0,533.0,KFINTECH,General Updates,routine_compliance,False
+106752892,proportional,missing_from_cache,,,,,,,UTTAMSUGAR,Price movement,exchange_query,False
+106763028,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,876.0,876.0,SJVN,Press Release,press_release,False
+106772955,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,534.25,534.25,ARIES,Updates,routine_compliance,False
+106745710,proportional,ok,True,1.0,"[""TEXT""]",True,619.75,619.75,ENGINERSIN,General Updates,analyst_meet_record,False
+106741531,proportional,missing_from_cache,,,,,,,GRANULES,Resignation of Director/KMP/SMP,management_change,True
+106757810,proportional,ok,True,36.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1244.5,24878.75,ARVIND,Updates,routine_compliance,False
+106755963,proportional,unreadable,True,11.0,"[""TEXT"", ""NO_TEXT"", ""NO_TEXT""]",True,632.75,632.75,POCL,Shareholders meeting,shareholder_meeting,True
+106765800,proportional,ok,True,1.0,"[""TEXT""]",True,393.25,393.25,CCCL,Updates,routine_compliance,False
+106743678,proportional,ok,True,9.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1726.0,5760.25,UPL,Credit Rating- Revision,credit_rating,False
+106743725,proportional,ok,True,25.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1400.75,18050.25,INTERARCH,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106741678,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1109.25,5800.5,DCW,Appointment,management_change,False
+106766111,proportional,ok,True,1.0,"[""TEXT""]",True,302.25,302.25,KPIGREEN,General Updates,management_change,False
+106737470,proportional,ok,True,22.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1277.25,16339.0,SAREGAMA,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,False
+106742614,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,3480.5,10075.25,ABREL,Credit Rating- Others,credit_rating,False
+106732391,proportional,ok,True,1.0,"[""TEXT""]",True,279.25,279.25,SBIN,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106744744,proportional,ok,True,12.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,630.5,5541.0,RATNAVEER,Monitoring Agency Report,routine_compliance,False
+106749777,proportional,ok,True,31.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,481.0,3764.0,ANUHPHR,Investor Presentation,investor_presentation,True
+106776688,proportional,ok,True,1.0,"[""TEXT""]",True,517.5,517.5,NHPC,General Updates,routine_compliance,False
+106768687,proportional,ok,True,21.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1794.75,19982.75,LANCORHOL,Shareholders meeting,shareholder_meeting,True
+106762270,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,1129.25,1129.25,DGCONTENT,General Updates,routine_compliance,False
+106741802,proportional,unreadable,True,11.0,"[""TEXT"", ""TEXT"", ""NO_TEXT""]",True,1068.25,1068.25,THEMISMED,Resignation,management_change,False
+106744512,proportional,ok,True,1.0,"[""TEXT""]",True,427.5,427.5,TITAN,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106762218,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1409.5,1409.5,ZUARI,Action(s) initiated or orders passed,regulatory_legal,False
+106747203,proportional,unreadable,True,3.0,"[""TEXT"", ""NO_TEXT"", ""TEXT""]",True,1127.25,1127.25,BURNPUR,Disclosure of material issue,generic_unclassified,True
+106764349,proportional,ok,True,222.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1160.75,158389.5,TNPETRO,Shareholders meeting,shareholder_meeting,True
+106776438,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1889.0,1889.0,NIITMTS,Shareholders meeting,shareholder_meeting,False
+106774930,proportional,ok,True,1.0,"[""TEXT""]",True,425.75,425.75,KOHINOOR,Loss of Share Certificates,routine_compliance,False
+106744651,proportional,unreadable,True,17.0,"[""TEXT"", ""NO_TEXT"", ""TEXT""]",True,501.75,4223.0,AARON,Investor Presentation,investor_presentation,True
+106749576,proportional,ok,True,1.0,"[""TEXT""]",True,476.75,476.75,AMAGI,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106736585,proportional,ok,True,6.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2349.5,4614.25,ORIENTBELL,Outcome of Board Meeting,board_meeting_outcome,True
+106747260,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,609.0,609.0,VMSTMT,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106736377,proportional,ok,True,1.0,"[""TEXT""]",True,409.0,409.0,QUINTEGRA,Shareholders meeting,shareholder_meeting,True
+106747511,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,917.0,3860.25,JUBLPHARMA,Shareholders meeting,shareholder_meeting,True
+106764525,proportional,ok,True,197.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,575.0,126771.5,MADRASFERT,Updates,routine_compliance,False
+106736887,proportional,ok,True,4.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,2371.25,3671.5,KRITINUT,General Updates,financial_results,False
+106743926,proportional,ok,True,17.0,"[""TEXT"", ""TEXT"", ""TEXT""]",False,1391.25,10859.5,URAVIDEF,Updates,routine_compliance,False
+106754785,proportional,ok,True,1.0,"[""TEXT""]",True,561.25,561.25,FORTIS,General Updates,generic_unclassified,True
+106732144,proportional,ok,True,2.0,"[""TEXT"", ""TEXT""]",True,822.75,822.75,MOTHERSON,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106763124,proportional,ok,True,153.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,855.75,113272.5,SANSTAR,Shareholders meeting,shareholder_meeting,False
+106754144,proportional,ok,True,3.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1559.25,1559.25,VEEDOL,Shareholders meeting,shareholder_meeting,False
+106737008,proportional,ok,True,1.0,"[""TEXT""]",True,394.75,394.75,KEC,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,False
+106762644,proportional,ok,True,1.0,"[""TEXT""]",True,341.0,341.0,ASHOKLEY,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_notice,True
+106756324,proportional,ok,True,1.0,"[""TEXT""]",True,300.5,300.5,IMFA,General Updates,generic_unclassified,True
+106736535,proportional,ok,True,11.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1947.75,6935.0,SURYAROSNI,Outcome of Board Meeting,financial_results,True
+106775560,proportional,ok,True,1.0,"[""TEXT""]",True,355.5,355.5,AUBANK,ESOP/ESOS/ESPS,esop,False
+106742872,proportional,ok,True,1.0,"[""TEXT""]",True,357.0,357.0,PROSTARM,Analysts/Institutional Investor Meet/Con. Call Updates,analyst_meet_record,True
+106774564,proportional,ok,True,1.0,"[""TEXT""]",True,612.25,612.25,NTPC,General Updates,management_change,False
+106736901,proportional,unreadable,True,35.0,"[""TEXT"", ""NO_TEXT"", ""TEXT""]",True,755.75,5491.5,EPL,Investor Presentation,investor_presentation,True
+106747443,proportional,ok,True,98.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,844.25,128539.0,WAKEFIT,Shareholders meeting,shareholder_meeting,False
+106750149,proportional,ok,True,13.0,"[""TEXT"", ""TEXT"", ""TEXT""]",True,1356.75,5128.5,HATHWAY,Shareholders meeting,shareholder_meeting,False
