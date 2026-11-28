@@ -39,4 +39,12 @@ data/archive/
 # CATALAN local store (standalone study)
 catalan/data/*.db
 catalan/data/*.db-*
+# NOT catalan/data/forward_log/ — that directory is the study's SYSTEM OF
+# RECORD, not build output. It is committed on purpose: CI runners are
+# ephemeral and Turso writes are quota-blocked, so if the archive is not in git
+# it does not exist anywhere durable. The commit timestamps are also the
+# tamper-evident proof that a headline was recorded before its outcome was
+# known, which is what the pre-registration's contamination argument rests on.
+# Ignoring it makes the daily Action's `git add` a no-op that still exits 0 —
+# silent, permanent loss of one day per day. See catalan/CLAUDE.md.
 catalan/**/__pycache__/

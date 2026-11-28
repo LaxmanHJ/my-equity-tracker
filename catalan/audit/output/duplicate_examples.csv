@@ -1,0 +1,29 @@
+rule,symbol,announced_at,category,headline
+dup_same_url,RSL,2026-08-13T16:03:37,Statement of deviation(s) or variation(s) under Reg. 32,Rajputana Stainless Limited has informed the Exchange about statement of deviation(s) or variation(s) under Reg. 32
+dup_same_url,RMC,2026-08-13T11:14:24,Bagging/Receiving of orders/contracts,"Rmc Switchgears Limited has informed the Exchange about Bagging/Receiving of orders/contracts worth Rs. 1,88,52,000/-"
+dup_same_url,SARDAEN,2026-08-14T15:40:22,Resignation,"Sarda Energy & Minerals Limited has informed the Exchange regarding Resignation of  Mr. Arup Pal as Other of the company w.e.f. August 10, 2"
+dup_same_url,RMC,2026-08-13T11:12:01,Bagging/Receiving of orders/contracts,"Rmc Switchgears Limited has informed the Exchange about Bagging/Receiving of orders/contracts worth Rs. 1,88,52,000/-"
+dup_same_ts_headline,INDIAMART,2026-09-22T19:07:10,Analysts/Institutional Investor Meet/Con. Call Updates,Please find enclosed outcome of Analyst/Institutional investor meet/call.
+dup_same_ts_headline,FIVESTAR,2026-09-18T14:44:52,Analysts/Institutional Investor Meet/Con. Call Updates,"Intimation of Schedule of Investor/Analyst meetings under the SEBI (Listing Obligations and Disclosure Requirements), Regulations 2015"
+dup_same_ts_headline,FIVESTAR,2026-09-18T14:44:52,Analysts/Institutional Investor Meet/Con. Call Updates,"Intimation of Schedule of Investor/Analyst meetings under the SEBI (Listing Obligations and Disclosure Requirements), Regulations 2015"
+dup_same_ts_headline,VEDL,2026-09-18T12:51:11,Credit Rating,Vedanta Limited has informed the Exchange about Credit Rating
+dup_same_text_same_size,RHIM,2026-09-09T12:06:10,Analysts/Institutional Investor Meet/Con. Call Updates,RHI MAGNESITA INDIA LTD has informed the Exchange about Schedule of meet
+dup_same_text_same_size,LTF,2026-09-16T17:48:28,Analysts/Institutional Investor Meet/Con. Call Updates,L&T Finance Limited has informed the Exchange about Analyst Meet
+dup_same_text_same_size,V2RETAIL,2026-08-13T14:51:15,Appointment,V2 Retail Limited has informed the Exchange regarding Appointment of Mr Dinesh Malpani as President Operations and SMP of the company w.e.f.
+dup_same_text_same_size,RBLBANK,2026-08-14T19:08:41,Analysts/Institutional Investor Meet/Con. Call Updates,RBL Bank Limited has informed the Exchange about Schedule of meet
+dup_near_same_day,ADVENTHTL,2026-09-07T17:27:32,Shareholders meeting,"Advent Hotels International Limited has informed the Exchange regarding Notice of Annual General Meeting to be held on September 29, 2026 at"
+dup_near_same_day,PVRINOX,2026-09-07T15:42:23,News Verification,The Exchange has sought clarification from PVR INOX Limited with respect to recent news item captioned PVR Inox shares fall 8% amid internal
+dup_near_same_day,BAJEL,2026-08-31T22:49:39,Retirement,Revised - Bajel Projects Limited has informed the Exchange about Retirement of Executive Director
+dup_near_same_day,MANIKA,2026-09-22T12:31:28,Updates,Manika Plastech Limited has informed the Exchange regarding 'Intimation under Regulation 30 (5) of the Securities and Exchange Board of Indi
+dup_cross_day,ESCORTS,2026-09-15T16:34:51,Analysts/Institutional Investor Meet/Con. Call Updates,Escorts Kubota Limited has informed the Exchange about Schedule of Analyst/ Investor Meet
+dup_cross_day,HOMEFIRST,2026-08-13T15:06:43,Analysts/Institutional Investor Meet/Con. Call Updates,Home First Finance Company India Limited has informed the Exchange about Outcome of the Investor Meet
+dup_cross_day,SAMMAANCAP,2026-08-26T18:28:25,Updates,Sammaan Capital Limited has informed the Exchange regarding 'Pursuant to Regulation 57 of Securities and Exchange Board of India (Listing Ob
+dup_cross_day,MTNL,2026-08-27T11:24:24,General Updates,"COMPLIANCE OF REGULATION 30 & 51 OF SEBI (LODR) REGULATIONS, 2015 - DISCLOSURE OF EVENTS OR INFORMATION   DISCLOSURE OF IMPOSITION OF FINES "
+repeat_text_different_doc,GOCOLORS,2026-08-17T18:41:24,Shareholders meeting,"Go Fashion (India) Limited has informed the Exchange regarding Notice of Annual General Meeting to be held on September 08, 2026"
+repeat_text_different_doc,HDFCBANK,2026-09-01T21:29:22,General Updates,HDFC Bank Limited has informed the Exchange about General Updates
+repeat_text_different_doc,PYRAMID,2026-08-12T23:02:51,Analysts/Institutional Investor Meet/Con. Call Updates,Pyramid Technoplast Limited has informed the Exchange about Link of Recording
+repeat_text_different_doc,UNIONBANK,2026-08-21T17:54:00,Credit Rating- New,Union Bank of India has informed the Exchange about Credit Rating- New
+project_filter_drop_other_category,TAJGVK,2026-08-13T16:41:43,General Updates,Taj GVK Hotels & Resorts Limited has informed the Exchange about General Updates BRSR of the company for the FY 202526
+project_filter_drop_other_category,DREDGECORP,2026-09-01T20:26:01,Record Date,Dredging Corporation of India Limited has informed the Exchange that Record date for the purpose of Meeting  is 18-Sep-2026.
+project_filter_drop_other_category,METROPOLIS,2026-08-27T23:12:36,Analysts/Institutional Investor Meet/Con. Call Updates,Metropolis Healthcare Limited has informed the Exchange about Link of Recording
+project_filter_drop_other_category,TEGA,2026-08-20T15:58:26,Copy of Newspaper Publication,Tega Industries Limited has informed the Exchange about Copy of Newspaper Publication
